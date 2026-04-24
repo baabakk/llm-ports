@@ -8,7 +8,7 @@ import type { ZodIssue } from "zod";
 
 /** Thrown when a provider's request budget (count or USD) is exhausted. */
 export class BudgetExceededError extends Error {
-  public readonly name = "BudgetExceededError";
+  public override readonly name = "BudgetExceededError";
   constructor(
     public readonly alias: string,
     public readonly limit: number,
@@ -23,10 +23,10 @@ export class BudgetExceededError extends Error {
 
 /** Thrown when a configured provider is unreachable, returns an error, or is misconfigured. */
 export class ProviderUnavailableError extends Error {
-  public readonly name = "ProviderUnavailableError";
+  public override readonly name = "ProviderUnavailableError";
   constructor(
     public readonly alias: string,
-    public readonly cause: Error,
+    public override readonly cause: Error,
   ) {
     super(`Provider "${alias}" unavailable: ${cause.message}`);
   }
@@ -37,7 +37,7 @@ export class ProviderUnavailableError extends Error {
  * and none succeeded (each either errored, was budget-blocked, or was missing).
  */
 export class NoProvidersAvailableError extends Error {
-  public readonly name = "NoProvidersAvailableError";
+  public override readonly name = "NoProvidersAvailableError";
   constructor(
     public readonly taskType: string,
     public readonly attempted: string[],
@@ -51,7 +51,7 @@ export class NoProvidersAvailableError extends Error {
 
 /** Thrown by validation strategies when generated structured output fails schema. */
 export class ValidationError extends Error {
-  public readonly name = "ValidationError";
+  public override readonly name = "ValidationError";
   constructor(
     public readonly issues: ZodIssue[],
     public readonly attempts: number,
@@ -63,7 +63,7 @@ export class ValidationError extends Error {
 
 /** Thrown when a content block kind is sent to an adapter that does not support it. */
 export class ContentBlockUnsupportedError extends Error {
-  public readonly name = "ContentBlockUnsupportedError";
+  public override readonly name = "ContentBlockUnsupportedError";
   constructor(
     public readonly adapter: string,
     public readonly blockType: string,
@@ -74,7 +74,7 @@ export class ContentBlockUnsupportedError extends Error {
 
 /** Thrown by the registry when env config is malformed. */
 export class ConfigError extends Error {
-  public readonly name = "ConfigError";
+  public override readonly name = "ConfigError";
   constructor(message: string) {
     super(message);
   }

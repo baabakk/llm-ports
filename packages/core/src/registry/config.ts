@@ -126,14 +126,18 @@ function parseGating(input: string, envKey: string): {
       }
       const amount = parseFloat(m[1]!);
       const window = m[2] as "hour" | "day" | "month";
-      const existing = costLimit.kind === "usd" ? costLimit : { kind: "usd" as const };
-      costLimit = {
-        ...existing,
+      const next: { kind: "usd"; perHour?: number; perDay?: number; perMonth?: number } = {
         kind: "usd",
-        ...(window === "hour" ? { perHour: amount } : {}),
-        ...(window === "day" ? { perDay: amount } : {}),
-        ...(window === "month" ? { perMonth: amount } : {}),
       };
+      if (costLimit.kind === "usd") {
+        if (costLimit.perHour !== undefined) next.perHour = costLimit.perHour;
+        if (costLimit.perDay !== undefined) next.perDay = costLimit.perDay;
+        if (costLimit.perMonth !== undefined) next.perMonth = costLimit.perMonth;
+      }
+      if (window === "hour") next.perHour = amount;
+      if (window === "day") next.perDay = amount;
+      if (window === "month") next.perMonth = amount;
+      costLimit = next;
     } else if (token === "unlimited") {
       // explicit unlimited; do nothing
     } else {
