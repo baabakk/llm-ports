@@ -1,0 +1,35 @@
+{
+  "name": "@llm-ports/adapter-contract-tests",
+  "version": "0.0.0",
+  "description": "Shared conformance test suite that every llm-ports adapter must pass. Internal-only; never published to npm.",
+  "license": "MIT",
+  "author": "Babak Abbaschian",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'no tests in contract-tests itself; consumed by adapter packages' && exit 0"
+  },
+  "dependencies": {
+    "@llm-ports/core": "workspace:*",
+    "vitest": "^2.1.4",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

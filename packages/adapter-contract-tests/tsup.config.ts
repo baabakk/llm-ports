@@ -2,15 +2,14 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: ["src/index.ts"],
-  format: ["esm", "cjs"],
+  format: ["esm"],
   dts: true,
   splitting: false,
   sourcemap: true,
   clean: true,
   target: "es2022",
-  minify: false,
-  treeshake: true,
-  outExtension({ format }) {
-    return { js: format === "esm" ? ".mjs" : ".cjs" };
+  external: ["vitest", "@llm-ports/core"],
+  outExtension() {
+    return { js: ".mjs" };
   },
 });
