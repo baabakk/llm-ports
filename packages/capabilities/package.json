@@ -1,0 +1,48 @@
+{
+  "name": "@llm-ports/capabilities",
+  "version": "0.0.0",
+  "description": "Reusable cognitive operation factories for llm-ports: classify, score, draft, summarize, extract, plan, analyze. Configure once at definition time, call many times.",
+  "license": "MIT",
+  "author": "Babak Abbaschian",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@llm-ports/core": "workspace:*",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baabakk/baabakk/llm-ports.git",
+    "directory": "packages/capabilities"
+  },
+  "keywords": ["llm", "ai", "capabilities", "classify", "draft", "summarize", "extract", "plan", "analyze", "factory-pattern", "llm-ports"],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
