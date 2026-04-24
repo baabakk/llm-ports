@@ -92,7 +92,8 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         expect(result.text).toBe("hello world");
         expect(result.usage.totalTokens).toBe(17);
-        expect(result.cost.totalUSD).toBeGreaterThan(0);
+        // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
+        expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
         expect(result.modelId).toBe(ctx.expectedModelId);
         expect(result.providerAlias).toBe(ctx.expectedAlias);
         expect(result.latencyMs).toBeGreaterThanOrEqual(0);
@@ -130,7 +131,8 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         expect(result.data).toEqual({ intent: "request", urgency: "high" });
         expect(result.usage.totalTokens).toBe(70);
-        expect(result.cost.totalUSD).toBeGreaterThan(0);
+        // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
+        expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
         expect(result.validationAttempts).toBeGreaterThanOrEqual(1);
       });
 
@@ -225,7 +227,8 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
           result.terminationReason,
         );
         expect(result.usage.totalTokens).toBe(250);
-        expect(result.cost.totalUSD).toBeGreaterThan(0);
+        // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
+        expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
       });
     });
   });

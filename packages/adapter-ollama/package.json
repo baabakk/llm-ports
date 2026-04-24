@@ -1,0 +1,50 @@
+{
+  "name": "@llm-ports/adapter-ollama",
+  "version": "0.0.0",
+  "description": "Ollama native adapter for llm-ports. Local LLMs via the Ollama daemon. Implements LLMPort, EmbeddingsPort, and ModelManagement (list/pull/delete/health).",
+  "license": "MIT",
+  "author": "Babak Abbaschian",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@llm-ports/core": "workspace:*",
+    "ollama": "^0.5.10"
+  },
+  "devDependencies": {
+    "@llm-ports/adapter-contract-tests": "workspace:*",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4",
+    "zod": "^3.23.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baabakk/llm-ports.git",
+    "directory": "packages/adapter-ollama"
+  },
+  "keywords": ["llm", "ai", "ollama", "local-llm", "self-hosted", "llm-ports", "adapter"],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
