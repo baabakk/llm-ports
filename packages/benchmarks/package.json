@@ -1,0 +1,27 @@
+{
+  "name": "@llm-ports/benchmarks",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal benchmark scripts. Measures the latency overhead llm-ports adds vs direct SDK calls. Not published to npm.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "bench": "tsx src/latency.bench.ts",
+    "bench:all": "tsx src/latency.bench.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'no tests in benchmarks; run pnpm bench instead' && exit 0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/core": "workspace:*",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
