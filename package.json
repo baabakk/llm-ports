@@ -19,7 +19,10 @@
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm build && changeset publish",
-    "clean": "pnpm -r exec rm -rf dist .turbo node_modules/.cache"
+    "clean": "pnpm -r exec rm -rf dist .turbo node_modules/.cache",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.10",
@@ -30,6 +33,7 @@
     "prettier": "^3.3.3",
     "tsup": "^8.3.0",
     "typescript": "^5.6.3",
+    "vitepress": "^1.5.0",
     "vitest": "^2.1.4"
   },
   "packageManager": "pnpm@9.12.3",
