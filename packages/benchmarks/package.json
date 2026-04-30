@@ -2,24 +2,40 @@
   "name": "@llm-ports/benchmarks",
   "version": "0.0.0",
   "private": true,
-  "description": "Internal benchmark scripts. Measures the latency overhead llm-ports adds vs direct SDK calls. Not published to npm.",
+  "description": "Internal benchmark and live-integration scripts. Measures latency overhead and exercises real provider APIs. Not published to npm.",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "bench": "tsx src/latency.bench.ts",
     "bench:all": "tsx src/latency.bench.ts",
+    "test:live": "vitest run src/live",
+    "test:live:anthropic": "vitest run src/live/anthropic.test.ts",
+    "test:live:openai": "vitest run src/live/openai.test.ts",
+    "test:live:ollama": "vitest run src/live/ollama.test.ts",
+    "test:live:vercel": "vitest run src/live/vercel.test.ts",
+    "test:live:capabilities": "vitest run src/live/capabilities.test.ts",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'no tests in benchmarks; run pnpm bench instead' && exit 0"
+    "test": "echo 'no offline tests; pnpm bench OR pnpm test:live' && exit 0"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
     "@anthropic-ai/sdk": "^0.32.1",
     "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/adapter-ollama": "workspace:*",
+    "@llm-ports/adapter-openai": "workspace:*",
+    "@llm-ports/adapter-vercel": "workspace:*",
+    "@llm-ports/capabilities": "workspace:*",
     "@llm-ports/core": "workspace:*",
+    "ai": "^4.3.19",
+    "ollama": "^0.5.10",
+    "openai": "^4.73.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
   },
   "engines": {
     "node": ">=18.0.0"
