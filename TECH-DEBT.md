@@ -121,7 +121,15 @@ Format: same convention as BEPA's `Development_TechDebt.md` (timestamp + system 
 - **Impact:** Vercel adapter users see a confusing SDK-internal SyntaxError instead of either auto-recovery (a la OpenAI adapter) or a clearer "model produced no output" error.
 - **Resolution path:** Same as TD-LLMP-11 (reasoning-aware retry). Plus: when JSON parse fails on an empty string, throw a more specific error class (e.g. `EmptyResponseError`) to make the failure mode obvious to users rather than masquerading as a generic provider failure.
 
-### TD-LLMP-13: Live tests against `gpt-5-nano` are flaky on validation-retry assertions
+### TD-LLMP-14: zod peer-dep range too narrow — Vercel adapter requires zod ≥3.24
+
+- **Severity:** Medium
+- **Status:** Open
+- **Files:** all `packages/*/package.json` (`"zod": "^3.23.0"` as a regular dependency)
+- **Problem:** Discovered during Phase 4 tarball install. `@ai-sdk/openai-compatible` (transitive of `ai@4.x`) depends on `zod-to-json-schema@^3.24.1`, which imports from `zod/v3`. The `zod/v3` subpath is only present in zod ≥3.24. Our packages declare zod `^3.23.0`, so a clean install can resolve to zod 3.23 and crash at runtime with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+- **Impact:** New consumers running `npm install @llm-ports/core @llm-ports/adapter-vercel zod` may get zod 3.23.x and a broken Vercel adapter. The OpenAI / Anthropic / Ollama paths are unaffected (they don't pull `zod-to-json-schema`).
+- **Resolution path:** (1) Convert `zod` from `dependencies` to `peerDependencies` in all six published packages with range `>=3.24.0 <5` (or `^3.24.0 || ^4`), so consumers control the version. (2) Add a peer-dep CI check to the release workflow. (3) Document the requirement in `getting-started.md` and the per-adapter README.
+- **Verified working combination:** `zod@3.25.76`. Both ESM + CJS smoke imports pass; TypeScript types resolve cleanly under `--strict --moduleResolution nodenext`.
 
 - **Severity:** Low
 - **Status:** Open (accepted limitation for v0.1 launch)
