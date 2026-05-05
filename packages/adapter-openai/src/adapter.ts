@@ -649,39 +649,62 @@ function learnConstraintsFromError(err: unknown, req: LogicalChatRequest): boole
 }
 
 /**
- * Inspect a successful response's usage and remember any newly-observed
- * model behavior. Specifically: if the response reports reasoning_tokens > 0,
- * remember that this model is a reasoning model. Future calls to the same
- * model will get an expanded max_completion_tokens budget so visible output
- * has room after reasoning consumes its share.
+ * Inspect a successful response and remember any newly-observed model behavior.
+ * Marks the model as reasoning if either signal is present:
+ *   - `usage.completion_tokens_details.reasoning_tokens > 0` (OpenAI o-series, gpt-5-nano)
+ *   - `choices[0].message.reasoning` populated (Cerebras gpt-oss-* and similar
+ *     compat providers that expose CoT as a separate field)
+ * Future calls to this model will get an expanded max_completion_tokens budget
+ * via the headroom multiplier so visible output has room after reasoning.
  */
 function learnFromResponse(modelId: string, response: unknown): void {
   if (!response || typeof response !== "object") return;
-  const r = response as { usage?: { completion_tokens_details?: { reasoning_tokens?: number } } };
-  const reasoning = r.usage?.completion_tokens_details?.reasoning_tokens;
-  if (reasoning !== undefined && reasoning > 0) {
+  const r = response as {
+    choices?: Array<{ message?: { reasoning?: string | null } }>;
+    usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
+  };
+  const reasoningTokens = r.usage?.completion_tokens_details?.reasoning_tokens;
+  const reasoningField = r.choices?.[0]?.message?.reasoning;
+  const isReasoning =
+    (reasoningTokens !== undefined && reasoningTokens > 0) ||
+    (typeof reasoningField === "string" && reasoningField.length > 0);
+  if (isReasoning) {
     rememberConstraint(modelId, { reasoningModel: true });
   }
 }
 
 /**
  * Detect the "all budget consumed by reasoning" pattern: empty visible text +
- * finish_reason=length + reasoning_tokens > 0. This signals a reasoning model
- * that didn't have enough total budget to produce any visible output. The
- * caller can use this to retry with the now-learned reasoning multiplier.
+ * finish_reason=length, with any signal that the model is reasoning (either
+ * usage.reasoning_tokens > 0 OR a populated message.reasoning field). This
+ * tells the caller to retry with the now-learned reasoning multiplier so the
+ * model has budget for visible output.
+ *
+ * Different providers expose reasoning differently:
+ *   - OpenAI o-series + gpt-5-nano: message.content empty, usage has reasoning_tokens
+ *   - Cerebras gpt-oss-*: message.content missing entirely, message.reasoning has CoT
+ * Both produce the same end-user symptom (empty visible text), so we recover the
+ * same way: expand the total budget and retry.
  */
 function reasoningStarvedResponse(response: unknown, req: LogicalChatRequest): boolean {
   if (!response || typeof response !== "object") return false;
   if (req.maxOutputTokens === undefined) return false;
   const r = response as {
-    choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
+    choices?: Array<{
+      message?: { content?: string | null; reasoning?: string | null };
+      finish_reason?: string;
+    }>;
     usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
   };
   const choice = r.choices?.[0];
   const text = choice?.message?.content ?? "";
   const finishReason = choice?.finish_reason;
-  const reasoning = r.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
-  return text === "" && finishReason === "length" && reasoning > 0;
+  const reasoningTokens = r.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+  const reasoningField = choice?.message?.reasoning;
+  const hasReasoningSignal =
+    reasoningTokens > 0 ||
+    (typeof reasoningField === "string" && reasoningField.length > 0);
+  return text === "" && finishReason === "length" && hasReasoningSignal;
 }
 
 /**

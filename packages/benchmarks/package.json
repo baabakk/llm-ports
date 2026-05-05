@@ -8,6 +8,13 @@
   "scripts": {
     "bench": "tsx src/latency.bench.ts",
     "bench:all": "tsx src/latency.bench.ts",
+    "rebuild-deps": "pnpm -F @llm-ports/core -F @llm-ports/capabilities -F @llm-ports/adapter-anthropic -F @llm-ports/adapter-openai -F @llm-ports/adapter-ollama -F @llm-ports/adapter-vercel build",
+    "pretest:live": "pnpm rebuild-deps",
+    "pretest:live:anthropic": "pnpm rebuild-deps",
+    "pretest:live:openai": "pnpm rebuild-deps",
+    "pretest:live:ollama": "pnpm rebuild-deps",
+    "pretest:live:vercel": "pnpm rebuild-deps",
+    "pretest:live:capabilities": "pnpm rebuild-deps",
     "test:live": "vitest run src/live",
     "test:live:anthropic": "vitest run src/live/anthropic.test.ts",
     "test:live:openai": "vitest run src/live/openai.test.ts",
