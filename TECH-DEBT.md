@@ -124,12 +124,17 @@ Format: same convention as BEPA's `Development_TechDebt.md` (timestamp + system 
 ### TD-LLMP-14: zod peer-dep range too narrow — Vercel adapter requires zod ≥3.24
 
 - **Severity:** Medium
-- **Status:** Open
-- **Files:** all `packages/*/package.json` (`"zod": "^3.23.0"` as a regular dependency)
-- **Problem:** Discovered during Phase 4 tarball install. `@ai-sdk/openai-compatible` (transitive of `ai@4.x`) depends on `zod-to-json-schema@^3.24.1`, which imports from `zod/v3`. The `zod/v3` subpath is only present in zod ≥3.24. Our packages declare zod `^3.23.0`, so a clean install can resolve to zod 3.23 and crash at runtime with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
-- **Impact:** New consumers running `npm install @llm-ports/core @llm-ports/adapter-vercel zod` may get zod 3.23.x and a broken Vercel adapter. The OpenAI / Anthropic / Ollama paths are unaffected (they don't pull `zod-to-json-schema`).
-- **Resolution path:** (1) Convert `zod` from `dependencies` to `peerDependencies` in all six published packages with range `>=3.24.0 <5` (or `^3.24.0 || ^4`), so consumers control the version. (2) Add a peer-dep CI check to the release workflow. (3) Document the requirement in `getting-started.md` and the per-adapter README.
-- **Verified working combination:** `zod@3.25.76`. Both ESM + CJS smoke imports pass; TypeScript types resolve cleanly under `--strict --moduleResolution nodenext`.
+- **Status:** Resolved 2026-05-05 (commit pending)
+- **Files:** all 6 published `packages/*/package.json`
+- **Problem:** Discovered during Phase 4 tarball install. `@ai-sdk/openai-compatible` (transitive of `ai@4.x`) depends on `zod-to-json-schema@^3.24.1`, which imports from `zod/v3`. The `zod/v3` subpath is only present in zod ≥3.24. Our packages declared zod `^3.23.0`, so a clean install could resolve to zod 3.23 and crash at runtime with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+- **Resolution:** Converted `zod` from `dependencies` (or `devDependencies` for adapters) to `peerDependencies` with range `">=3.24.0 <5"` in all six published packages. Added zod `^3.25.76` to each package's `devDependencies` so the workspace continues to type-check and test against a known-good version. Consumers now control the zod version they install; npm/pnpm satisfies the peer constraint.
+- **Verified after fix (2026-05-05):**
+  - `pnpm install` (workspace re-install) clean
+  - `pnpm -r typecheck` clean across all 8 packages
+  - `pnpm -r test` 211 tests pass (45 + 34 + 7 + 27 + 23 + 75)
+  - Re-packed all 6 tarballs; inspected `package.json` inside `llm-ports-core-0.0.0.tgz` — `peerDependencies.zod = ">=3.24.0 <5"` is published
+  - Fresh `e:\tmp\llm-ports-consumer` install with `zod@3.25.76` + ESM smoke: 12 named exports resolve, registry constructs cleanly
+- **Follow-up (deferred):** add a peer-dep CI check to the release workflow so future PRs that change peer ranges get gated. Document the zod requirement in `getting-started.md` and per-adapter README during Phase 6 polish (TD-LLMP-15).
 
 - **Severity:** Low
 - **Status:** Open (accepted limitation for v0.1 launch)

@@ -25,13 +25,16 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@llm-ports/core": "workspace:*",
-    "zod": "^3.23.0"
+    "@llm-ports/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "zod": ">=3.24.0 <5"
   },
   "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "zod": "^3.25.76"
   },
   "publishConfig": {
     "access": "public"

@@ -28,12 +28,15 @@
     "@llm-ports/core": "workspace:*",
     "ollama": "^0.5.10"
   },
+  "peerDependencies": {
+    "zod": ">=3.24.0 <5"
+  },
   "devDependencies": {
     "@llm-ports/adapter-contract-tests": "workspace:*",
     "tsup": "^8.3.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4",
-    "zod": "^3.23.0"
+    "zod": "^3.25.76"
   },
   "publishConfig": {
     "access": "public"
