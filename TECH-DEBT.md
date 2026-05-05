@@ -75,6 +75,25 @@ Format: same convention as BEPA's `Development_TechDebt.md` (timestamp + system 
 - **Impact:** Cost-gated workloads with very small per-call costs would silently bypass the gate.
 - **Resolution path:** Add `packages/core/tests/cost.test.ts` with a case asserting `computeEmbeddingCost(5, {embeddingPer1M: 0.02})` returns a positive value (not zero).
 
+### TD-LLMP-09: Registry has no runtime-error fallback — only budget-gating fallback
+
+- **Severity:** Medium
+- **Status:** Open
+- **Files:** `packages/core/src/registry/registry.ts:225-275` (RegistryPort.generateText / generateStructured / streamText / streamStructured / runAgent)
+- **Problem:** The fallback chain in `selectModel()` is consulted ONLY at provider-selection time. If the selected provider returns a `ProviderUnavailableError` at runtime (network 503, transient outage, hit-the-rate-limit-mid-call), the error propagates straight to the caller. There is no try/catch around `sel.port.generateText(options)` that walks to the next chain entry. Discovered while writing Group J tests during Phase 1.5 (2026-05-04).
+- **Impact:** Multi-provider setups don't get the resilience that the chain syntax implies. `LLM_TASK_ROUTE_TRIAGE: "fast,backup"` reads as "if fast fails, use backup" — but only "fails" in the budget sense, not the runtime sense. This is a documentation-vs-implementation gap.
+- **Resolution path:** Wrap the `sel.port.X(options)` call inside RegistryPort's methods in a try/catch that, on `ProviderUnavailableError`, walks to the next chain entry and accumulates per-alias reasons. On exhaustion, throw `NoProvidersAvailableError`. Care needed for streaming methods (can only fall back at stream-creation time, not mid-stream) and for cost recording (don't record cost for failed attempts).
+- **Test pinning current behavior:** [`packages/core/tests/registry-edges.test.ts`](packages/core/tests/registry-edges.test.ts) "documents current behavior: runtime ProviderUnavailableError propagates — does NOT trigger fallback". Update that test when this lands.
+
+### TD-LLMP-10: `transientAuthBackoffMs` is exposed solely for tests — no production use case yet
+
+- **Severity:** Low
+- **Status:** Open
+- **Files:** `packages/adapter-openai/src/adapter.ts` (OpenAIAdapterOptions)
+- **Problem:** Added during Phase 1.5 to make Group C tests fast (inject `() => 0` instead of waiting 500ms+1500ms per test). Exposed in the public adapter options because that was the cleanest way to make it test-injectable without test-only conditionals in production code. Production users have no current reason to override the default.
+- **Impact:** Public API surface area carrying a feature with no documented production use case. If we publish v0.1 as-is, the field is part of the SemVer contract.
+- **Resolution path:** Either (a) document a production use case (compat providers may need different backoff cadences), (b) rename to `_transientAuthBackoffMs` (underscore-prefix convention for advanced/test-only) before v0.1, or (c) accept it as-is and document in the OpenAI adapter README.
+
 ### TD-LLMP-08 (BLOCKER): OpenAI API key deactivated — Phase 2/3 verification stalled
 
 - **Severity:** High (blocks test phases)

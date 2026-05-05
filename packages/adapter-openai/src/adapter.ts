@@ -96,6 +96,13 @@ export interface OpenAIAdapterOptions {
    * Set to 0 to disable.
    */
   transientAuthRetries?: number;
+  /**
+   * Override the backoff delay between transient-401 retries. Receives the
+   * 0-indexed retry attempt (0 = first retry) and returns the delay in
+   * milliseconds. Default is `(attempt) => 500 * Math.pow(3, attempt)` —
+   * 500ms, 1500ms, 4500ms... Tests inject `() => 0` to skip the wait.
+   */
+  transientAuthBackoffMs?: (attempt: number) => number;
 }
 
 // ─── Internal context ────────────────────────────────────────────────
@@ -112,6 +119,7 @@ interface AdapterContext {
    */
   hasSucceeded: { value: boolean };
   transientAuthRetries: number;
+  transientAuthBackoffMs: (attempt: number) => number;
 }
 
 function makeClient(opts: OpenAIAdapterOptions): OpenAI {
@@ -163,6 +171,8 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     pricingOverrides: opts.pricingOverrides ?? {},
     hasSucceeded: { value: false },
     transientAuthRetries: opts.transientAuthRetries ?? 2,
+    transientAuthBackoffMs:
+      opts.transientAuthBackoffMs ?? ((attempt) => 500 * Math.pow(3, attempt)),
   };
 
   return {
@@ -763,7 +773,7 @@ async function withTransientAuthRetry<T>(
         isTransientAuthError(err, ctx) &&
         attempt < ctx.transientAuthRetries
       ) {
-        await sleep(500 * Math.pow(3, attempt));
+        await sleep(ctx.transientAuthBackoffMs(attempt));
         attempt++;
         continue;
       }
@@ -829,7 +839,7 @@ async function executeChatRequest(
         transientRetries < ctx.transientAuthRetries
       ) {
         // Exponential backoff: 500ms, 1500ms, 4500ms... up to maxRetries
-        await sleep(500 * Math.pow(3, transientRetries));
+        await sleep(ctx.transientAuthBackoffMs(transientRetries));
         transientRetries++;
         continue;
       }
@@ -876,7 +886,7 @@ async function executeChatStream(
         isTransientAuthError(err, ctx) &&
         transientRetries < ctx.transientAuthRetries
       ) {
-        await sleep(500 * Math.pow(3, transientRetries));
+        await sleep(ctx.transientAuthBackoffMs(transientRetries));
         transientRetries++;
         continue;
       }

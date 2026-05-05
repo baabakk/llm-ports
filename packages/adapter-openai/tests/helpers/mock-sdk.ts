@@ -85,6 +85,114 @@ export function buildOpenAIChatResponse(spec: MockedOpenAIChatResponse): {
   };
 }
 
+/**
+ * Build a Cerebras gpt-oss-shaped chat response: CoT in `message.reasoning`,
+ * `content` field omitted entirely on starved responses, `reasoning_tokens=0`
+ * in usage (Cerebras doesn't separately count them).
+ */
+export function buildCerebrasReasoningResponse(spec: {
+  reasoning: string;
+  content?: string;
+  promptTokens: number;
+  completionTokens: number;
+  modelId?: string;
+  finishReason?: "stop" | "length";
+}): unknown {
+  const message: Record<string, unknown> = {
+    role: "assistant",
+    reasoning: spec.reasoning,
+  };
+  if (spec.content !== undefined) message["content"] = spec.content;
+  return {
+    id: `chatcmpl-cerebras-${Math.random().toString(36).slice(2)}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: spec.modelId ?? "gpt-oss-120b",
+    choices: [
+      {
+        index: 0,
+        message,
+        finish_reason: spec.finishReason ?? "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: spec.promptTokens,
+      completion_tokens: spec.completionTokens,
+      total_tokens: spec.promptTokens + spec.completionTokens,
+      completion_tokens_details: {
+        accepted_prediction_tokens: 0,
+        rejected_prediction_tokens: 0,
+        reasoning_tokens: 0,
+      },
+    },
+  };
+}
+
+/**
+ * Build an OpenAI o-series-shaped reasoning response: visible content empty,
+ * usage carries `reasoning_tokens > 0`, finish=length on starvation.
+ */
+export function buildOpenAIReasoningResponse(spec: {
+  content?: string;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  modelId?: string;
+  finishReason?: "stop" | "length";
+}): unknown {
+  return {
+    id: `chatcmpl-reasoning-${Math.random().toString(36).slice(2)}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: spec.modelId ?? "gpt-5-nano",
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: spec.content ?? null },
+        finish_reason: spec.finishReason ?? (spec.content ? "stop" : "length"),
+      },
+    ],
+    usage: {
+      prompt_tokens: spec.promptTokens,
+      completion_tokens: spec.completionTokens,
+      total_tokens: spec.promptTokens + spec.completionTokens,
+      completion_tokens_details: {
+        reasoning_tokens: spec.reasoningTokens,
+      },
+    },
+  };
+}
+
+/**
+ * Build an OpenAI APIError-shaped object the adapter would catch. The
+ * adapter inspects status, code, param, and message — match all four to
+ * exercise the real classification paths.
+ */
+export function buildOpenAIError(spec: {
+  status: number;
+  code?: string | null;
+  param?: string | null;
+  message: string;
+  type?: string;
+}): Error & { status: number; code?: string | null; param?: string | null; error?: unknown } {
+  const err = new Error(`${spec.status} ${spec.message}`) as Error & {
+    status: number;
+    code?: string | null;
+    param?: string | null;
+    error?: unknown;
+  };
+  err.status = spec.status;
+  err.code = spec.code ?? null;
+  err.param = spec.param ?? null;
+  err.error = {
+    message: spec.message,
+    type: spec.type ?? "invalid_request_error",
+    code: spec.code ?? null,
+    param: spec.param ?? null,
+  };
+  return err;
+}
+
 export function buildOpenAIEmbeddingResponse(spec: {
   vector: number[];
   promptTokens: number;
