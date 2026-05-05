@@ -558,6 +558,13 @@ function mergeUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
 }
 
 function wrapError(alias: string, err: unknown): Error {
+  // Idempotent: don't double-wrap framework errors that are already typed.
+  if (err instanceof ProviderUnavailableError) {
+    return err;
+  }
+  if (err instanceof Error && err.name === "ValidationError") {
+    return err;
+  }
   if (err instanceof Error) {
     return new ProviderUnavailableError(alias, err);
   }

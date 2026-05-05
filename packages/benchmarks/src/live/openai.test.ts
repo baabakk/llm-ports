@@ -29,7 +29,11 @@ import {
   skipOpenAI,
 } from "./shared.js";
 
-const MODEL = "gpt-5-nano";              // smallest, cheapest
+// gpt-5-nano is a reasoning model that rejects custom temperature values.
+// The adapter handles this transparently (catches OpenAI's `unsupported_value`
+// + `param: "temperature"` error and retries with model default), so the test
+// uses gpt-5-nano (cheapest) and exercises that adapter resilience.
+const MODEL = "gpt-5-nano";
 const EMBED_MODEL = "text-embedding-3-small";
 const ALIAS = "live-openai";
 
@@ -311,18 +315,21 @@ describe.skipIf(skipGroq)("live: groq (via openai adapter + baseURL)", () => {
 });
 
 describe.skipIf(skipCerebras)("live: cerebras (via openai adapter + baseURL)", () => {
+  // Cerebras model availability changes over time. Default to gpt-oss-120b
+  // (currently in BEPA's production catalog); allow override via env var.
+  const CEREBRAS_MODEL = process.env.CEREBRAS_TEST_MODEL ?? "gpt-oss-120b";
+
   it("basic generateText routes correctly through the compat baseURL", async () => {
     const adapter = createOpenAIAdapter({
       apiKey: CEREBRAS_KEY ?? "missing",
       baseURL: "https://api.cerebras.ai/v1",
       pricingOverrides: {
-        "llama-4-scout-17b-16e-instruct": { inputPer1M: 0.65, outputPer1M: 0.85 },
+        [CEREBRAS_MODEL]: { inputPer1M: 0.65, outputPer1M: 0.85 },
       },
     });
     const registry = createRegistryFromEnv({
       env: {
-        LLM_PROVIDER_LIVE_CEREBRAS:
-          "openai|llama-4-scout-17b-16e-instruct|unlimited",
+        LLM_PROVIDER_LIVE_CEREBRAS: `openai|${CEREBRAS_MODEL}|unlimited`,
         LLM_TASK_ROUTE_TEST_CEREBRAS: "live-cerebras",
       },
       adapters: { openai: adapter },

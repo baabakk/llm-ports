@@ -95,19 +95,26 @@ export function assertAgentShape(
 // ─── Test fixtures ───────────────────────────────────────────────────
 
 /**
- * 1×1 transparent PNG, base64-encoded. Tiny but real. Useful for vision tests
- * that just need ANY image to verify the multimodal path works without
- * running up costs on large images.
+ * 4×4 solid-red PNG, base64-encoded. Tiny but visible — gpt-5-mini and Claude
+ * Haiku will both successfully identify "red" as the dominant color, which
+ * gives vision tests something to assert on. The previous 1×1 transparent
+ * PNG produced empty responses on some models because there was nothing to
+ * describe.
  */
 export const TINY_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEUlEQVR42mP8/5+hngEEGNFFAA2kAvjEMW1OAAAAAElFTkSuQmCC";
 
 /**
- * Public, stable image URL for vision tests. Wikipedia's commons hosts
- * this and is unlikely to disappear.
+ * Public, stable image URL for vision tests. OpenAI's API has been observed
+ * to reject some image hosts (Wikipedia's CDN, GitHub raw URLs) with
+ * "invalid_image_url" errors. This GitHub-rendered SVG-as-PNG is reliable
+ * and tiny (~10KB).
+ *
+ * If this URL ever stops working with OpenAI, the fallback is to convert
+ * to base64 data URIs in the test rather than chase a stable host.
  */
 export const PUBLIC_IMAGE_URL =
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png";
+  "https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/.github/anthropic-logo.png";
 
 // ─── Cost reporter ───────────────────────────────────────────────────
 

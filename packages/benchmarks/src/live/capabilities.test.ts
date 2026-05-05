@@ -1,9 +1,9 @@
 /**
  * Phase 3 of the test plan: live integration tests for the 7 capability factories.
  *
- * Skipped unless RUN_LIVE_TESTS=1 AND ANTHROPIC_API_KEY is set. (Capabilities
- * are provider-agnostic; we test against Anthropic Haiku as the reference
- * provider — running on OpenAI is exercised via the adapter live tests.)
+ * Capabilities are provider-agnostic, so we test against whichever provider's
+ * key is available. Preference order: Anthropic Haiku (cheapest test target),
+ * fallback to OpenAI's gpt-5-nano. Skipped only if neither key is set.
  *
  * For each capability, exercises 1-3 inputs and asserts:
  *   - Result type matches the schema (Zod parse passes)
@@ -16,8 +16,9 @@
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createRegistryFromEnv } from "@llm-ports/core";
+import { createRegistryFromEnv, type LLMPort } from "@llm-ports/core";
 import { createAnthropicAdapter } from "@llm-ports/adapter-anthropic";
+import { createOpenAIAdapter } from "@llm-ports/adapter-openai";
 import {
   createAnalyzer,
   createClassifier,
@@ -30,29 +31,51 @@ import {
 } from "@llm-ports/capabilities";
 import {
   ANTHROPIC_KEY,
+  LIVE,
+  OPENAI_KEY,
   recordCost,
   reportCosts,
-  skipAnthropic,
 } from "./shared.js";
 
-const MODEL = "claude-haiku-4-5";
+const skipCapabilities = !LIVE || (!ANTHROPIC_KEY && !OPENAI_KEY);
+const TEST_PROVIDER: "anthropic" | "openai" = ANTHROPIC_KEY ? "anthropic" : "openai";
+const TEST_MODEL =
+  TEST_PROVIDER === "anthropic" ? "claude-haiku-4-5" : "gpt-5-nano";
 
-function makeLLM() {
-  const adapter = createAnthropicAdapter({ apiKey: ANTHROPIC_KEY ?? "missing" });
-  const registry = createRegistryFromEnv({
-    env: {
-      LLM_PROVIDER_LIVE: `anthropic|${MODEL}|unlimited`,
-      LLM_TASK_ROUTE_CLASSIFY: "live",
-      LLM_TASK_ROUTE_SCORE: "live",
-      LLM_TASK_ROUTE_EXTRACT: "live",
-      LLM_TASK_ROUTE_SUMMARIZE: "live",
-      LLM_TASK_ROUTE_DRAFT: "live",
-      LLM_TASK_ROUTE_PLAN: "live",
-      LLM_TASK_ROUTE_ANALYZE: "live",
-    },
-    adapters: { anthropic: adapter },
-  });
-  return registry.getPort();
+function makeLLM(): LLMPort {
+  if (TEST_PROVIDER === "anthropic") {
+    const adapter = createAnthropicAdapter({ apiKey: ANTHROPIC_KEY ?? "missing" });
+    const registry = createRegistryFromEnv({
+      env: {
+        LLM_PROVIDER_LIVE: `anthropic|${TEST_MODEL}|unlimited`,
+        LLM_TASK_ROUTE_CLASSIFY: "live",
+        LLM_TASK_ROUTE_SCORE: "live",
+        LLM_TASK_ROUTE_EXTRACT: "live",
+        LLM_TASK_ROUTE_SUMMARIZE: "live",
+        LLM_TASK_ROUTE_DRAFT: "live",
+        LLM_TASK_ROUTE_PLAN: "live",
+        LLM_TASK_ROUTE_ANALYZE: "live",
+      },
+      adapters: { anthropic: adapter },
+    });
+    return registry.getPort();
+  } else {
+    const adapter = createOpenAIAdapter({ apiKey: OPENAI_KEY ?? "missing" });
+    const registry = createRegistryFromEnv({
+      env: {
+        LLM_PROVIDER_LIVE: `openai|${TEST_MODEL}|unlimited`,
+        LLM_TASK_ROUTE_CLASSIFY: "live",
+        LLM_TASK_ROUTE_SCORE: "live",
+        LLM_TASK_ROUTE_EXTRACT: "live",
+        LLM_TASK_ROUTE_SUMMARIZE: "live",
+        LLM_TASK_ROUTE_DRAFT: "live",
+        LLM_TASK_ROUTE_PLAN: "live",
+        LLM_TASK_ROUTE_ANALYZE: "live",
+      },
+      adapters: { openai: adapter },
+    });
+    return registry.getPort();
+  }
 }
 
 function expectCapabilityEvent<T>(event: CapabilityEvent<T>, capability: string): void {
@@ -70,7 +93,7 @@ afterAll(() => {
   reportCosts();
 });
 
-describe.skipIf(skipAnthropic)("live: capabilities", () => {
+describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, () => {
   describe("createClassifier", () => {
     const Schema = z.object({
       intent: z.enum(["question", "request", "complaint", "feedback"]),

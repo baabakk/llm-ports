@@ -86,6 +86,14 @@ export interface AnthropicAdapter {
 }
 
 export function createAnthropicAdapter(opts: AnthropicAdapterOptions): AnthropicAdapter {
+  // Merge user-supplied pricingOverrides into the adapter's exposed pricing
+  // so the registry's pricing check sees them. (See same-named comment in
+  // adapter-openai/adapter.ts for the rationale.)
+  const mergedPricing: Record<string, ModelPricing> = {
+    ...ANTHROPIC_PRICING,
+    ...(opts.pricingOverrides ?? {}),
+  };
+
   const ctx: AdapterContext = {
     client: makeClient(opts),
     validationStrategy: opts.validationStrategy ?? {
@@ -98,7 +106,7 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
 
   return {
     name: "anthropic",
-    pricing: ANTHROPIC_PRICING,
+    pricing: mergedPricing,
     createLLMPort: (modelId, alias) => createPort(ctx, modelId, alias),
   };
 }
@@ -407,6 +415,13 @@ function mergeUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
 }
 
 function wrapError(alias: string, err: unknown): Error {
+  // Idempotent: don't double-wrap framework errors that are already typed.
+  if (err instanceof ProviderUnavailableError) {
+    return err;
+  }
+  if (err instanceof Error && err.name === "ValidationError") {
+    return err;
+  }
   if (err instanceof Error) {
     return new ProviderUnavailableError(alias, err);
   }

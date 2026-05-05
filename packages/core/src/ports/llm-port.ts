@@ -54,12 +54,26 @@ export interface ToolDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny> {
 
 export interface TokenUsage {
   inputTokens: number;
+  /**
+   * Tokens emitted by the model. For "standard" chat models, this is the
+   * visible response length. For reasoning models (OpenAI o-series, gpt-5-nano,
+   * etc.), this INCLUDES reasoning_tokens — the model's internal chain-of-
+   * thought tokens that don't appear in `text` but are billed at the output
+   * rate. Use {@link reasoningTokens} to break out the reasoning portion.
+   */
   outputTokens: number;
   totalTokens: number;
-  /** Tokens read from prompt cache (Anthropic feature; 0 elsewhere). */
+  /** Tokens read from prompt cache (Anthropic + OpenAI feature). */
   cacheReadTokens?: number;
-  /** Tokens written to prompt cache. */
+  /** Tokens written to prompt cache (Anthropic explicit caching). */
   cacheWriteTokens?: number;
+  /**
+   * Reasoning tokens (subset of outputTokens). Only populated for reasoning
+   * models that report it via the provider API. When set, visible output
+   * tokens = outputTokens - reasoningTokens. Useful for cost attribution
+   * and for diagnosing "model used all the budget on thinking" cases.
+   */
+  reasoningTokens?: number;
 }
 
 export interface CostUsage {

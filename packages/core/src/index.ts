@@ -85,6 +85,7 @@ export type {
   CostBackend,
   CostCheckResult,
   CostLimit,
+  ModelCapabilities,
   ModelPricing,
 } from "./budget/types.js";
 

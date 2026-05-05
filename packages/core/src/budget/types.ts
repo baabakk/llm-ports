@@ -76,4 +76,71 @@ export interface ModelPricing {
   cacheWritePer1M?: number;
   /** Embedding-only models: cost per 1M input tokens (no output). */
   embeddingPer1M?: number;
+  /**
+   * Model-specific capability flags. Adapters consult these to adapt request
+   * shape — the right pipeline for an older chat model isn't the same as the
+   * right one for a reasoning model. Defaults assume "standard chat":
+   * full temperature range, separate system message, JSON mode, streaming,
+   * tool use, optional vision. Setting a flag to a non-default tells the
+   * adapter to take a divergent path.
+   *
+   * Unknown future models without flags use the default assumptions plus a
+   * runtime error fallback in the adapter (e.g. catch a temperature rejection
+   * and retry without it).
+   */
+  capabilities?: ModelCapabilities;
+}
+
+/**
+ * Model-specific behavior flags. Each flag describes what a model can do
+ * differently from the standard chat-completion baseline. Adapters use these
+ * to choose the right pipeline (standard chat, reasoning, etc.) per model.
+ */
+export interface ModelCapabilities {
+  /**
+   * Reasoning models (OpenAI o1/o3 family, gpt-5-nano) reject any non-default
+   * temperature value. When true, the adapter omits `temperature` from the
+   * request entirely, regardless of what the user set or what defaults the
+   * capability factory chose.
+   */
+  temperatureLocked?: boolean;
+  /**
+   * Some reasoning models reject custom system messages. When true, the adapter
+   * folds instructions into the user message instead of sending a separate
+   * `system` field. (OpenAI o1-preview historically; later versions accept
+   * system messages.)
+   */
+  systemMessageInUserOnly?: boolean;
+  /**
+   * Native JSON mode supported (e.g. OpenAI's `response_format: json_object`,
+   * Ollama's `format: "json"`). When false or undefined, structured-output
+   * capabilities use prompted JSON instead of the native mode. Defaults vary
+   * by adapter — typically true for major chat models, false for reasoning
+   * models that don't pair JSON mode with their reasoning pipeline.
+   */
+  jsonMode?: boolean;
+  /** Streaming supported. Default: true. */
+  streaming?: boolean;
+  /** Tool/function calling supported. Default: true. */
+  toolUse?: boolean;
+  /** Vision input supported. Default: false (text-only is the historical baseline). */
+  vision?: boolean;
+  /**
+   * Reasoning model: the provider's "max output tokens" parameter caps
+   * BOTH the model's internal reasoning chain-of-thought AND the visible
+   * output. With a small budget, the model can spend all of it on reasoning
+   * and emit zero visible text. Adapters that detect this expand the budget
+   * automatically — see {@link reasoningHeadroomMultiplier} below for the
+   * factor applied. Adapters typically learn this flag at runtime from
+   * the first response that reports reasoning_tokens > 0.
+   */
+  reasoningModel?: boolean;
+  /**
+   * For reasoning models, the multiplier applied to the user's
+   * `maxOutputTokens` to produce the value sent to the provider. Defaults
+   * to 10 (chosen so that a request for 20 visible output tokens gets a
+   * 200-token total budget, leaving 180 for reasoning). Override per
+   * model if you have specific knowledge of its reasoning intensity.
+   */
+  reasoningHeadroomMultiplier?: number;
 }

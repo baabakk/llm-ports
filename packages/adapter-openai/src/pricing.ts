@@ -19,8 +19,23 @@
 
 import type { ModelPricing } from "@llm-ports/core";
 
+// Note: this table contains pricing only — no capability flags.
+//
+// Why no hardcoded capabilities: OpenAI does not expose programmatic
+// capability discovery (the `/v1/models` endpoint returns names + ownership,
+// no schema for "which params does this model accept"). A hardcoded list of
+// "gpt-5-nano is reasoning, gpt-4o is standard" goes stale every time
+// OpenAI ships a new model. Instead, the adapter discovers constraints at
+// runtime: it catches the specific OpenAI error (e.g. `unsupported_value`
+// for `temperature`), learns the constraint, and remembers it for the rest
+// of the process so subsequent calls don't pay the discovery cost.
+//
+// Users who already know their model's constraints and want to skip
+// discovery can still supply `capabilities` via pricingOverrides — that's
+// what the field is for.
+
 export const OPENAI_PRICING: Record<string, ModelPricing> = {
-  // GPT-5 family (flagship)
+  // GPT-5 family
   "gpt-5": {
     inputPer1M: 2.5,
     outputPer1M: 10.0,
@@ -37,7 +52,7 @@ export const OPENAI_PRICING: Record<string, ModelPricing> = {
     cacheReadPer1M: 0.025,
   },
 
-  // GPT-4o family (still common)
+  // GPT-4o family
   "gpt-4o": {
     inputPer1M: 2.5,
     outputPer1M: 10.0,

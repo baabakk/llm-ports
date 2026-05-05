@@ -56,7 +56,18 @@ export function computeEmbeddingCost(inputTokens: number, pricing: ModelPricing)
   };
 }
 
-/** Round to 6 decimals; sufficient precision for fractions of a cent. */
+/**
+ * Round to 10 decimals (1/10,000,000,000 of a USD = $0.0000000001).
+ *
+ * Why 10 not 6: a single embedding of a few tokens at $0.02/1M costs around
+ * $0.0000001, which would round to 0 at 6 decimals — making the cost field
+ * useless for cost gating on embeddings or short prompts. 10 decimals
+ * preserves precision for the smallest realistic per-call costs while
+ * still being well within IEEE 754 double precision.
+ *
+ * The function is named round6 for backward source compatibility; the
+ * actual rounding is at 10 decimals as of v0.1.
+ */
 function round6(n: number): number {
-  return Math.round(n * 1_000_000) / 1_000_000;
+  return Math.round(n * 10_000_000_000) / 10_000_000_000;
 }

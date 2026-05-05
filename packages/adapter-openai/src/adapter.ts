@@ -40,6 +40,13 @@ import {
   toOpenAIUserContent,
   type OpenAIMessage,
 } from "./content.js";
+import {
+  getEffectiveCapabilities,
+  isJsonModeRejection,
+  isSystemMessageRejection,
+  isTemperatureRejection,
+  rememberConstraint,
+} from "./capabilities.js";
 
 // ─── Adapter options ─────────────────────────────────────────────────
 
@@ -71,6 +78,24 @@ export interface OpenAIAdapterOptions {
    * config still says "openai" because that's the SDK shape.
    */
   displayName?: string;
+  /**
+   * Number of retries the OpenAI SDK performs internally for retriable HTTP
+   * errors (408, 409, 429, 500+). Defaults to 2 (the SDK's own default). The
+   * SDK does NOT retry 401s; that's handled separately in this adapter — see
+   * {@link OpenAIAdapterOptions.transientAuthRetries}.
+   */
+  maxRetries?: number;
+  /**
+   * Number of retries to attempt on transient 401 responses. OpenAI project
+   * keys (sk-proj-*) have burst-protection that occasionally returns
+   * 401 "Incorrect API key" when too many requests arrive in a short window,
+   * even though the key is valid. The adapter only retries 401s if a prior
+   * request on this same client previously succeeded — that's how it
+   * distinguishes a transient burst-protection 401 from a real auth failure.
+   * Defaults to 2 retries with exponential backoff (500ms, 1500ms).
+   * Set to 0 to disable.
+   */
+  transientAuthRetries?: number;
 }
 
 // ─── Internal context ────────────────────────────────────────────────
@@ -79,6 +104,14 @@ interface AdapterContext {
   client: OpenAI;
   validationStrategy: ValidationStrategy;
   pricingOverrides: Record<string, ModelPricing>;
+  /**
+   * Set true after the first successful response on this client. Used to
+   * distinguish OpenAI project-key burst-protection 401s (transient; key
+   * is valid) from real auth failures (the key never worked).
+   * Boxed so AdapterContext stays a value type while `hasSucceeded` mutates.
+   */
+  hasSucceeded: { value: boolean };
+  transientAuthRetries: number;
 }
 
 function makeClient(opts: OpenAIAdapterOptions): OpenAI {
@@ -86,6 +119,7 @@ function makeClient(opts: OpenAIAdapterOptions): OpenAI {
     apiKey: opts.apiKey,
     ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
     ...(opts.fetch ? { fetch: opts.fetch as OpenAI["fetch"] } : {}),
+    ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
   });
 }
 
@@ -109,6 +143,16 @@ export interface OpenAIAdapter {
 }
 
 export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
+  // Merge user-supplied pricingOverrides into the adapter's exposed pricing
+  // table so the registry's pricing check sees them. Without this merge,
+  // models that aren't in the bundled OPENAI_PRICING (e.g. compat-provider
+  // models like Groq's llama-3.3-70b-versatile or Cerebras's llama-4-scout)
+  // would be rejected by the registry as "no pricing entry".
+  const mergedPricing: Record<string, ModelPricing> = {
+    ...OPENAI_PRICING,
+    ...(opts.pricingOverrides ?? {}),
+  };
+
   const ctx: AdapterContext = {
     client: makeClient(opts),
     validationStrategy: opts.validationStrategy ?? {
@@ -117,11 +161,13 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
       includeOriginalError: true,
     },
     pricingOverrides: opts.pricingOverrides ?? {},
+    hasSucceeded: { value: false },
+    transientAuthRetries: opts.transientAuthRetries ?? 2,
   };
 
   return {
     name: "openai",
-    pricing: OPENAI_PRICING,
+    pricing: mergedPricing,
     createLLMPort: (modelId, alias) => createPort(ctx, modelId, alias),
     createEmbeddingsPort: (modelId, alias) => createEmbeddings(ctx, modelId, alias),
   };
@@ -135,35 +181,33 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       const start = Date.now();
-      try {
-        const messages: OpenAIMessage[] = [];
-        if (options.instructions !== undefined) {
-          messages.push({ role: "system", content: options.instructions });
-        }
-        messages.push({
-          role: "user",
-          content: toOpenAIUserContent(options.prompt),
-        });
-        const response = await ctx.client.chat.completions.create({
-          model: modelId,
-          messages: messages as never,
-          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-          ...(options.maxOutputTokens !== undefined ? { max_completion_tokens: options.maxOutputTokens } : {}),
-          stream: false,
-        });
-        const usage = parseUsage(response);
-        const text = response.choices[0]?.message.content ?? "";
-        return {
-          text,
-          usage,
-          cost: computeChatCost(usage, pricing),
-          modelId: response.model ?? modelId,
-          providerAlias: alias,
-          latencyMs: Date.now() - start,
-        };
-      } catch (err) {
-        throw wrapError(alias, err);
-      }
+      const userMsg: OpenAIMessage = {
+        role: "user",
+        content: toOpenAIUserContent(options.prompt),
+      };
+      const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
+        modelId,
+        messages: [userMsg],
+        ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+        stream: false,
+      });
+      const r = response as {
+        model?: string;
+        choices: Array<{ message: { content: string | null } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+      };
+      const usage = parseUsage(r);
+      const text = r.choices[0]?.message.content ?? "";
+      return {
+        text,
+        usage,
+        cost: computeChatCost(usage, pricing),
+        modelId: r.model ?? modelId,
+        providerAlias: alias,
+        latencyMs: Date.now() - start,
+      };
     },
 
     async generateStructured<T>(
@@ -182,116 +226,102 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
       while (attempts < maxAttempts) {
         attempts++;
-        try {
-          const messages: OpenAIMessage[] = [];
-          if (options.instructions !== undefined) {
-            messages.push({ role: "system", content: options.instructions });
-          }
-          const userText = correctionPrompt
-            ? `${stringifyPrompt(options.prompt)}\n\n${correctionPrompt}`
-            : `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
-          messages.push({ role: "user", content: userText });
+        const userText = correctionPrompt
+          ? `${stringifyPrompt(options.prompt)}\n\n${correctionPrompt}`
+          : `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
 
-          const response = await ctx.client.chat.completions.create({
-            model: modelId,
-            messages: messages as never,
-            temperature: options.temperature ?? 0,
-            ...(options.maxOutputTokens !== undefined
-              ? { max_completion_tokens: options.maxOutputTokens }
-              : {}),
-            // OpenAI native JSON mode improves reliability of valid JSON.
-            response_format: { type: "json_object" },
-            stream: false,
-          });
-          lastUsage = parseUsage(response);
-          lastModelId = response.model ?? modelId;
-          const raw = response.choices[0]?.message.content ?? "";
-          const parsed = options.schema.safeParse(extractJSON(raw));
-          if (parsed.success) {
-            return {
-              data: parsed.data as T,
-              usage: lastUsage,
-              cost: computeChatCost(lastUsage, pricing),
-              modelId: lastModelId,
-              providerAlias: alias,
-              latencyMs: Date.now() - start,
-              validationAttempts: attempts,
-            };
-          }
-          if (
-            ctx.validationStrategy.kind === "retry-with-feedback" &&
-            attempts < maxAttempts
-          ) {
-            const issues = parsed.error.issues
-              .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
-              .join("\n");
-            correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
-            continue;
-          }
-          failValidation(parsed.error.issues, attempts);
-        } catch (err) {
-          throw wrapError(alias, err);
+        // executeChatRequest handles error wrapping and capability fallback.
+        // Don't double-wrap here — let ProviderUnavailableError propagate, and
+        // let failValidation throw ValidationError directly.
+        const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
+          modelId,
+          messages: [{ role: "user", content: userText }],
+          ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+          temperature: options.temperature ?? 0,
+          ...(options.maxOutputTokens !== undefined
+            ? { maxOutputTokens: options.maxOutputTokens }
+            : {}),
+          jsonMode: true,
+          stream: false,
+        });
+        const r = response as {
+          model?: string;
+          choices: Array<{ message: { content: string | null } }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+        };
+        lastUsage = parseUsage(r);
+        lastModelId = r.model ?? modelId;
+        const raw = r.choices[0]?.message.content ?? "";
+        const parsed = options.schema.safeParse(extractJSON(raw));
+        if (parsed.success) {
+          return {
+            data: parsed.data as T,
+            usage: lastUsage,
+            cost: computeChatCost(lastUsage, pricing),
+            modelId: lastModelId,
+            providerAlias: alias,
+            latencyMs: Date.now() - start,
+            validationAttempts: attempts,
+          };
         }
+        if (
+          ctx.validationStrategy.kind === "retry-with-feedback" &&
+          attempts < maxAttempts
+        ) {
+          const issues = parsed.error.issues
+            .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
+            .join("\n");
+          correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
+          continue;
+        }
+        failValidation(parsed.error.issues, attempts);
       }
       throw new Error("generateStructured exhausted attempts");
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
-      try {
-        const messages: OpenAIMessage[] = [];
-        if (options.instructions !== undefined) {
-          messages.push({ role: "system", content: options.instructions });
+      const userMsg: OpenAIMessage = {
+        role: "user",
+        content: toOpenAIUserContent(options.prompt),
+      };
+      const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
+        modelId,
+        messages: [userMsg],
+        ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+        stream: true,
+      });
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (typeof delta === "string" && delta.length > 0) {
+          yield delta;
         }
-        messages.push({
-          role: "user",
-          content: toOpenAIUserContent(options.prompt),
-        });
-        const stream = await ctx.client.chat.completions.create({
-          model: modelId,
-          messages: messages as never,
-          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-          ...(options.maxOutputTokens !== undefined ? { max_completion_tokens: options.maxOutputTokens } : {}),
-          stream: true,
-        });
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content;
-          if (typeof delta === "string" && delta.length > 0) {
-            yield delta;
-          }
-        }
-      } catch (err) {
-        throw wrapError(alias, err);
       }
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
-      try {
-        const messages: OpenAIMessage[] = [];
-        if (options.instructions !== undefined) {
-          messages.push({ role: "system", content: options.instructions });
-        }
-        messages.push({
-          role: "user",
-          content: `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
-        });
-        const stream = await ctx.client.chat.completions.create({
-          model: modelId,
-          messages: messages as never,
-          temperature: options.temperature ?? 0,
-          ...(options.maxOutputTokens !== undefined ? { max_completion_tokens: options.maxOutputTokens } : {}),
-          response_format: { type: "json_object" },
-          stream: true,
-        });
-        let buffer = "";
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content;
-          if (typeof delta !== "string") continue;
-          buffer += delta;
-          const partial = tryParsePartialJSON(buffer) as Partial<T> | null;
-          if (partial !== null) yield partial;
-        }
-      } catch (err) {
-        throw wrapError(alias, err);
+      const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
+        modelId,
+        messages: [
+          {
+            role: "user",
+            content: `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+          },
+        ],
+        ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+        temperature: options.temperature ?? 0,
+        ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+        jsonMode: true,
+        stream: true,
+      });
+      let buffer = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (typeof delta !== "string") continue;
+        buffer += delta;
+        const partial = tryParsePartialJSON(buffer) as Partial<T> | null;
+        if (partial !== null) yield partial;
       }
     },
 
@@ -309,24 +339,32 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       try {
         for (let step = 0; step < maxSteps; step++) {
           stepsTaken = step + 1;
-          const messages: OpenAIMessage[] = [];
-          if (options.instructions) {
-            messages.push({ role: "system", content: options.instructions });
-          }
-          messages.push(...toOpenAIMessages(conversation));
+          const turnMessages = toOpenAIMessages(conversation);
+          const tools = toOpenAITools(options.tools);
 
-          const response = await ctx.client.chat.completions.create({
-            model: modelId,
-            messages: messages as never,
+          const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
+            modelId,
+            messages: turnMessages,
+            ...(options.instructions ? { instructions: options.instructions } : {}),
             ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-            ...(options.maxOutputTokens !== undefined ? { max_completion_tokens: options.maxOutputTokens } : {}),
-            tools: toOpenAITools(options.tools),
+            ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+            ...(tools.length > 0 ? { tools } : {}),
             stream: false,
           });
-          totalUsage = mergeUsage(totalUsage, parseUsage(response));
-          lastModelId = response.model ?? modelId;
+          const r = response as {
+            model?: string;
+            choices: Array<{
+              message: {
+                content: string | null;
+                tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+              };
+            }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+          };
+          totalUsage = mergeUsage(totalUsage, parseUsage(r));
+          lastModelId = r.model ?? modelId;
 
-          const aMsg = response.choices[0]?.message;
+          const aMsg = r.choices[0]?.message;
           if (!aMsg) {
             terminationReason = "completed";
             break;
@@ -425,10 +463,12 @@ function createEmbeddings(
     async generateEmbedding(options: EmbeddingOptions): Promise<EmbeddingResult> {
       const start = Date.now();
       try {
-        const response = await ctx.client.embeddings.create({
-          model: modelId,
-          input: options.input,
-        });
+        const response = await withTransientAuthRetry(ctx, alias, () =>
+          ctx.client.embeddings.create({
+            model: modelId,
+            input: options.input,
+          }),
+        );
         const inputTokens = response.usage?.prompt_tokens ?? 0;
         const vector = response.data[0]?.embedding ?? [];
         return {
@@ -448,10 +488,12 @@ function createEmbeddings(
     async generateEmbeddings(options: BatchEmbeddingOptions): Promise<BatchEmbeddingResult> {
       const start = Date.now();
       try {
-        const response = await ctx.client.embeddings.create({
-          model: modelId,
-          input: options.inputs,
-        });
+        const response = await withTransientAuthRetry(ctx, alias, () =>
+          ctx.client.embeddings.create({
+            model: modelId,
+            input: options.inputs,
+          }),
+        );
         const inputTokens = response.usage?.prompt_tokens ?? 0;
         const vectors = response.data.map((d) => d.embedding);
         return {
@@ -470,6 +512,360 @@ function createEmbeddings(
   };
 }
 
+// ─── Capability-aware request building ───────────────────────────────
+
+/**
+ * Logical chat-completion request. Adapter methods build one of these and
+ * hand it to {@link executeChatRequest}, which materializes it for the SDK
+ * — applying any model capability constraints learned (or supplied via
+ * pricingOverrides), retrying once on capability rejection.
+ */
+interface LogicalChatRequest {
+  modelId: string;
+  messages: OpenAIMessage[];
+  /** Optional system instructions. Folded into user message if model rejects system. */
+  instructions?: string;
+  /** User-supplied temperature. Skipped when model has temperatureLocked capability. */
+  temperature?: number;
+  /** User-supplied output cap. Always honored when set. */
+  maxOutputTokens?: number;
+  /** Set true to request native JSON mode. Falls back to plain text on rejection. */
+  jsonMode?: boolean;
+  /** Stream the response or not. */
+  stream: boolean;
+  /** Tools when this is an agent step. */
+  tools?: ReturnType<typeof toOpenAITools>;
+}
+
+/** Build the SDK's request object from a logical request and the model's effective capabilities. */
+function materializeRequest(
+  req: LogicalChatRequest,
+  caps: ModelCapsCompact,
+): Record<string, unknown> {
+  // Compose messages, optionally folding instructions into the user message
+  // if the model rejects standalone system messages.
+  const messages: OpenAIMessage[] = [];
+  if (req.instructions !== undefined) {
+    if (caps.systemMessageInUserOnly) {
+      // Prepend instructions to the first user-role message; if there is
+      // none, synthesize one.
+      const cloned = [...req.messages];
+      const firstUserIdx = cloned.findIndex((m) => m.role === "user");
+      const annotation = `<instructions>\n${req.instructions}\n</instructions>\n\n`;
+      if (firstUserIdx >= 0) {
+        const u = cloned[firstUserIdx]!;
+        if (typeof (u as { content: unknown }).content === "string") {
+          cloned[firstUserIdx] = { role: "user", content: annotation + ((u as { content: string }).content) };
+        } else {
+          cloned[firstUserIdx] = {
+            role: "user",
+            content: [
+              { type: "text", text: annotation } as never,
+              ...((u as { content: unknown[] }).content as never[]),
+            ] as never,
+          };
+        }
+      } else {
+        cloned.unshift({ role: "user", content: annotation });
+      }
+      messages.push(...cloned);
+    } else {
+      messages.push({ role: "system", content: req.instructions });
+      messages.push(...req.messages);
+    }
+  } else {
+    messages.push(...req.messages);
+  }
+
+  const out: Record<string, unknown> = {
+    model: req.modelId,
+    messages,
+    stream: req.stream,
+  };
+  // Temperature: only set if user requested AND model accepts it
+  if (req.temperature !== undefined && !caps.temperatureLocked) {
+    out["temperature"] = req.temperature;
+  }
+  if (req.maxOutputTokens !== undefined) {
+    // For reasoning models, OpenAI's max_completion_tokens caps reasoning
+    // tokens + visible output. Apply the headroom multiplier so the model
+    // has room to think AND emit visible output. Discovered at runtime
+    // (see executeChatRequest learning from usage.reasoningTokens) or
+    // supplied via pricingOverrides.capabilities.reasoningModel.
+    out["max_completion_tokens"] = caps.reasoningModel
+      ? req.maxOutputTokens * caps.reasoningHeadroomMultiplier
+      : req.maxOutputTokens;
+  }
+  if (req.jsonMode && !caps.jsonModeUnsupported) {
+    out["response_format"] = { type: "json_object" };
+  }
+  if (req.tools && req.tools.length > 0) {
+    out["tools"] = req.tools;
+  }
+  return out;
+}
+
+interface ModelCapsCompact {
+  temperatureLocked?: boolean;
+  jsonModeUnsupported?: boolean;
+  systemMessageInUserOnly?: boolean;
+  reasoningModel?: boolean;
+  reasoningHeadroomMultiplier: number;
+}
+
+function readCaps(modelId: string, pricing: ModelPricing): ModelCapsCompact {
+  const eff = getEffectiveCapabilities(modelId, pricing.capabilities);
+  return {
+    temperatureLocked: eff.temperatureLocked === true,
+    // jsonMode default is true; only treat as unsupported if explicitly false
+    jsonModeUnsupported: eff.jsonMode === false,
+    systemMessageInUserOnly: eff.systemMessageInUserOnly === true,
+    reasoningModel: eff.reasoningModel === true,
+    reasoningHeadroomMultiplier: eff.reasoningHeadroomMultiplier ?? 10,
+  };
+}
+
+/**
+ * Inspect an SDK error and, if it matches a known capability constraint,
+ * record the constraint against this model. Returns true if at least one
+ * constraint was learned from this error (so the caller knows a retry might
+ * succeed).
+ */
+function learnConstraintsFromError(err: unknown, req: LogicalChatRequest): boolean {
+  let learned = false;
+  if (isTemperatureRejection(err) && req.temperature !== undefined) {
+    rememberConstraint(req.modelId, { temperatureLocked: true });
+    learned = true;
+  }
+  if (isJsonModeRejection(err) && req.jsonMode) {
+    rememberConstraint(req.modelId, { jsonMode: false });
+    learned = true;
+  }
+  if (isSystemMessageRejection(err) && req.instructions !== undefined) {
+    rememberConstraint(req.modelId, { systemMessageInUserOnly: true });
+    learned = true;
+  }
+  return learned;
+}
+
+/**
+ * Inspect a successful response's usage and remember any newly-observed
+ * model behavior. Specifically: if the response reports reasoning_tokens > 0,
+ * remember that this model is a reasoning model. Future calls to the same
+ * model will get an expanded max_completion_tokens budget so visible output
+ * has room after reasoning consumes its share.
+ */
+function learnFromResponse(modelId: string, response: unknown): void {
+  if (!response || typeof response !== "object") return;
+  const r = response as { usage?: { completion_tokens_details?: { reasoning_tokens?: number } } };
+  const reasoning = r.usage?.completion_tokens_details?.reasoning_tokens;
+  if (reasoning !== undefined && reasoning > 0) {
+    rememberConstraint(modelId, { reasoningModel: true });
+  }
+}
+
+/**
+ * Detect the "all budget consumed by reasoning" pattern: empty visible text +
+ * finish_reason=length + reasoning_tokens > 0. This signals a reasoning model
+ * that didn't have enough total budget to produce any visible output. The
+ * caller can use this to retry with the now-learned reasoning multiplier.
+ */
+function reasoningStarvedResponse(response: unknown, req: LogicalChatRequest): boolean {
+  if (!response || typeof response !== "object") return false;
+  if (req.maxOutputTokens === undefined) return false;
+  const r = response as {
+    choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
+    usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
+  };
+  const choice = r.choices?.[0];
+  const text = choice?.message?.content ?? "";
+  const finishReason = choice?.finish_reason;
+  const reasoning = r.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+  return text === "" && finishReason === "length" && reasoning > 0;
+}
+
+/**
+ * True if this error is OpenAI's project-key burst-protection 401 (transient,
+ * key is valid) rather than a real auth failure. Distinguishable only when a
+ * prior request on the same client already succeeded — otherwise indistinguishable
+ * from a bad key, in which case we fall through to the normal error path.
+ *
+ * OpenAI sk-proj-* keys briefly return 401 "Incorrect API key" when too many
+ * requests arrive in a short window, even though the key works. The OpenAI SDK
+ * does not retry 401 internally because for most users a 401 is a permanent
+ * config issue. The adapter handles this provider-specific quirk so callers
+ * don't need to know about it.
+ */
+function isTransientAuthError(err: unknown, ctx: AdapterContext): boolean {
+  if (!ctx.hasSucceeded.value) return false;
+  if (!err || typeof err !== "object") return false;
+  const e = err as {
+    status?: number;
+    message?: unknown;
+    code?: unknown;
+    error?: { code?: unknown; message?: unknown };
+  };
+  if (e.status !== 401) return false;
+  const code = e.code ?? e.error?.code;
+  const message = String(e.message ?? e.error?.message ?? "");
+  if (code === "invalid_api_key") return true;
+  if (/incorrect api key/i.test(message)) return true;
+  return false;
+}
+
+/** Wait helper for transient retry backoff. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Generic transient-401 retry wrapper for non-chat operations (embeddings, etc.).
+ * Same logic as the transient branch of executeChatRequest but as a standalone
+ * helper. Used by EmbeddingsPort methods. Marks ctx.hasSucceeded on success so
+ * subsequent calls' transient detection works.
+ */
+async function withTransientAuthRetry<T>(
+  ctx: AdapterContext,
+  _alias: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      const result = await fn();
+      ctx.hasSucceeded.value = true;
+      return result;
+    } catch (err) {
+      if (
+        isTransientAuthError(err, ctx) &&
+        attempt < ctx.transientAuthRetries
+      ) {
+        await sleep(500 * Math.pow(3, attempt));
+        attempt++;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
+ * Execute a non-streaming chat completion with capability awareness AND
+ * transient-401 resilience. Single retry loop with three decision branches:
+ *
+ *   1. Success  → mark client as proven-good; learn from usage; return.
+ *      (If the response is reasoning-starved, do one expanded-budget retry.)
+ *   2. Transient 401 (project-key burst protection)  → backoff + retry,
+ *      up to ctx.transientAuthRetries.
+ *   3. Capability rejection (temperature, json_object, system message)  →
+ *      learn the constraint, retry once with offending param dropped.
+ *
+ * Anything else propagates as ProviderUnavailableError via {@link wrapError}.
+ */
+async function executeChatRequest(
+  client: OpenAI,
+  ctx: AdapterContext,
+  alias: string,
+  pricing: ModelPricing,
+  req: LogicalChatRequest,
+): Promise<{ response: unknown; modelId: string }> {
+  const attempt = async (): Promise<unknown> => {
+    const caps = readCaps(req.modelId, pricing);
+    const sdkReq = materializeRequest(req, caps);
+    return await client.chat.completions.create(sdkReq as never);
+  };
+
+  let triedCapabilityFallback = false;
+  let transientRetries = 0;
+
+  while (true) {
+    try {
+      const response = await attempt();
+      ctx.hasSucceeded.value = true;
+      learnFromResponse(req.modelId, response);
+
+      // If the response shows the model spent all its budget on reasoning and
+      // produced no visible text, retry once with the now-learned reasoning
+      // multiplier applied to max_completion_tokens. This is the recovery path
+      // for first-call interactions with unknown reasoning models.
+      if (reasoningStarvedResponse(response, req)) {
+        try {
+          const retried = await attempt();
+          ctx.hasSucceeded.value = true;
+          learnFromResponse(req.modelId, retried);
+          return { response: retried, modelId: req.modelId };
+        } catch (retryErr) {
+          throw wrapError(alias, retryErr);
+        }
+      }
+
+      return { response, modelId: req.modelId };
+    } catch (err) {
+      if (
+        isTransientAuthError(err, ctx) &&
+        transientRetries < ctx.transientAuthRetries
+      ) {
+        // Exponential backoff: 500ms, 1500ms, 4500ms... up to maxRetries
+        await sleep(500 * Math.pow(3, transientRetries));
+        transientRetries++;
+        continue;
+      }
+      if (!triedCapabilityFallback && learnConstraintsFromError(err, req)) {
+        triedCapabilityFallback = true;
+        continue;
+      }
+      throw wrapError(alias, err);
+    }
+  }
+}
+
+/**
+ * Execute a streaming chat completion with capability awareness AND
+ * transient-401 resilience. Mirrors executeChatRequest but returns the SDK's
+ * async iterable. Both retry kinds (capability rejection, transient 401)
+ * happen at stream-creation time. Mid-stream errors propagate as-is to the
+ * consumer's iteration loop.
+ */
+async function executeChatStream(
+  client: OpenAI,
+  ctx: AdapterContext,
+  alias: string,
+  pricing: ModelPricing,
+  req: LogicalChatRequest,
+): Promise<AsyncIterable<{ choices: Array<{ delta?: { content?: string } }> }>> {
+  const streamReq = { ...req, stream: true };
+  const attempt = async (): Promise<AsyncIterable<{ choices: Array<{ delta?: { content?: string } }> }>> => {
+    const caps = readCaps(streamReq.modelId, pricing);
+    const sdkReq = materializeRequest(streamReq, caps);
+    return (await client.chat.completions.create(sdkReq as never)) as never;
+  };
+
+  let triedCapabilityFallback = false;
+  let transientRetries = 0;
+
+  while (true) {
+    try {
+      const stream = await attempt();
+      ctx.hasSucceeded.value = true;
+      return stream;
+    } catch (err) {
+      if (
+        isTransientAuthError(err, ctx) &&
+        transientRetries < ctx.transientAuthRetries
+      ) {
+        await sleep(500 * Math.pow(3, transientRetries));
+        transientRetries++;
+        continue;
+      }
+      if (!triedCapabilityFallback && learnConstraintsFromError(err, streamReq)) {
+        triedCapabilityFallback = true;
+        continue;
+      }
+      throw wrapError(alias, err);
+    }
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function parseUsage(response: {
@@ -477,16 +873,19 @@ function parseUsage(response: {
     prompt_tokens?: number;
     completion_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
   };
 }): TokenUsage {
   const inputTokens = response.usage?.prompt_tokens ?? 0;
   const outputTokens = response.usage?.completion_tokens ?? 0;
   const cached = response.usage?.prompt_tokens_details?.cached_tokens;
+  const reasoning = response.usage?.completion_tokens_details?.reasoning_tokens;
   return {
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
     ...(cached !== undefined && cached > 0 ? { cacheReadTokens: cached } : {}),
+    ...(reasoning !== undefined && reasoning > 0 ? { reasoningTokens: reasoning } : {}),
   };
 }
 
@@ -502,6 +901,17 @@ function mergeUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
 }
 
 function wrapError(alias: string, err: unknown): Error {
+  // Idempotent: don't double-wrap framework errors that are already typed.
+  // ProviderUnavailableError is what executeChatRequest produces; passing it
+  // through unchanged means runAgent's outer try/catch can stay simple.
+  // ValidationError is what failValidation produces; the caller wants to see
+  // it as-is, not wrapped as a provider failure.
+  if (err instanceof ProviderUnavailableError) {
+    return err;
+  }
+  if (err instanceof Error && err.name === "ValidationError") {
+    return err;
+  }
   if (err instanceof Error) {
     return new ProviderUnavailableError(alias, err);
   }
