@@ -94,14 +94,41 @@ Format: same convention as BEPA's `Development_TechDebt.md` (timestamp + system 
 - **Impact:** Public API surface area carrying a feature with no documented production use case. If we publish v0.1 as-is, the field is part of the SemVer contract.
 - **Resolution path:** Either (a) document a production use case (compat providers may need different backoff cadences), (b) rename to `_transientAuthBackoffMs` (underscore-prefix convention for advanced/test-only) before v0.1, or (c) accept it as-is and document in the OpenAI adapter README.
 
-### TD-LLMP-08 (BLOCKER): OpenAI API key deactivated — Phase 2/3 verification stalled
+### TD-LLMP-08: OpenAI API key deactivated — Phase 2/3 verification stalled
 
-- **Severity:** High (blocks test phases)
-- **Status:** Blocked (awaiting key rotation by Babak)
-- **Files:** `.env` (BEPA root), `OPENAI_API_KEY` ending in `wrwA`
-- **Problem:** Direct curl to `api.openai.com/v1/models` with the current key returns HTTP 401 "Incorrect API key". The key was working earlier in Phase 2 but has since been deactivated (rotated, revoked, or moved to a different project).
-- **Impact:** TEST-PLAN.md Phase 2 (Live API integration) and Phase 3 (Capabilities live integration) cannot complete the OpenAI portions. Cerebras compat works (verified). Anthropic and Ollama tests are blocked by missing key/daemon (separate matter).
-- **Resolution path:** Babak rotates the OpenAI API key, updates `.env`, reruns `pnpm test:live` (full suite). Then reruns the capabilities suite which falls back to OpenAI when ANTHROPIC_API_KEY is absent.
+- **Severity:** High (blocked test phases)
+- **Status:** Resolved 2026-05-04 — Babak rotated the key (now ends `cxmt`); both `/v1/models` and full Phase 2 suite reach the API. 22 of 26 live tests pass; remaining failures are model-output flakiness, not key issues.
+- **Files:** `.env` (BEPA root), `OPENAI_API_KEY`
+- **Problem:** Direct curl to `api.openai.com/v1/models` with the previous key (`...wrwA`) returned HTTP 401 "Incorrect API key" after working earlier in Phase 2.
+- **Impact:** TEST-PLAN.md Phase 2 (Live API integration) and Phase 3 (Capabilities live integration) couldn't complete the OpenAI portions. Cerebras compat worked throughout.
+- **Resolution:** Key rotated 2026-05-04. New key length 56 chars (standard service-key shape, not `sk-proj-*`). All OpenAI live test paths reachable.
+
+### TD-LLMP-11: Vercel adapter does not handle reasoning models (no headroom multiplier)
+
+- **Severity:** Medium
+- **Status:** Open
+- **Files:** `packages/adapter-vercel/src/adapter.ts`
+- **Problem:** The OpenAI adapter applies a 10x reasoning-headroom multiplier when it learns a model is a reasoning model (so a request for 20 visible tokens gets max=200 sent to the API, leaving room for CoT). The Vercel adapter has none of this — calling `vercel.generateText({ maxOutputTokens: 20 })` against `gpt-5-nano` reliably starves the model and returns empty text. Discovered while triaging Phase 2 vercel failures.
+- **Impact:** Vercel-adapter users with reasoning models hit silent empty-output failures unless they manually budget 10x more than they want visible. Inconsistent with the OpenAI adapter's transparent handling.
+- **Resolution path:** Port the reasoning-detection + auto-retry + headroom multiplier logic from `adapter-openai/src/adapter.ts` (executeChatRequest, learnFromResponse, reasoningStarvedResponse) to the Vercel adapter. Or extract the logic to a shared helper in `@llm-ports/core` so both adapters consume it. The shared-helper path is cleaner long-term but bigger scope.
+
+### TD-LLMP-12: Vercel adapter throws SyntaxError "Unexpected end of JSON input" on empty structured response
+
+- **Severity:** Medium
+- **Status:** Open
+- **Files:** `packages/adapter-vercel/src/adapter.ts` (generateStructured path)
+- **Problem:** Observed Phase 2 (intermittent): `vercel.generateStructured` against `gpt-5-nano` sometimes returns an empty completion, after which the JSON parser throws `SyntaxError: Unexpected end of JSON input`. The error wraps as `ProviderUnavailableError` — but the underlying cause is the same reasoning-starvation pattern as TD-LLMP-11.
+- **Impact:** Vercel adapter users see a confusing SDK-internal SyntaxError instead of either auto-recovery (a la OpenAI adapter) or a clearer "model produced no output" error.
+- **Resolution path:** Same as TD-LLMP-11 (reasoning-aware retry). Plus: when JSON parse fails on an empty string, throw a more specific error class (e.g. `EmptyResponseError`) to make the failure mode obvious to users rather than masquerading as a generic provider failure.
+
+### TD-LLMP-13: Live tests against `gpt-5-nano` are flaky on validation-retry assertions
+
+- **Severity:** Low
+- **Status:** Open (accepted limitation for v0.1 launch)
+- **Files:** `packages/benchmarks/src/live/openai.test.ts` (`generateStructured.retry` test); `packages/benchmarks/src/live/capabilities.test.ts` (`createPlanner.decomposes a goal` against Cerebras occasionally)
+- **Problem:** A subset of live tests rely on the model self-correcting after one validation feedback round. With `gpt-5-nano` (reasoning model, cheapest in OpenAI's catalog), the model's structured output is non-deterministic at the schema-conformance level: it sometimes returns `urgent: "yes"` instead of `urgent: true`, omits required fields, or fabricates enum values. Even after retry-with-feedback, the same drift recurs. The architecture works (the retry fires; the validator detects the issue; the second response is consumed); the model just isn't good enough at JSON.
+- **Impact:** Phase 2 live runs see 1-3 intermittent failures per ~26-test run depending on which way the model rolls. Architectural assertions unaffected.
+- **Resolution path:** Either (a) accept and document as known LLM-flakiness; (b) switch the brittle tests to a more reliable model (gpt-4o-mini or claude-haiku-4-5 when available); (c) add a retry-the-test framework hook that re-runs failing tests up to N times before marking failed. Option (b) is cleanest — currently blocked by ANTHROPIC_API_KEY availability.
 
 ---
 

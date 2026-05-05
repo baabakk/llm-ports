@@ -31,51 +31,74 @@ import {
 } from "@llm-ports/capabilities";
 import {
   ANTHROPIC_KEY,
+  CEREBRAS_KEY,
   LIVE,
   OPENAI_KEY,
   recordCost,
   reportCosts,
 } from "./shared.js";
 
-const skipCapabilities = !LIVE || (!ANTHROPIC_KEY && !OPENAI_KEY);
-const TEST_PROVIDER: "anthropic" | "openai" = ANTHROPIC_KEY ? "anthropic" : "openai";
+// Preference order: Anthropic Haiku (cheapest, best at structured output) →
+// Cerebras gpt-oss-120b via OpenAI compat (fast, clean JSON) → OpenAI gpt-5-nano
+// (a reasoning model — slow + brittle for structured tests; only as last resort).
+const skipCapabilities = !LIVE || (!ANTHROPIC_KEY && !CEREBRAS_KEY && !OPENAI_KEY);
+const TEST_PROVIDER: "anthropic" | "cerebras" | "openai" = ANTHROPIC_KEY
+  ? "anthropic"
+  : CEREBRAS_KEY
+    ? "cerebras"
+    : "openai";
 const TEST_MODEL =
-  TEST_PROVIDER === "anthropic" ? "claude-haiku-4-5" : "gpt-5-nano";
+  TEST_PROVIDER === "anthropic"
+    ? "claude-haiku-4-5"
+    : TEST_PROVIDER === "cerebras"
+      ? "gpt-oss-120b"
+      : "gpt-5-nano";
+// Only the OpenAI gpt-5-nano fallback needs explicit headroom; Cerebras and
+// Anthropic produce visible output reliably with capability defaults.
+const REASONING_HEADROOM = TEST_PROVIDER === "openai" ? 800 : undefined;
+
+const ROUTES = {
+  LLM_TASK_ROUTE_CLASSIFY: "live",
+  LLM_TASK_ROUTE_SCORE: "live",
+  LLM_TASK_ROUTE_EXTRACT: "live",
+  LLM_TASK_ROUTE_SUMMARIZE: "live",
+  LLM_TASK_ROUTE_DRAFT: "live",
+  LLM_TASK_ROUTE_PLAN: "live",
+  LLM_TASK_ROUTE_ANALYZE: "live",
+} as const;
 
 function makeLLM(): LLMPort {
   if (TEST_PROVIDER === "anthropic") {
     const adapter = createAnthropicAdapter({ apiKey: ANTHROPIC_KEY ?? "missing" });
     const registry = createRegistryFromEnv({
-      env: {
-        LLM_PROVIDER_LIVE: `anthropic|${TEST_MODEL}|unlimited`,
-        LLM_TASK_ROUTE_CLASSIFY: "live",
-        LLM_TASK_ROUTE_SCORE: "live",
-        LLM_TASK_ROUTE_EXTRACT: "live",
-        LLM_TASK_ROUTE_SUMMARIZE: "live",
-        LLM_TASK_ROUTE_DRAFT: "live",
-        LLM_TASK_ROUTE_PLAN: "live",
-        LLM_TASK_ROUTE_ANALYZE: "live",
-      },
+      env: { LLM_PROVIDER_LIVE: `anthropic|${TEST_MODEL}|unlimited`, ...ROUTES },
       adapters: { anthropic: adapter },
     });
     return registry.getPort();
-  } else {
-    const adapter = createOpenAIAdapter({ apiKey: OPENAI_KEY ?? "missing" });
+  }
+  if (TEST_PROVIDER === "cerebras") {
+    // Cerebras via the OpenAI compat baseURL. gpt-oss-120b reasoning-tokens
+    // come back via message.reasoning (handled by adapter); content is clean
+    // JSON. Pricing supplied inline because the bundled OPENAI_PRICING table
+    // doesn't ship Cerebras-specific entries.
+    const adapter = createOpenAIAdapter({
+      apiKey: CEREBRAS_KEY ?? "missing",
+      baseURL: "https://api.cerebras.ai/v1",
+      pricingOverrides: { [TEST_MODEL]: { inputPer1M: 0.65, outputPer1M: 0.85 } },
+    });
     const registry = createRegistryFromEnv({
-      env: {
-        LLM_PROVIDER_LIVE: `openai|${TEST_MODEL}|unlimited`,
-        LLM_TASK_ROUTE_CLASSIFY: "live",
-        LLM_TASK_ROUTE_SCORE: "live",
-        LLM_TASK_ROUTE_EXTRACT: "live",
-        LLM_TASK_ROUTE_SUMMARIZE: "live",
-        LLM_TASK_ROUTE_DRAFT: "live",
-        LLM_TASK_ROUTE_PLAN: "live",
-        LLM_TASK_ROUTE_ANALYZE: "live",
-      },
+      env: { LLM_PROVIDER_LIVE: `openai|${TEST_MODEL}|unlimited`, ...ROUTES },
       adapters: { openai: adapter },
     });
     return registry.getPort();
   }
+  // openai
+  const adapter = createOpenAIAdapter({ apiKey: OPENAI_KEY ?? "missing" });
+  const registry = createRegistryFromEnv({
+    env: { LLM_PROVIDER_LIVE: `openai|${TEST_MODEL}|unlimited`, ...ROUTES },
+    adapters: { openai: adapter },
+  });
+  return registry.getPort();
 }
 
 function expectCapabilityEvent<T>(event: CapabilityEvent<T>, capability: string): void {
@@ -126,6 +149,11 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
         port: llm,
         schema: Schema,
         schemaName: "user-intent",
+        // Be explicit about the allowed enum values; some models otherwise
+        // invent new categories like "time_query" or "informational".
+        rubric:
+          "Choose EXACTLY one of: question, request, complaint, feedback. Anything that asks for information or clarification is a 'question'.",
+        ...(REASONING_HEADROOM !== undefined ? { maxOutputTokens: REASONING_HEADROOM } : {}),
         onResult: () => {
           throw new Error("intentional hook failure");
         },
@@ -169,7 +197,9 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
         port: llm,
         schema: Schema,
         schemaName: "draft-quality",
-        rubric: "1=poor, 5=passable, 10=excellent. Email clarity and conciseness.",
+        rubric:
+          "Score 1-10 (1=poor, 5=passable, 10=excellent) on email clarity and conciseness. Output BOTH `score` (number) and `reasoning` (string) fields — the reasoning is required.",
+        ...(REASONING_HEADROOM !== undefined ? { maxOutputTokens: REASONING_HEADROOM } : {}),
         onResult: (e) => {
           captured = e as CapabilityEvent<unknown>;
         },
@@ -225,6 +255,10 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
         port: llm,
         targetWords: 30,
         styleGuide: "3 bullets, each starting with a verb.",
+        // Summarizer's default `maxOutputTokens = targetWords * 1.5` (45 for
+        // 30 words) is too tight for ANY reasoning model — CoT consumes the
+        // whole budget. Override generously for both Cerebras and OpenAI.
+        maxOutputTokens: REASONING_HEADROOM ?? 400,
         onResult: (e) => {
           captured = e as CapabilityEvent<string>;
         },
@@ -291,6 +325,10 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
         schema: PlanSchema,
         schemaName: "email-reply-plan",
         toolCatalog: "fetchEmail, getContact, draftReply, sendReply",
+        // Planner output is verbose (steps array with ids + descriptions);
+        // bump the budget further for reasoning models so the planner has
+        // room after CoT consumes its share.
+        ...(REASONING_HEADROOM !== undefined ? { maxOutputTokens: 1500 } : {}),
         onResult: (e) => {
           captured = e as CapabilityEvent<unknown>;
         },
@@ -323,6 +361,9 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
         schemaName: "swot",
         framework:
           "SWOT analysis. Each list 3-5 items, each item a single concise sentence.",
+        // SWOT is the most verbose schema (4 lists × 3-5 items + a recommendation).
+        // For reasoning models, give plenty of budget to avoid 60s vitest timeout.
+        ...(REASONING_HEADROOM !== undefined ? { maxOutputTokens: 2000 } : {}),
         onResult: (e) => {
           captured = e as CapabilityEvent<unknown>;
         },

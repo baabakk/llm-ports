@@ -305,11 +305,15 @@ function createEmbeddings(
   alias: string,
 ): EmbeddingsPort {
   const pricing = pricingFor(ctx, modelId);
-  const model = getEmbeddingModel(ctx, modelId);
+  // Defer getEmbeddingModel until an embedding is actually requested. The
+  // registry calls createEmbeddingsPort eagerly during selectModel even when
+  // only LLM chat operations will run; throwing here would break unrelated
+  // chat tests against the same modelId.
 
   return {
     async generateEmbedding(options: EmbeddingOptions): Promise<EmbeddingResult> {
       const start = Date.now();
+      const model = getEmbeddingModel(ctx, modelId);
       try {
         const result = await embed({ model, value: options.input });
         const inputTokens = result.usage?.tokens ?? Math.ceil(options.input.length / 4);
@@ -329,6 +333,7 @@ function createEmbeddings(
 
     async generateEmbeddings(options: BatchEmbeddingOptions): Promise<BatchEmbeddingResult> {
       const start = Date.now();
+      const model = getEmbeddingModel(ctx, modelId);
       try {
         const result = await embedMany({ model, values: options.inputs });
         const inputTokens =

@@ -95,26 +95,27 @@ export function assertAgentShape(
 // ─── Test fixtures ───────────────────────────────────────────────────
 
 /**
- * 4×4 solid-red PNG, base64-encoded. Tiny but visible — gpt-5-mini and Claude
- * Haiku will both successfully identify "red" as the dominant color, which
- * gives vision tests something to assert on. The previous 1×1 transparent
- * PNG produced empty responses on some models because there was nothing to
- * describe.
+ * 32×32 solid-red PNG, base64-encoded. Below 32×32 OpenAI rejects vision
+ * input with `image_parse_error`. Generated programmatically via Node's
+ * zlib + manual PNG framing (no sharp dep), with a deterministic single-
+ * color body so the assertion can confidently check for "red" / "color" /
+ * dominant tone in the model's response.
  */
 export const TINY_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEUlEQVR42mP8/5+hngEEGNFFAA2kAvjEMW1OAAAAAElFTkSuQmCC";
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==";
 
 /**
- * Public, stable image URL for vision tests. OpenAI's API has been observed
- * to reject some image hosts (Wikipedia's CDN, GitHub raw URLs) with
- * "invalid_image_url" errors. This GitHub-rendered SVG-as-PNG is reliable
- * and tiny (~10KB).
+ * Public, stable image URL for vision tests. OpenAI's vision endpoints
+ * reject several common hosts (Wikipedia's CDN, GitHub raw, GitHub user
+ * content) with `invalid_image_url`. The OpenAI Cookbook's examples bucket
+ * IS allowed by OpenAI's image-fetch service — they host their own example
+ * images for the API docs, so they're guaranteed to work with the API.
  *
- * If this URL ever stops working with OpenAI, the fallback is to convert
- * to base64 data URIs in the test rather than chase a stable host.
+ * If this URL ever breaks, fall back to inline base64 in the test rather
+ * than chase a stable allowed host.
  */
 export const PUBLIC_IMAGE_URL =
-  "https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/.github/anthropic-logo.png";
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg";
 
 // ─── Cost reporter ───────────────────────────────────────────────────
 

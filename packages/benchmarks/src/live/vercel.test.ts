@@ -120,12 +120,18 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
     return registry.getPort();
   }
 
+  // gpt-5-nano is a reasoning model; the Vercel adapter does NOT apply the
+  // OpenAI adapter's reasoning-headroom multiplier (TD-LLMP-11). Without
+  // explicit headroom, a small maxOutputTokens starves the model. Bump
+  // generously here so visible output emerges after CoT.
+  const REASONING_HEADROOM_TOKENS = 800;
+
   it("generateText.basic", async () => {
     const llm = makePort();
     const result = await llm.generateText({
       taskType: "test-text-openai",
       prompt: "Say 'pong' and nothing else.",
-      maxOutputTokens: 20,
+      maxOutputTokens: REASONING_HEADROOM_TOKENS,
     });
     assertGenerateTextShape(result, ALIAS);
     recordCost("vercel-openai", result.cost.totalUSD);
@@ -140,10 +146,11 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
     const llm = makePort();
     const result = await llm.generateStructured({
       taskType: "test-structured-openai",
-      instructions: "Classify user intent.",
+      instructions: "Classify user intent. Always include a 'reasoning' string.",
       prompt: "Can I get a refund?",
       schema: Intent,
       schemaName: "user-intent",
+      maxOutputTokens: REASONING_HEADROOM_TOKENS,
     });
     assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
     recordCost("vercel-openai", result.cost.totalUSD);
@@ -155,7 +162,7 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
     for await (const chunk of llm.streamText({
       taskType: "test-stream-openai",
       prompt: "Count from 1 to 5, separated by spaces, nothing else.",
-      maxOutputTokens: 30,
+      maxOutputTokens: REASONING_HEADROOM_TOKENS,
     })) {
       chunks.push(chunk);
     }
