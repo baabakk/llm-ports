@@ -1,0 +1,77 @@
+name: Capability request
+description: Propose a new reusable LLM capability factory (alongside classify/score/draft/summarize/extract/plan/analyze).
+title: "[capability] "
+labels: ["capability", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Capabilities are the reusable layer above the LLM port: configure once with a schema + rubric + hooks, call many times. Each capability is a small factory file in `packages/capabilities/src/`.
+
+        Before opening, please check the current set in [`docs/capabilities/`](https://baabakk.github.io/llm-ports/capabilities/) and consider whether your need is one of the existing seven with a different rubric — that's usually the right answer.
+  - type: input
+    id: name
+    attributes:
+      label: Proposed capability name
+      description: A single verb naming the cognitive operation, lowercased.
+      placeholder: "redact, route, decide, answer, ..."
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What does this capability do?
+      description: |
+        One paragraph: what's the input, what's the output, why is this its own capability rather than a custom prompt or one of the existing seven?
+    validations:
+      required: true
+  - type: textarea
+    id: schema
+    attributes:
+      label: What does the output schema look like?
+      description: |
+        A Zod schema sketch. If the output is text-only (like `summarize`), say so.
+      render: typescript
+      placeholder: |
+        const RouteSchema = z.object({
+          target: z.enum(["billing", "support", "sales"]),
+          priority: z.enum(["P0", "P1", "P2", "P3"]),
+          reasoning: z.string(),
+        });
+    validations:
+      required: false
+  - type: textarea
+    id: usage
+    attributes:
+      label: Sketch a call site
+      description: How would your application code use this capability after the factory configures it?
+      render: typescript
+      placeholder: |
+        const route = createRouter({
+          port: llm,
+          schema: RouteSchema,
+          schemaName: "ticket-routing",
+          rubric: "...",
+        });
+
+        const result = await route({ content: ticketBody });
+    validations:
+      required: false
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Prior art
+      description: |
+        Has a similar primitive shipped in another library (LangChain, LlamaIndex, instructor, ...)? Linking helps us calibrate the API shape.
+    validations:
+      required: false
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you be willing to contribute the implementation?
+      options:
+        - "Yes, with some guidance"
+        - "Maybe, depending on the design discussion"
+        - "No, just requesting"
+    validations:
+      required: true

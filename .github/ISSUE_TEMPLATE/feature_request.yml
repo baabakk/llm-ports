@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a new feature, API change, or improvement that isn't an adapter or capability.
+title: "[feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for everything that isn't an adapter (use the **Adapter request** template) or a capability (use the **Capability request** template). Examples: new `LLMPort` method, registry-level feature (routing strategy, observability hook), a new validation strategy, security primitive, etc.
+
+        For open-ended design discussion before filing a feature request, please consider [Discussions](https://github.com/baabakk/llm-ports/discussions) instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: |
+        What are you trying to do that's awkward or impossible today? Lead with the use case, not the solution.
+      placeholder: |
+        I want to know which retry attempt fired (capability rejection vs transient 401 vs reasoning-starved) so I can graph it in our observability stack. Right now retries are silent.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        What API or behavior would solve it for you? Code sketches are welcome.
+      render: typescript
+      placeholder: |
+        const adapter = createOpenAIAdapter({
+          apiKey: ...,
+          onRetry: (event) => {
+            metrics.increment("llm.retry", { kind: event.kind, alias: event.alias });
+          },
+        });
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        What workarounds did you try, or what other API shapes did you consider? Why did they fall short?
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: |
+        Which packages would this change touch? Is it a breaking change?
+    validations:
+      required: false

@@ -1,0 +1,84 @@
+name: Bug report
+description: Something isn't working the way the docs say it should.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Before continuing, please:
+        - Check the [Known Limitations in Alpha](https://github.com/baabakk/llm-ports#known-limitations-in-alpha) section of the README.
+        - Search [open and closed issues](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue) for the same symptom.
+  - type: dropdown
+    id: package
+    attributes:
+      label: Which package?
+      description: The published package where the bug surfaces. (Pick the closest one — you can refine in the description.)
+      multiple: false
+      options:
+        - "@llm-ports/core"
+        - "@llm-ports/capabilities"
+        - "@llm-ports/adapter-anthropic"
+        - "@llm-ports/adapter-openai"
+        - "@llm-ports/adapter-ollama"
+        - "@llm-ports/adapter-vercel"
+        - "I'm not sure / spans multiple"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: Output of `npm ls @llm-ports/core` (or whichever package). Include all `@llm-ports/*` versions if multiple.
+      placeholder: "@llm-ports/core@0.1.0-alpha.0, @llm-ports/adapter-openai@0.1.0-alpha.0"
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+      placeholder: "v20.11.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what did you see? Include error messages verbatim.
+      placeholder: |
+        I called `llm.generateStructured(...)` and got a `ProviderUnavailableError` with cause `SyntaxError: Unexpected end of JSON input`.
+        ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: A typed result with the schema-validated `data` field, or a clearer error if the model returned an empty response.
+    validations:
+      required: true
+  - type: textarea
+    id: minimal-repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest amount of code that reproduces the issue. Strip API keys.
+      render: typescript
+      placeholder: |
+        const adapter = createOpenAIAdapter({ apiKey: process.env.OPENAI_API_KEY! });
+        const registry = createRegistryFromEnv({ ... });
+        const llm = registry.getPort();
+
+        await llm.generateStructured({
+          taskType: "test",
+          schema: z.object({ x: z.number() }),
+          prompt: "...",
+        });
+    validations:
+      required: false
+  - type: textarea
+    id: extra-context
+    attributes:
+      label: Anything else?
+      description: |
+        Logs, screenshots, related issues, working theories. If you've already debugged it, please share what you've tried.

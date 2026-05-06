@@ -261,6 +261,22 @@ Skip it if:
 
 ---
 
+## Known Limitations in Alpha
+
+`llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (200+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
+
+Known limitations:
+
+- Tool schemas in `runAgent` are still being tightened. The Zod-to-JSON-Schema conversion is currently a stub for the OpenAI and Anthropic adapters, so models receive less structural type information for tool inputs than the Zod schema describes. The looser tool-call shape works, but model accuracy on parameter names depends more on the tool description string than on the schema.
+- The Vercel adapter does not yet apply the reasoning-model headroom multiplier that `adapter-openai` does. Reasoning models (OpenAI o-series, Cerebras gpt-oss, etc.) used through the Vercel adapter may require manually setting `maxOutputTokens` 5-10x higher than expected.
+- The Vercel adapter's `generateStructured` path currently throws `SyntaxError: Unexpected end of JSON input` on the rare empty-response edge case, instead of a clearer typed error. Same root cause as the bullet above.
+- No `onRetry` observability hook yet. The OpenAI adapter retries internally on capability-rejection, transient-401 burst protection, and reasoning-starved responses; consumers can't currently observe these. Quality-tracking still works through `onResult` on capability factories.
+- Some provider-specific edge cases (Cerebras compat baseURL, Groq, Together AI, Fireworks) may require a `pricingOverrides` entry to match the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default.
+
+These are tracked openly in [GitHub issues](https://github.com/baabakk/llm-ports/issues). Please open an issue if you hit an adapter-specific failure.
+
+---
+
 ## Installation
 
 Pre-release. Packages are not yet on the npm `latest` tag.
@@ -340,6 +356,18 @@ Current target:
 - v0.1: core, adapters, cost gating, 7 capability factories
 - v0.2: expanded capabilities and observability package
 - v0.3: additional adapters and markdown skill format evaluation
+
+---
+
+## Follow Releases
+
+`llm-ports` is pre-release. To get notified when v0.1 lands on the `latest` tag (and for every minor release after):
+
+1. Click the **Watch** button at the top of the [GitHub repo](https://github.com/baabakk/llm-ports)
+2. Choose **Custom**
+3. Enable **Releases**
+
+You'll get an email or notification only when a real version ships. No PR or commit noise.
 
 ---
 

@@ -1,0 +1,72 @@
+name: Adapter request
+description: Request support for a new LLM provider, an OpenAI-compatible inference service, or expand an existing adapter.
+title: "[adapter] "
+labels: ["adapter", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adapters are the most-requested type of contribution. Before opening, please check:
+        - [`docs/adapters/index.md`](https://baabakk.github.io/llm-ports/adapters/) — the current adapter feature matrix
+        - [`docs/guides/custom-adapters.md`](https://baabakk.github.io/llm-ports/guides/custom-adapters) — the path to writing your own adapter as a separate package
+  - type: input
+    id: provider
+    attributes:
+      label: Provider name
+      placeholder: "Cohere, Mistral, Google Vertex, Databricks Mosaic, ..."
+    validations:
+      required: true
+  - type: input
+    id: provider-docs
+    attributes:
+      label: Link to the provider's API documentation
+      placeholder: "https://..."
+    validations:
+      required: true
+  - type: dropdown
+    id: shape
+    attributes:
+      label: API shape
+      description: Is this an OpenAI-compatible API, or does it have its own SDK?
+      options:
+        - "OpenAI-compatible (works through @llm-ports/adapter-openai with a baseURL)"
+        - "Has its own native SDK (would need a new adapter package)"
+        - "I'm not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: features
+    attributes:
+      label: Which features matter to you?
+      description: |
+        Check the ones that are blocking. The minimum viable adapter implements `generateText`; the rest are progressive.
+      value: |
+        - [ ] generateText
+        - [ ] generateStructured
+        - [ ] streamText
+        - [ ] streamStructured
+        - [ ] runAgent (tool use)
+        - [ ] embeddings
+        - [ ] vision (multimodal input)
+        - [ ] audio
+        - [ ] prompt caching
+        - [ ] reasoning models (o-series-style with separated CoT)
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What's your use case?
+      description: |
+        What are you building, and what's making you reach for this provider specifically? (Cost, latency, quality, locality, regulatory, etc.)
+    validations:
+      required: false
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you be willing to contribute the adapter?
+      description: Adapters typically take 200-400 lines following the existing pattern. We're happy to mentor.
+      options:
+        - "Yes, with some guidance"
+        - "Maybe, depending on complexity"
+        - "No, just requesting"
+    validations:
+      required: true

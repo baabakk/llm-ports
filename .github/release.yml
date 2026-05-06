@@ -1,0 +1,46 @@
+# GitHub auto-generated release notes config.
+# When you click "Generate release notes" on a tag, GitHub uses this to
+# group merged PRs by category. Each PR is bucketed by its labels.
+#
+# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+
+changelog:
+  exclude:
+    labels:
+      - chore
+      - dependencies
+      - duplicate
+      - invalid
+      - wontfix
+    authors:
+      - dependabot[bot]
+      - github-actions[bot]
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking
+        - "breaking change"
+    - title: New adapters
+      labels:
+        - adapter
+    - title: New capabilities
+      labels:
+        - capability
+    - title: New features
+      labels:
+        - enhancement
+        - feature
+    - title: Bug fixes
+      labels:
+        - bug
+        - fix
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+    - title: Performance
+      labels:
+        - performance
+    - title: Other changes
+      labels:
+        - "*"

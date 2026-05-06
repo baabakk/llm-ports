@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://baabakk.github.io/llm-ports/
+    about: Read the docs site before opening an issue — concepts, guides, and the per-adapter feature matrix.
+  - name: Discussions (questions, design ideas, show-and-tell)
+    url: https://github.com/baabakk/llm-ports/discussions
+    about: For open-ended questions, design feedback, or sharing how you're using llm-ports.
+  - name: Security vulnerabilities
+    url: https://github.com/baabakk/llm-ports/security/advisories/new
+    about: Report security issues privately, not as a public issue.
