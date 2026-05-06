@@ -369,26 +369,3 @@ Current target:
 
 You'll get an email or notification only when a real version ships. No PR or commit noise.
 
----
-
-## Suggested GitHub Topics
-
-Recommended repo topics:
-
-```text
-llm
-ai
-openai
-anthropic
-ollama
-typescript
-generative-ai
-llm-routing
-llm-fallback
-llm-abstraction
-ai-architecture
-software-architecture
-cost-control
-vendor-lock-in
-multi-provider
-```
