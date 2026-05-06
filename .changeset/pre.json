@@ -1,0 +1,17 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@llm-ports/adapter-anthropic": "0.0.0",
+    "@llm-ports/adapter-contract-tests": "0.0.0",
+    "@llm-ports/adapter-ollama": "0.0.0",
+    "@llm-ports/adapter-openai": "0.0.0",
+    "@llm-ports/adapter-vercel": "0.0.0",
+    "@llm-ports/benchmarks": "0.0.0",
+    "@llm-ports/capabilities": "0.0.0",
+    "@llm-ports/core": "0.0.0"
+  },
+  "changesets": [
+    "initial-alpha"
+  ]
+}

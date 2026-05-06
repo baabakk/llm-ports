@@ -1,68 +1,121 @@
-# llm-ports
+# llm-ports: TypeScript LLM Abstraction Layer for Multi-Provider AI Systems
 
-Provider-agnostic LLM architecture for TypeScript. Multi-provider routing, USD-denominated cost gating, fallback chains, reusable capability factories, tool-use security primitives. Under 3000 lines total.
+Provider-agnostic LLM architecture for TypeScript.
+
+Switch providers without changing code.  
+Avoid vendor lock-in.  
+Control cost.  
+Reuse prompts as capabilities.
+
+Multi-provider routing • fallback chains • USD cost gating • capability factories • tool-use security • observability
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Status](https://img.shields.io/badge/status-pre--release-orange)
+![TypeScript](https://img.shields.io/badge/TypeScript-first-blue)
 
-## Why
+---
 
-Most TypeScript LLM code imports provider SDKs directly, scattering `generateText()` calls across dozens of files. Every SDK upgrade breaks multiple files. Every provider switch is a refactor.
+## The Problem
 
-`llm-ports` fixes this with a clean ports-and-adapters pattern: only two files in your project import the LLM SDK. Everything else talks to a typed interface that supports multi-provider routing, USD cost gating, fallback chains, and reusable capability factories.
+Most LLM applications break in predictable ways:
 
-This is the library that assumes you're running LLMs in production at cost, not in a demo.
+- SDK upgrades touch too many files
+- Switching providers requires refactoring
+- Prompt logic is duplicated across features
+- Cost and routing logic are scattered
+- Business logic becomes coupled to provider-specific SDKs
 
-## 60 seconds
+This is not just an SDK problem.
 
-**1. Configure providers in `.env`:**
+**It is an architecture problem.**
 
-```
-LLM_PROVIDER_FAST=anthropic|<your-model-id>|cost:50/day
-LLM_PROVIDER_SMART=anthropic|<your-model-id>|cost:200/day
+---
+
+## The Solution
+
+`llm-ports` applies the ports-and-adapters pattern to LLM systems.
+
+> **Only two files in your codebase should know the LLM SDK exists.**
+
+Everything else talks to a typed interface.
+
+Instead of calling models directly, your application uses reusable capabilities:
+
+- classify
+- draft
+- score
+- summarize
+- extract
+- plan
+- analyze
+
+The LLM stops being a dependency you manage.  
+It becomes infrastructure you configure.
+
+---
+
+## What You Get
+
+- **Multi-provider LLM routing** across OpenAI, Anthropic, Ollama, Vercel AI SDK, and compatible providers
+- **Fallback chains** when a provider fails or exceeds budget
+- **USD-based cost gating** with hourly, daily, and monthly limits
+- **Reusable prompt capabilities** so prompts are defined once and reused everywhere
+- **Validation recovery** for structured output failures
+- **Tool-use safety primitives** for destructive or confirmation-required actions
+- **Observability hooks** for cost, latency, quality, and outcomes
+- **TypeScript-first API** with full type support
+- **No runtime dependency on LangChain, LlamaIndex, or heavy frameworks**
+
+---
+
+## 60 Second Setup
+
+### 1. Configure providers in `.env`
+
+```env
+LLM_PROVIDER_FAST=anthropic|<model>|cost:50/day
+LLM_PROVIDER_SMART=anthropic|<model>|cost:200/day
 LLM_TASK_ROUTE_TRIAGE=fast,smart
 ```
 
-**2. Create the port once at app start:**
+### 2. Create the port once
 
-```typescript
+```ts
 import { createRegistryFromEnv } from "@llm-ports/core";
 import { createAnthropicAdapter } from "@llm-ports/adapter-anthropic";
 
 export const llm = createRegistryFromEnv({
   adapters: {
-    anthropic: createAnthropicAdapter({ apiKey: process.env.ANTHROPIC_API_KEY! }),
+    anthropic: createAnthropicAdapter({
+      apiKey: process.env.ANTHROPIC_API_KEY!,
+    }),
   },
 }).getPort();
 ```
 
-**3. Use anywhere, no SDK imports:**
+### 3. Use it anywhere, with no SDK imports
 
-```typescript
+```ts
 const result = await llm.generateText({
   taskType: "triage",
-  prompt: "Classify this email: ...",
+  prompt: "Classify this email...",
 });
 ```
 
-The registry picks the model per task, enforces cost limits, falls back through the provider chain on failure, and measures latency and cost for observability.
+The registry:
 
-## Packages
+- selects the right model for the task
+- enforces cost limits
+- falls back through the provider chain on failure
+- records usage, cost, and latency
 
-| Package | Purpose |
-|---------|---------|
-| `@llm-ports/core` | Port interfaces, registry, cost/budget gating, validation strategies, content blocks |
-| `@llm-ports/adapter-anthropic` | Direct Anthropic SDK adapter with prompt caching |
-| `@llm-ports/adapter-openai` | OpenAI SDK adapter with `baseURL` support (covers 10+ compat providers) |
-| `@llm-ports/adapter-vercel` | Vercel AI SDK adapter (migration path from existing Vercel users) |
-| `@llm-ports/adapter-ollama` | Ollama native adapter with model management |
-| `@llm-ports/capabilities` | 7 cognitive operation factories: classify, score, draft, summarize, extract, plan, analyze |
-| `@llm-ports/observability` | Quality tracking hooks, sinks, deterministic edit-diff helpers |
+---
 
-## Capabilities example
+## Capabilities: Reusable LLM Operations
 
-Capability factories let you bind a schema, rubric, and hooks once, then call the configured function many times:
+Instead of duplicating prompt logic across files, define a capability once and reuse it.
 
-```typescript
+```ts
 import { createClassifier } from "@llm-ports/capabilities";
 import { z } from "zod";
 
@@ -80,43 +133,197 @@ export const classifyIntent = createClassifier({
     question: asking for information
     request: wants something done
     complaint: reports a problem
-    feedback: opinion, no action requested
+    feedback: opinion only
+    other: anything else
   `,
 });
-
-const result = await classifyIntent({ content: userMessage });
-// { intent: "request", urgency: "high", reasoning: "..." }
 ```
 
-## Related tools
+Now call it anywhere:
+
+```ts
+const result = await classifyIntent({ content: userMessage });
+```
+
+Example output:
+
+```ts
+{
+  intent: "request",
+  urgency: "high",
+  reasoning: "The user is asking for a concrete action."
+}
+```
+
+Why this matters:
+
+- Improve a prompt once, and every call site benefits
+- Keep behavior consistent across the system
+- Make debugging and evaluation easier
+- Keep business logic free from provider-specific SDK details
+
+---
+
+## Architecture Overview
+
+Before:
+
+```text
+Application code
+  ├─ direct SDK call
+  ├─ direct SDK call
+  ├─ direct SDK call
+  └─ model router leaking SDK types
+```
+
+After:
+
+```text
+Application code
+  ↓
+Capabilities
+  ↓
+LLM Port
+  ↓
+Adapters and Provider Registry
+  ↓
+LLM providers
+```
+
+The key shift:
+
+> Application code stops calling models directly. It calls capabilities.
+
+---
+
+## Packages
+
+| Package | Purpose |
+|--------|---------|
+| `@llm-ports/core` | Port interfaces, registry, routing, cost gating, validation strategies, content blocks |
+| `@llm-ports/capabilities` | Reusable LLM operation factories |
+| `@llm-ports/adapter-openai` | OpenAI SDK adapter with `baseURL` support for compatible providers |
+| `@llm-ports/adapter-anthropic` | Anthropic SDK adapter |
+| `@llm-ports/adapter-ollama` | Ollama native adapter with model management |
+| `@llm-ports/adapter-vercel` | Vercel AI SDK adapter for migration and compatibility |
+
+> `@llm-ports/observability` (quality tracking hooks, sinks, deterministic edit-diff helpers) is planned for v0.2.
+
+---
+
+## Supported Use Cases
+
+Use `llm-ports` when you need:
+
+- multi-provider LLM routing
+- LLM fallback chains
+- TypeScript LLM abstraction
+- OpenAI and Anthropic provider switching
+- cost control for production LLM applications
+- reusable prompt capabilities
+- structured output validation and recovery
+- tool-use security in agent workflows
+- observability for LLM cost, latency, and quality
+- vendor-neutral AI architecture
+
+---
+
+## When to Use This
+
+Use `llm-ports` if:
+
+- you use 2 or more LLM providers
+- you may switch providers later
+- SDK upgrades have caused multi-file changes
+- prompt logic is duplicated
+- cost control matters
+- you want business logic decoupled from provider SDKs
+
+Skip it if:
+
+- you have 1 or 2 LLM calls
+- you are only prototyping
+- you are intentionally building around one provider-specific feature
+- you want a full agent framework, memory layer, RAG framework, or hosted gateway
+
+---
+
+## Related Tools
 
 | Tool | How `llm-ports` relates |
-|------|-------------------------|
-| Vercel AI SDK | Vercel unifies provider calls. `llm-ports` adds registry, fallback chains, USD cost gating, validation recovery, capability factories on top. |
-| LiteLLM | Python-first HTTP proxy. `llm-ports` is TypeScript in-process, zero network hop. Talks to LiteLLM via the OpenAI adapter with `baseURL`. |
-| Portkey | Commercial hosted gateway. `llm-ports` is MIT, in-process, no vendor dependency. |
-| LangChain.js | LangChain is a framework. `llm-ports` is a utility. Wrap LangChain's LLM calls with a port for budget gating and fallbacks. |
-| LlamaIndex.TS | LlamaIndex is retrieval-first. `llm-ports` handles LLM invocation; bring your own retrieval. |
-| Mastra | Mastra is agent-first with built-in memory. `llm-ports` is primitives beneath that layer. |
+|------|--------------------------|
+| Vercel AI SDK | Vercel unifies provider calls. `llm-ports` adds registry, fallback chains, USD cost gating, validation recovery, and capability factories on top. |
+| LiteLLM | LiteLLM is a Python-first HTTP proxy. `llm-ports` is TypeScript and runs in-process with no extra network hop. |
+| Portkey | Portkey is a commercial hosted gateway. `llm-ports` is MIT, in-process, and has no hosted dependency. |
+| LangChain.js | LangChain is a framework. `llm-ports` is a lightweight architecture and control layer. |
+| LlamaIndex.TS | LlamaIndex is retrieval-first. `llm-ports` handles LLM invocation, routing, fallback, and cost control. |
+| Mastra | Mastra is agent-first with built-in memory and workflow primitives. `llm-ports` provides lower-level LLM primitives beneath that layer. |
+
+---
+
+## Installation
+
+Pre-release. Packages are not yet on the npm `latest` tag.
+
+When v0.1 is released:
+
+```bash
+npm install @llm-ports/core
+```
+
+Install adapters as needed:
+
+```bash
+npm install @llm-ports/adapter-anthropic
+npm install @llm-ports/adapter-openai
+npm install @llm-ports/adapter-ollama
+npm install @llm-ports/capabilities
+```
+
+Peer dependency: `zod >=3.24.0 <5`. Bring your own SDKs (`@anthropic-ai/sdk`, `openai`, `ollama`, `ai`).
+
+---
 
 ## Documentation
 
-Full docs: [llm-ports.dev](https://llm-ports.dev) (coming v0.1).
+Full documentation is planned at:
+
+https://llm-ports.dev
+
+Planned docs:
 
 - Getting Started
-- Concepts: ports, adapters, task routing, cost vs request gating, content blocks, validation strategies
-- Guides: multi-provider, local-to-cloud, cost gating, custom adapters, observability, security
-- Capabilities (one page each)
-- Adapters (one page each + feature matrix)
-- Migration: from Vercel AI, from LangChain, from direct SDKs
+- Concepts: ports, adapters, task routing, cost gating, content blocks, validation strategies
+- Guides: multi-provider routing, local-to-cloud, cost control, custom adapters, observability, security
+- Capabilities: one page per capability
+- Adapters: one page per adapter and feature matrix
+- Migration: from Vercel AI SDK, LangChain.js, and direct provider SDKs
 
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
+---
 
 ## Security
 
-See [SECURITY.md](./SECURITY.md) for the threat model and vulnerability reporting.
+Tool use without a threat model is dangerous.
+
+`llm-ports` treats security as a first-class part of the API:
+
+- destructive tool markers
+- confirmation-required actions
+- max output byte limits
+- redaction capability
+- explicit guidance for prompt injection and tool abuse
+
+See [SECURITY.md](./SECURITY.md).
+
+---
+
+## Contributing
+
+Contributions are welcome after the initial v0.1 scaffolding lands.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
 
 ## License
 
@@ -124,4 +331,36 @@ MIT. See [LICENSE](./LICENSE).
 
 ---
 
-**Status:** Pre-release. Scaffolding in progress; v0.1 target date: Week 14.
+## Status
+
+Pre-release.
+
+Current target:
+
+- v0.1: core, adapters, cost gating, 7 capability factories
+- v0.2: expanded capabilities and observability package
+- v0.3: additional adapters and markdown skill format evaluation
+
+---
+
+## Suggested GitHub Topics
+
+Recommended repo topics:
+
+```text
+llm
+ai
+openai
+anthropic
+ollama
+typescript
+generative-ai
+llm-routing
+llm-fallback
+llm-abstraction
+ai-architecture
+software-architecture
+cost-control
+vendor-lock-in
+multi-provider
+```

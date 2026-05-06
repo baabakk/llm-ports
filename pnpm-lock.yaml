@@ -61,7 +61,7 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
       zod:
-        specifier: ^3.23.0
+        specifier: ^3.25.76
         version: 3.25.76
 
   packages/adapter-contract-tests:
@@ -105,7 +105,7 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
       zod:
-        specifier: ^3.23.0
+        specifier: ^3.25.76
         version: 3.25.76
 
   packages/adapter-openai:
@@ -130,7 +130,7 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
       zod:
-        specifier: ^3.23.0
+        specifier: ^3.25.76
         version: 3.25.76
 
   packages/adapter-vercel:
@@ -155,7 +155,7 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
       zod:
-        specifier: ^3.23.0
+        specifier: ^3.25.76
         version: 3.25.76
 
   packages/benchmarks:
@@ -215,9 +215,6 @@ importers:
       '@llm-ports/core':
         specifier: workspace:*
         version: link:../core
-      zod:
-        specifier: ^3.23.0
-        version: 3.25.76
     devDependencies:
       tsup:
         specifier: ^8.3.0
@@ -228,12 +225,11 @@ importers:
       vitest:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
 
   packages/core:
-    dependencies:
-      zod:
-        specifier: ^3.23.0
-        version: 3.25.76
     devDependencies:
       tsup:
         specifier: ^8.3.0
@@ -244,6 +240,9 @@ importers:
       vitest:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
 
 packages:
 

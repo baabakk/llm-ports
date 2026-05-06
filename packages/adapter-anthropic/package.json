@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-anthropic",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "description": "Direct @anthropic-ai/sdk adapter for llm-ports. Implements LLMPort with prompt caching, vision, and tool use support for Claude models.",
   "license": "MIT",
   "author": "Babak Abbaschian",
@@ -15,7 +15,10 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -46,7 +49,14 @@
     "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/adapter-anthropic"
   },
-  "keywords": ["llm", "ai", "anthropic", "claude", "llm-ports", "adapter"],
+  "keywords": [
+    "llm",
+    "ai",
+    "anthropic",
+    "claude",
+    "llm-ports",
+    "adapter"
+  ],
   "engines": {
     "node": ">=18.0.0"
   }

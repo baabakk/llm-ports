@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-vercel",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "description": "Vercel AI SDK adapter for llm-ports. Migration path for users already on @ai-sdk/*. Bring your own Vercel-configured models; the adapter handles the LLMPort plumbing.",
   "license": "MIT",
   "author": "Babak Abbaschian",
@@ -15,7 +15,10 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -46,7 +49,15 @@
     "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/adapter-vercel"
   },
-  "keywords": ["llm", "ai", "vercel-ai-sdk", "ai-sdk", "migration", "llm-ports", "adapter"],
+  "keywords": [
+    "llm",
+    "ai",
+    "vercel-ai-sdk",
+    "ai-sdk",
+    "migration",
+    "llm-ports",
+    "adapter"
+  ],
   "engines": {
     "node": ">=18.0.0"
   }
