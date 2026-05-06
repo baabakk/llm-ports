@@ -763,6 +763,7 @@ async function withTransientAuthRetry<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   let attempt = 0;
+  // eslint-disable-next-line no-constant-condition -- intentional retry loop; exits via return/throw/break
   while (true) {
     try {
       const result = await fn();
@@ -811,6 +812,7 @@ async function executeChatRequest(
   let triedCapabilityFallback = false;
   let transientRetries = 0;
 
+  // eslint-disable-next-line no-constant-condition -- intentional retry loop; exits via return/throw/break
   while (true) {
     try {
       const response = await attempt();
@@ -876,6 +878,7 @@ async function executeChatStream(
   let triedCapabilityFallback = false;
   let transientRetries = 0;
 
+  // eslint-disable-next-line no-constant-condition -- intentional retry loop; exits via return/throw/break
   while (true) {
     try {
       const stream = await attempt();

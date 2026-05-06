@@ -286,11 +286,11 @@ Peer dependency: `zod >=3.24.0 <5`. Bring your own SDKs (`@anthropic-ai/sdk`, `o
 
 ## Documentation
 
-Full documentation is planned at:
+Documentation site (auto-deployed from `docs/` on every push to `main`):
 
-https://llm-ports.dev
+https://baabakk.github.io/llm-ports/
 
-Planned docs:
+Pages:
 
 - Getting Started
 - Concepts: ports, adapters, task routing, cost gating, content blocks, validation strategies

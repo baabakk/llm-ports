@@ -1,6 +1,11 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
+  // Project Pages deploys at https://<user>.github.io/<repo>/, so all
+  // assets and links must be prefixed with `/llm-ports/`. Override via
+  // the VITEPRESS_BASE env var when deploying elsewhere (custom domain,
+  // preview build, or local dev with `pnpm docs:dev`).
+  base: process.env["VITEPRESS_BASE"] ?? "/llm-ports/",
   title: "llm-ports",
   description:
     "Provider-agnostic LLM architecture for TypeScript: cost gating, fallback chains, capability factories, tool-use security primitives.",

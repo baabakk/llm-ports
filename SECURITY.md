@@ -7,8 +7,13 @@ latest published minor version on the `0.x` line.
 
 ## Reporting a Vulnerability
 
-Please report suspected vulnerabilities privately to:
-`security@llm-ports.dev`.
+Please report suspected vulnerabilities privately via GitHub's
+[Private Vulnerability Reporting](https://github.com/baabakk/llm-ports/security/advisories/new).
+
+This goes directly to maintainers and is not visible publicly until a fix
+is released. If you can't use the GitHub form, open a discussion at
+https://github.com/baabakk/llm-ports/discussions and ask for a private
+contact channel without disclosing the vulnerability details there.
 
 When reporting, include:
 

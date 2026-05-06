@@ -158,7 +158,6 @@ describe.skipIf(skipOllama)("live: ollama", () => {
   describe("runAgent", () => {
     it.skipIf(skipNoDaemon())("singleTool — model invokes a tool (model-dependent)", async () => {
       const { llm } = makePorts();
-      let calls = 0;
       const result = await llm.runAgent({
         taskType: "test-agent",
         instructions:
@@ -169,10 +168,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
             name: "lookupNumber",
             description: "Look up a phone number by person's name",
             inputSchema: z.object({ name: z.string() }),
-            execute: async ({ name }) => {
-              calls++;
-              return `${name}: 555-0100`;
-            },
+            execute: async ({ name }) => `${name}: 555-0100`,
           },
         },
         maxSteps: 5,
@@ -180,8 +176,9 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       });
       assertAgentShape(result, ALIAS, { allowZeroCost: true });
       recordCost("ollama", result.cost.totalUSD);
-      // Tool use is model-dependent; smaller Ollama models may not call it.
-      // The hard assertion: result returned, terminated cleanly. Soft: tool was called.
+      // Tool use is model-dependent; smaller Ollama models may not call the
+      // tool at all. Hard assertion: clean termination. Tool-invocation count
+      // would be brittle with small models, so we don't assert on it.
       expect(["completed", "max_steps"]).toContain(result.terminationReason);
     });
   });
