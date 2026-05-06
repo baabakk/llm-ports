@@ -49,13 +49,31 @@
     "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/adapter-anthropic"
   },
+  "homepage": "https://github.com/baabakk/llm-ports/tree/main/packages/adapter-anthropic#readme",
+  "bugs": {
+    "url": "https://github.com/baabakk/llm-ports/issues"
+  },
   "keywords": [
     "llm",
     "ai",
+    "typescript",
     "anthropic",
     "claude",
+    "claude-haiku",
+    "claude-sonnet",
+    "claude-opus",
+    "ai-sdk",
+    "generative-ai",
     "llm-ports",
-    "adapter"
+    "llm-adapter",
+    "llm-routing",
+    "llm-fallback",
+    "prompt-caching",
+    "vision",
+    "tool-use",
+    "function-calling",
+    "multi-provider",
+    "cost-control"
   ],
   "engines": {
     "node": ">=18.0.0"

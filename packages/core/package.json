@@ -47,13 +47,30 @@
   "keywords": [
     "llm",
     "ai",
-    "ports-and-adapters",
     "typescript",
-    "anthropic",
     "openai",
+    "anthropic",
     "ollama",
-    "vercel-ai"
+    "ai-sdk",
+    "generative-ai",
+    "llm-routing",
+    "llm-fallback",
+    "llm-abstraction",
+    "multi-provider",
+    "multi-provider-llm",
+    "ports-and-adapters",
+    "hexagonal-architecture",
+    "cost-control",
+    "cost-gating",
+    "vendor-lock-in",
+    "provider-router",
+    "ai-architecture",
+    "production-llm"
   ],
+  "homepage": "https://github.com/baabakk/llm-ports#readme",
+  "bugs": {
+    "url": "https://github.com/baabakk/llm-ports/issues"
+  },
   "engines": {
     "node": ">=18.0.0"
   }

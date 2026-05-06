@@ -44,21 +44,34 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/baabakk/baabakk/llm-ports.git",
+    "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/capabilities"
+  },
+  "homepage": "https://github.com/baabakk/llm-ports/tree/main/packages/capabilities#readme",
+  "bugs": {
+    "url": "https://github.com/baabakk/llm-ports/issues"
   },
   "keywords": [
     "llm",
     "ai",
+    "typescript",
+    "generative-ai",
+    "llm-ports",
+    "llm-capabilities",
     "capabilities",
     "classify",
+    "score",
     "draft",
     "summarize",
     "extract",
     "plan",
     "analyze",
+    "structured-output",
+    "zod",
+    "json-mode",
     "factory-pattern",
-    "llm-ports"
+    "reusable-prompts",
+    "production-llm"
   ],
   "engines": {
     "node": ">=18.0.0"

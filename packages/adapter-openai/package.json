@@ -49,11 +49,20 @@
     "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/adapter-openai"
   },
+  "homepage": "https://github.com/baabakk/llm-ports/tree/main/packages/adapter-openai#readme",
+  "bugs": {
+    "url": "https://github.com/baabakk/llm-ports/issues"
+  },
   "keywords": [
     "llm",
     "ai",
+    "typescript",
     "openai",
+    "openai-compatible",
     "gpt",
+    "gpt-4",
+    "gpt-4o",
+    "gpt-5",
     "azure-openai",
     "groq",
     "together-ai",
@@ -62,8 +71,20 @@
     "perplexity",
     "cerebras",
     "litellm",
+    "ai-sdk",
+    "generative-ai",
     "llm-ports",
-    "adapter"
+    "llm-adapter",
+    "llm-routing",
+    "llm-fallback",
+    "embeddings",
+    "tool-use",
+    "function-calling",
+    "structured-output",
+    "vision",
+    "multi-provider",
+    "cost-control",
+    "reasoning-models"
   ],
   "engines": {
     "node": ">=18.0.0"

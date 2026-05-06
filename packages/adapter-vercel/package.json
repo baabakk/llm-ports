@@ -49,14 +49,30 @@
     "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/adapter-vercel"
   },
+  "homepage": "https://github.com/baabakk/llm-ports/tree/main/packages/adapter-vercel#readme",
+  "bugs": {
+    "url": "https://github.com/baabakk/llm-ports/issues"
+  },
   "keywords": [
     "llm",
     "ai",
+    "typescript",
     "vercel-ai-sdk",
     "ai-sdk",
-    "migration",
+    "ai-sdk-migration",
+    "openai",
+    "anthropic",
+    "ollama",
+    "generative-ai",
     "llm-ports",
-    "adapter"
+    "llm-adapter",
+    "llm-routing",
+    "llm-fallback",
+    "migration",
+    "wrapper",
+    "multi-provider",
+    "cost-control",
+    "production-llm"
   ],
   "engines": {
     "node": ">=18.0.0"

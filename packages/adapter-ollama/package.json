@@ -49,14 +49,36 @@
     "url": "https://github.com/baabakk/llm-ports.git",
     "directory": "packages/adapter-ollama"
   },
+  "homepage": "https://github.com/baabakk/llm-ports/tree/main/packages/adapter-ollama#readme",
+  "bugs": {
+    "url": "https://github.com/baabakk/llm-ports/issues"
+  },
   "keywords": [
     "llm",
     "ai",
+    "typescript",
     "ollama",
     "local-llm",
     "self-hosted",
+    "llama",
+    "llama3",
+    "mistral",
+    "phi",
+    "qwen",
+    "gemma",
+    "ai-sdk",
+    "generative-ai",
     "llm-ports",
-    "adapter"
+    "llm-adapter",
+    "llm-routing",
+    "embeddings",
+    "model-management",
+    "local-to-cloud",
+    "tool-use",
+    "vision",
+    "multi-provider",
+    "offline-llm",
+    "privacy"
   ],
   "engines": {
     "node": ">=18.0.0"
