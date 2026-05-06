@@ -14,6 +14,7 @@
     "build": "pnpm -r build",
     "pretest": "pnpm -r build",
     "test": "pnpm -r test",
+    "pretypecheck": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint packages --ext .ts",
     "format": "prettier --write \"packages/**/*.{ts,tsx,md,json}\"",
