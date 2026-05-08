@@ -289,15 +289,15 @@ Skip it if:
 
 `llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (200+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
 
-Known limitations:
+Known limitations (each tracked publicly — click the issue number for details, workarounds, and progress):
 
-- Tool schemas in `runAgent` are still being tightened. The Zod-to-JSON-Schema conversion is currently a stub for the OpenAI and Anthropic adapters, so models receive less structural type information for tool inputs than the Zod schema describes. The looser tool-call shape works, but model accuracy on parameter names depends more on the tool description string than on the schema.
-- The Vercel adapter does not yet apply the reasoning-model headroom multiplier that `adapter-openai` does. Reasoning models (OpenAI o-series, Cerebras gpt-oss, etc.) used through the Vercel adapter may require manually setting `maxOutputTokens` 5-10x higher than expected.
-- The Vercel adapter's `generateStructured` path currently throws `SyntaxError: Unexpected end of JSON input` on the rare empty-response edge case, instead of a clearer typed error. Same root cause as the bullet above.
-- No `onRetry` observability hook yet. The OpenAI adapter retries internally on capability-rejection, transient-401 burst protection, and reasoning-starved responses; consumers can't currently observe these. Quality-tracking still works through `onResult` on capability factories.
-- Some provider-specific edge cases (Cerebras compat baseURL, Groq, Together AI, Fireworks) may require a `pricingOverrides` entry to match the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default.
+- **[#1](https://github.com/baabakk/llm-ports/issues/1) — `runAgent` tool input schemas are passed as `{}` to the model.** Zod-to-JSON-Schema conversion is a stub in the OpenAI and Anthropic adapters. Tool calls work, but model accuracy on parameter names depends more on the tool's `description` string than on the schema. Workaround: name parameters explicitly in `description`.
+- **[#3](https://github.com/baabakk/llm-ports/issues/3) — No `onRetry` observability hook.** The OpenAI adapter retries internally on capability-rejection, transient-401 burst protection, and reasoning-starved responses; consumers can't currently observe these. `onResult` on capability factories still fires per logical call.
+- **[#4](https://github.com/baabakk/llm-ports/issues/4) — Vercel adapter starves reasoning models.** No headroom multiplier when used with OpenAI o-series, Cerebras gpt-oss-style models, etc. Workaround: set `maxOutputTokens` 5-10× higher than your visible-output budget.
+- **[#5](https://github.com/baabakk/llm-ports/issues/5) — Vercel `generateStructured` throws confusing `SyntaxError` on empty model responses.** Same root cause as #4. Will be fixed in two layers: the reasoning-aware retry, and a clearer typed `EmptyResponseError`.
+- Some compat-provider models (Cerebras via OpenAI baseURL, Groq, Together AI, Fireworks) may require a `pricingOverrides` entry to satisfy the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default.
 
-These are tracked openly in [GitHub issues](https://github.com/baabakk/llm-ports/issues). Please open an issue if you hit an adapter-specific failure.
+If you hit something not listed here, please [open an issue](https://github.com/baabakk/llm-ports/issues/new/choose) — the bug-report template captures the version + repro shape we need.
 
 ---
 
