@@ -1,0 +1,27 @@
+{
+  "name": "@llm-ports/example-migrate-from-vercel-ai",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Migration paths for users on Vercel AI SDK: (a) wrap existing code with no rewrite, (b) progressive port to llm-ports' typed registry. Both paths add fallback chains, USD cost gating, and capability factories without touching most call sites.",
+  "type": "module",
+  "scripts": {
+    "before": "tsx src/before-vercel-direct.ts",
+    "after-wrap": "tsx src/after-wrap-path.ts",
+    "after-migrate": "tsx src/after-migrate-path.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/adapter-openai": "workspace:*",
+    "@llm-ports/adapter-vercel": "workspace:*",
+    "@llm-ports/core": "workspace:*",
+    "ai": "^4.3.19",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}
