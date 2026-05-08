@@ -1,0 +1,24 @@
+{
+  "name": "@llm-ports/example-email-triage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Email triage example: classify intent + urgency, draft a suggested reply, log everything for quality tracking. Composes two capability factories with the fallback-chain registry.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/adapter-openai": "workspace:*",
+    "@llm-ports/capabilities": "workspace:*",
+    "@llm-ports/core": "workspace:*",
+    "openai": "^4.73.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}
