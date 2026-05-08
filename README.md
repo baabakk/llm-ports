@@ -211,6 +211,30 @@ The key shift:
 
 ---
 
+## Examples
+
+Seven runnable examples in [`examples/`](examples/), each its own pnpm workspace package with a README walking through the code:
+
+| Example | What it shows |
+|---|---|
+| [`basic`](examples/basic/) | The smallest possible end-to-end. One adapter, one task type, one `generateText` call. The 60-second-setup demo. |
+| [`multi-provider`](examples/multi-provider/) | Fallback chain (Anthropic primary → OpenAI backup), USD cost gating per provider, capability factory. |
+| [`email-triage`](examples/email-triage/) | The most common production use case, condensed into ~150 lines. Inbound email → classify (intent + urgency + sentiment) → policy gate → draft brand-voiced reply → queue for human review. Capability composition story. |
+| [`streaming-chat`](examples/streaming-chat/) | Express server with three routes: `POST /chat` (one-shot), `POST /chat/stream` (Server-Sent Events), `POST /chat/agent` (tool-augmented). The most common LLM UX patterns in ~30 lines of glue. |
+| [`extract-from-pdf`](examples/extract-from-pdf/) | Document extraction: raw OCR'd invoice text → fully-typed structured object via Zod. Demonstrates `generateStructured`, validation-retry-with-feedback, and the `createExtractor` factory. |
+| [`agent-with-approval`](examples/agent-with-approval/) | Tool-use agent with first-class security primitives. `destructive`, `requiresConfirmation`, `maxOutputBytes` flags + an approval-gate wrapper. The differentiation example. |
+| [`migrate-from-vercel-ai`](examples/migrate-from-vercel-ai/) | Two migration paths for users on Vercel AI SDK: (a) wrap your existing model factories with `@llm-ports/adapter-vercel`, (b) replace `@ai-sdk/*` with native llm-ports adapters. Side-by-side before/after diffs. |
+
+Each example is runnable from the monorepo root:
+
+```bash
+pnpm --filter @llm-ports/example-<name> start
+```
+
+Set the relevant API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) before running. Each example's README documents which keys it needs.
+
+---
+
 ## Supported Use Cases
 
 Use `llm-ports` when you need:
