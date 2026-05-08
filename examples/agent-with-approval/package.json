@@ -1,0 +1,21 @@
+{
+  "name": "@llm-ports/example-agent-with-approval",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tool-use agent with security primitives: read-only tools execute freely, destructive tools are flagged, requiresConfirmation tools route through a human-approval gate before executing. Demonstrates the safety model that's first-class in llm-ports.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/core": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}
