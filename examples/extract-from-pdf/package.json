@@ -1,0 +1,22 @@
+{
+  "name": "@llm-ports/example-extract-from-pdf",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Document extraction example: text from a (mock) OCR'd invoice → fully-typed structured object via Zod schema. Demonstrates generateStructured, validation-retry-with-feedback, and the extractor capability factory.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/capabilities": "workspace:*",
+    "@llm-ports/core": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}
