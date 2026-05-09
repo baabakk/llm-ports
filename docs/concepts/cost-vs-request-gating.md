@@ -28,6 +28,8 @@ When request gating still makes sense:
 
 The actual USD cost computed from token usage and the model's pricing entry. Cache reads (Anthropic's prompt caching feature) priced at the discounted rate. Embedding models priced at `embeddingPer1M`.
 
+Cost is tracked at 10-decimal-place precision so per-call costs as low as `$1e-7` (e.g. a 5-token embedding at `$0.02/1M`) survive the gate without rounding to zero. If you cost-gate embedding workloads on a tight per-day cap, the smallest single-call cost the gate can resolve is `$0.0000001`.
+
 This is **what you actually care about** in production: how many dollars will this provider spend today.
 
 ## Combining both

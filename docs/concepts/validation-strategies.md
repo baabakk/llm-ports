@@ -131,7 +131,7 @@ Failure cases:
 - Output isn't valid JSON at all (model wrote prose, code fences, etc.)
 - Output is valid JSON but doesn't match the schema (wrong field names, types, enum values)
 - Output is partial (model truncated due to `max_tokens`)
-- Output is empty (provider returned no completion). Common with reasoning models when `maxOutputTokens` is set too low — the model spends the whole budget on internal chain-of-thought and produces zero visible tokens. The OpenAI adapter detects this and auto-retries with a 10× headroom multiplier (see the [OpenAI adapter docs](/llm-ports/adapters/openai)). The Vercel adapter currently surfaces this as a `SyntaxError: Unexpected end of JSON input` (tracked at [#5](https://github.com/baabakk/llm-ports/issues/5)).
+- Output is empty (provider returned no completion). Common with reasoning models when `maxOutputTokens` is set too low — the model spends the whole budget on internal chain-of-thought and produces zero visible tokens. The OpenAI adapter detects this and auto-retries with a 10× headroom multiplier (see the [OpenAI adapter docs](/adapters/openai)). The Vercel adapter currently surfaces this as a `SyntaxError: Unexpected end of JSON input` (tracked at [#5](https://github.com/baabakk/llm-ports/issues/5)).
 
 The retry-with-feedback prompt names the specific issues so the model can target the fix.
 

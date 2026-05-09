@@ -127,5 +127,9 @@ All three retry kinds are silent today — see [#3 — no `onRetry` observabilit
 
 ## Reading next
 
+- [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper
+- [Content blocks reference](/concepts/content-blocks) — `tool_use` and `tool_result` block shapes
 - [Multi-provider routing](/guides/multi-provider) — wire multiple compat providers as separate aliases
 - [OpenAI pricing](https://openai.com/api/pricing/) — verify bundled table
+
+> **Compat-provider test coverage.** Compat providers (Cerebras, Groq, Together AI, Fireworks AI, DeepInfra, Perplexity, Azure OpenAI, LiteLLM proxy) are exercised today by basic `generateText` live tests. Structured-output, streaming, agent, and embeddings coverage for compat providers is one-test-deep — e.g. a regression in Cerebras's `message.reasoning` parsing wouldn't be caught by the existing live suite. Tracked at [TD-LLMP-02](https://github.com/baabakk/llm-ports/blob/main/TECH-DEBT.md#td-llmp-02); full compat-provider matrix coverage ships with v0.2.

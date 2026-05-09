@@ -19,7 +19,7 @@ For other providers:
 
 | Provider | Install |
 |----------|---------|
-| OpenAI (or 10+ compat: Groq, Together, Fireworks, ...) | `pnpm add @llm-ports/adapter-openai openai` |
+| OpenAI (or 10+ compat: Groq, Together, Fireworks, Cerebras, ...) | `pnpm add @llm-ports/adapter-openai openai` |
 | Ollama (local LLMs) | `pnpm add @llm-ports/adapter-ollama ollama` |
 | Vercel AI SDK migration | `pnpm add @llm-ports/adapter-vercel ai @ai-sdk/anthropic` |
 
@@ -38,7 +38,7 @@ LLM_TASK_ROUTE_TRIAGE=fast,smart
 LLM_TASK_ROUTE_DRAFT=smart
 ```
 
-> **What "first eligible wins" means in v0.1.** When a call comes in, the registry walks the chain in order and picks the first provider that's within its budget cap. If a provider is over budget, the registry walks past it. **The registry does not currently retry on the next provider when a runtime error fires** (network timeout, provider 5xx, 429); that ships in v0.2. See the [multi-provider guide](/llm-ports/guides/multi-provider) for full details.
+> **What "first eligible wins" means in v0.1.** When a call comes in, the registry walks the chain in order and picks the first provider that's within its budget cap. If a provider is over budget, the registry walks past it. **The registry does not currently retry on the next provider when a runtime error fires** (network timeout, provider 5xx, 429); that ships in v0.2. See the [multi-provider guide](/guides/multi-provider) for full details.
 
 Gating options:
 

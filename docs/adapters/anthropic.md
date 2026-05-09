@@ -88,5 +88,7 @@ createAnthropicAdapter({
 
 ## Reading next
 
+- [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper
+- [Content blocks reference](/concepts/content-blocks) — `tool_use` and `tool_result` block shapes
 - [Anthropic prompt caching docs](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) — how cache reads are billed
 - [Pricing source](https://www.anthropic.com/pricing) — verify the bundled table is current

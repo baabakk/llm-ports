@@ -121,5 +121,7 @@ This makes cost gating meaningful for local models. Otherwise leave the defaults
 
 ## Reading next
 
+- [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper
+- [Content blocks reference](/concepts/content-blocks) — `tool_use` and `tool_result` block shapes
 - [Local-to-cloud flip →](/guides/local-to-cloud)
 - [Ollama documentation](https://github.com/ollama/ollama)
