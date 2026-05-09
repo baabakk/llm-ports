@@ -162,6 +162,8 @@ const result = await llm.runAgent({
 
 The adapter handles the per-provider translation: Anthropic's `tool_use` blocks, OpenAI's `tool_calls`, Ollama's tool format. You write the `ToolDefinition` once.
 
+> **v0.1 caveat: tool parameter schemas.** The Zod schema in `inputSchema` validates the `execute` function's input at runtime, but in v0.1 the OpenAI and Anthropic adapters convert it to a generic `{ type: "object", properties: {} }` shape before sending the tool definition to the model. The model has to read parameter names from your `description` string until full Zod-to-JSON-Schema conversion lands. **Practical fix during migration**: name parameters explicitly in the tool description, e.g. `description: "Search the inbox by query. Required parameter: \`query\` (string)."`. Tracked at [#1](https://github.com/baabakk/llm-ports/issues/1).
+
 [Tool-use security primitives →](/guides/security)
 
 ## Reading next

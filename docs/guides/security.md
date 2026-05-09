@@ -36,6 +36,8 @@ const sendReply: ToolDefinition = {
 };
 ```
 
+> **v0.1 caveat: tool parameter schemas.** The Zod schema in `inputSchema` validates the `execute` function's input at runtime, but in v0.1 the OpenAI and Anthropic adapters convert it to a generic `{ type: "object", properties: {} }` shape before sending the tool definition to the model. **Workaround**: name parameters explicitly in the `description` string, e.g. `"Send a reply. Required: \`threadId\` (string), \`body\` (string)."` — model relies on the description for parameter names until [#1](https://github.com/baabakk/llm-ports/issues/1) lands. The security flags below are unaffected.
+
 Three flags do three things:
 
 - **`destructive: true`** — declarative metadata. Tells observability tools, audit logs, and human reviewers that this tool mutates state. Doesn't change runtime behavior by itself.

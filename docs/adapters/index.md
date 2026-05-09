@@ -20,6 +20,7 @@ Four adapters ship with v0.1, covering 14+ providers in total. Plus a 5th privat
 | Streaming text | ✓ | ✓ | ✓ | ✓ |
 | Streaming structured (partial JSON) | ✓ | ✓ | ✓ | ✓ |
 | Tool use | ✓ | ✓ | ✓\* | partial (single-turn in v0.1) |
+| Tool parameter schemas advertised to model | stub\*\* | stub\*\* | stub\*\* | via Vercel SDK |
 | Vision input (base64) | ✓ | ✓ (data URI) | ✓\* | partial (string conversion) |
 | Vision input (URL) | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | partial |
 | Audio input | ✗ (Anthropic chat) | ✓ (wav, mp3) | ✗ | ✗ |
@@ -31,8 +32,13 @@ Four adapters ship with v0.1, covering 14+ providers in total. Plus a 5th privat
 | Cost tracking (pricing tables) | ✓ | ✓ | ✓ (zero-cost default) | ✓ (user-supplied pricing) |
 | `baseURL` override (compat providers) | ✓ | ✓ (primary feature) | n/a (always local) | n/a |
 
+\*\* **Tool parameter schemas advertised to model — "stub" means**: in v0.1 the Anthropic, OpenAI, and Ollama adapters convert your Zod `inputSchema` to a generic `{ type: "object", properties: {} }` shape before sending the tool definition to the model. The Zod schema still validates `execute`'s input at runtime; only the model-facing tool advertisement loses structural information. Until [#1](https://github.com/baabakk/llm-ports/issues/1) lands, name parameters explicitly in the tool's `description` string. The Vercel adapter uses the Vercel SDK's own schema handling, which preserves the schema shape.
+
 ## Gaps to address in v0.2
 
+- **All adapters**: full Zod-to-JSON-Schema conversion for tool parameters ([#1](https://github.com/baabakk/llm-ports/issues/1)).
+- **All adapters**: `onRetry` observability hook for capability-rejection / transient-401 / reasoning-starved retries ([#3](https://github.com/baabakk/llm-ports/issues/3)).
+- **Vercel**: reasoning-model headroom multiplier ([#4](https://github.com/baabakk/llm-ports/issues/4)) and typed `EmptyResponseError` ([#5](https://github.com/baabakk/llm-ports/issues/5)).
 - **Ollama**: pre-emptive `streamStructured` handling once Ollama's API exposes partial JSON natively.
 - **OpenAI**: prompt caching first-class once OpenAI ships its caching API surface.
 - **Anthropic**: embeddings, if and when Anthropic ships an embedding model.
