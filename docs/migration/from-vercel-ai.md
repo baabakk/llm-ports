@@ -141,7 +141,7 @@ You can drop `@ai-sdk/anthropic` and the `ai` package once all call sites are mi
 | `streamText({ ... })` | `for await (const chunk of llm.streamText(...))` |
 | `streamObject({ ... })` | `for await (const partial of llm.streamStructured(...))` |
 | `tool({ description, inputSchema, execute })` | `ToolDefinition` with same shape (plus `destructive`, `requiresConfirmation`, `maxOutputBytes`) |
-| Calling tools via `generateText({ tools, maxSteps })` | `llm.runAgent({ tools, maxSteps, instructions, messages })` |
+| Calling tools via `generateText({ tools, maxSteps })` | `llm.runAgent({ tools, maxSteps, instructions, messages })` — see [v0.1 caveat below](#v01-caveat-tool-parameter-schemas) |
 | `embed({ model, value })` | `embedPort.generateEmbedding({ taskType, input })` |
 | `embedMany({ model, values })` | `embedPort.generateEmbeddings({ taskType, inputs })` |
 
@@ -152,6 +152,33 @@ Argument renames you'll hit:
 - `messages: [{ role, content }]` → same shape, but content uses our `MessageContent` type
 - `usage.promptTokens` → `usage.inputTokens`; `usage.completionTokens` → `usage.outputTokens`
 - `result.response.modelId` → `result.modelId` (already at top level)
+
+## v0.1 caveat: tool parameter schemas
+
+When you migrate `tool({ inputSchema: z.object({...}) })` to `ToolDefinition`, your Zod schemas pass through unchanged at the call-site level — `runAgent` accepts them and `execute` receives validated typed input. **But in v0.1, the OpenAI and Anthropic adapters convert the Zod schema to an empty `{ type: "object", properties: {} }` shape before sending it to the model.** The model has to guess parameter names from your tool's `description` string until full Zod-to-JSON-Schema conversion lands.
+
+Tracked: [#1 — runAgent: tool input schemas are passed as `{}` to the model](https://github.com/baabakk/llm-ports/issues/1).
+
+**Migration impact**: when you port your tool definitions, **explicitly name the parameters in the description string**. Example:
+
+```ts
+// Before migrating
+tool({
+  description: "Look up an order",
+  inputSchema: z.object({ orderId: z.string() }),
+  execute: async ({ orderId }) => ...,
+})
+
+// After migrating — note the description names the parameter
+{
+  name: "lookupOrder",
+  description: "Look up an order by ID. Required parameter: `orderId` (string, the order ID like 'ORD-1234').",
+  inputSchema: z.object({ orderId: z.string() }),
+  execute: async ({ orderId }) => ...,
+}
+```
+
+The Zod schema still validates `execute`'s input at runtime (so your `execute` function gets a typed `orderId: string`); only the model-facing tool advertisement loses the structural information. Once #1 lands, the description-based workaround becomes optional.
 
 ## Streaming differences
 

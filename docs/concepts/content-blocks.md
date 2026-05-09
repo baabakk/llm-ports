@@ -125,7 +125,7 @@ conversation.push({
 const next = await llm.runAgent({ ... });
 ```
 
-In practice, `runAgent` (and the upcoming `createAgent` capability) handles this loop for you. You just declare the tools and the agent executes them.
+In practice, `runAgent` on the LLM port handles this loop for you in v0.1: declare the tools, the agent calls them, the multi-turn message accumulation happens inside the adapter. A higher-level `createAgent` capability factory (matching the ergonomics of `createClassifier` / `createDrafter`) ships in v0.2 — until then, use `llm.runAgent({ ... })` directly.
 
 ## Adapter normalization
 

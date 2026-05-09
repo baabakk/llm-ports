@@ -42,29 +42,53 @@ Three flags do three things:
 - **`requiresConfirmation: true`** — when the agent capability wrapper sees this, it pauses the loop and calls your `onToolCall` hook. Your hook is responsible for getting user approval (Telegram, web UI, CLI prompt, etc.) and either continuing or aborting.
 - **`maxOutputBytes: N`** — adapters truncate the tool's return value to N bytes before re-injecting into the conversation. Caps context flood from a tool that returns 50 MB unexpectedly.
 
-## The approval hook
+## The approval pattern
 
-When `requiresConfirmation: true`, the agent loop calls your hook before executing:
+When a tool is marked `requiresConfirmation: true`, the canonical pattern is to wrap the tools dictionary in an approval gate before handing it to `runAgent`. The wrapper inspects each tool's flags, and for tools requiring confirmation, intercepts the `execute` call to ask the human first.
 
 ```ts
-import { createAgent } from "@llm-ports/capabilities"; // v0.2
+import { type ToolDefinition } from "@llm-ports/core";
 
-const agent = createAgent({
-  port: llm,
-  instructions: "You are an email assistant.",
-  tools: { sendReply, searchEmails },
-  finalOutputSchema: ResponseSchema,
-  maxSteps: 10,
-  onToolCall: async (call) => {
-    if (call.tool.requiresConfirmation) {
-      const approved = await yourApprovalChannel(`Run ${call.name}?\n\nArgs: ${JSON.stringify(call.input)}`);
-      if (!approved) {
-        throw new Error("User declined");
-      }
+function wrapWithApprovalGate(
+  tools: Record<string, ToolDefinition>,
+  approve: (req: { name: string; input: unknown }) => Promise<boolean>,
+): Record<string, ToolDefinition> {
+  const out: Record<string, ToolDefinition> = {};
+  for (const [name, def] of Object.entries(tools)) {
+    if (def.requiresConfirmation !== true) {
+      out[name] = def;
+      continue;
     }
-  },
+    out[name] = {
+      ...def,
+      execute: async (input) => {
+        const approved = await approve({ name, input });
+        if (!approved) return { error: `Action ${name} denied by operator` };
+        return await def.execute(input as never);
+      },
+    };
+  }
+  return out;
+}
+
+const wrappedTools = wrapWithApprovalGate(
+  { sendReply, searchEmails },
+  async ({ name, input }) =>
+    yourApprovalChannel(`Run ${name}?\n\nArgs: ${JSON.stringify(input)}`),
+);
+
+const result = await llm.runAgent({
+  taskType: "email-assistant",
+  instructions: "You are an email assistant.",
+  messages,
+  tools: wrappedTools,
+  maxSteps: 10,
 });
 ```
+
+You can run this end-to-end via the [`agent-with-approval` example](https://github.com/baabakk/llm-ports/tree/main/examples/agent-with-approval), which ships the same wrapper plus three scenarios (read-only / destructive auto-approved / destructive requires-confirmation).
+
+> **v0.1 → v0.2 ergonomics.** The wrapper above is what you write today. v0.2 ships a higher-level `createAgent` capability factory that bundles the approval-gate wrapping + the `tools`/`messages`/`maxSteps` plumbing into one configure-once factory (matching the `createClassifier` / `createDrafter` pattern). The security model is identical between the two APIs; only the call-site shape changes.
 
 Your `yourApprovalChannel` is a userland implementation. Examples in production:
 
