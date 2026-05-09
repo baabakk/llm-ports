@@ -36,6 +36,8 @@ Four adapters ship with v0.1, covering 14+ providers in total. Plus a 5th privat
 
 ## Gaps to address in v0.2
 
+The full inventory — including workarounds and tracking — is on the [v0.1 status page](/v0-1-status).
+
 - **All adapters**: full Zod-to-JSON-Schema conversion for tool parameters ([#1](https://github.com/baabakk/llm-ports/issues/1)).
 - **All adapters**: `onRetry` observability hook for capability-rejection / transient-401 / reasoning-starved retries ([#3](https://github.com/baabakk/llm-ports/issues/3)).
 - **Vercel**: reasoning-model headroom multiplier ([#4](https://github.com/baabakk/llm-ports/issues/4)) and typed `EmptyResponseError` ([#5](https://github.com/baabakk/llm-ports/issues/5)).

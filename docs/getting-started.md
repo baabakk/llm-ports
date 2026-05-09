@@ -38,7 +38,7 @@ LLM_TASK_ROUTE_TRIAGE=fast,smart
 LLM_TASK_ROUTE_DRAFT=smart
 ```
 
-> **What "first eligible wins" means in v0.1.** When a call comes in, the registry walks the chain in order and picks the first provider that's within its budget cap. If a provider is over budget, the registry walks past it. **The registry does not currently retry on the next provider when a runtime error fires** (network timeout, provider 5xx, 429); that ships in v0.2. See the [multi-provider guide](/guides/multi-provider) for full details.
+> **What "first eligible wins" means in v0.1.** When a call comes in, the registry walks the chain in order and picks the first provider that's within its budget cap. If a provider is over budget, the registry walks past it. **The registry does not currently retry on the next provider when a runtime error fires** (network timeout, provider 5xx, 429); that ships in v0.2. See the [multi-provider guide](/guides/multi-provider) for full details, or the [v0.1 status page](/v0-1-status) for the full inventory of v0.1 limitations.
 
 Gating options:
 

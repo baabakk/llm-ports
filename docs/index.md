@@ -69,7 +69,7 @@ const result = await llm.generateText({
 });
 ```
 
-The registry picks the model per task, enforces the cost cap, walks to the next provider when a budget is exhausted, and reports per-call latency and USD cost. (In v0.1, fallback walks the chain on **budget gating** today — runtime-error fallback ships in v0.2; see the [multi-provider guide](/guides/multi-provider).)
+The registry picks the model per task, enforces the cost cap, walks to the next provider when a budget is exhausted, and reports per-call latency and USD cost. (In v0.1, fallback walks the chain on **budget gating** today — runtime-error fallback ships in v0.2; see the [multi-provider guide](/guides/multi-provider), or the [v0.1 status page](/v0-1-status) for the full inventory of what's stable and what's not.)
 
 ## How it relates to other tools
 

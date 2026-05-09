@@ -37,6 +37,7 @@ export default defineConfig({
       {
         text: "v0.1",
         items: [
+          { text: "v0.1 status (what's stable, what's not)", link: "/v0-1-status" },
           { text: "Changelog", link: "https://github.com/baabakk/llm-ports/blob/main/CHANGELOG.md" },
           { text: "Implementation plan", link: "https://github.com/baabakk/llm-ports/blob/main/PLAN.md" },
         ],
@@ -51,6 +52,7 @@ export default defineConfig({
             { text: "What is llm-ports?", link: "/" },
             { text: "Getting Started", link: "/getting-started" },
             { text: "Why this exists", link: "/why" },
+            { text: "v0.1 status", link: "/v0-1-status" },
           ],
         },
         {

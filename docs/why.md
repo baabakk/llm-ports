@@ -36,6 +36,8 @@ Nothing above that, nothing below it.
 
 The track record above is for the extracted core, not the extensions. Credibility is bidirectional: overclaiming "all of v0.1 is production-tested" gets refuted by anyone reading the BEPA git log; underclaiming undersells the part that genuinely is. The above is the precise truth.
 
+For the per-surface picture — what's stable, what's still being hardened, what ships in v0.2 — see the [v0.1 status page](/v0-1-status). It's the canonical inventory.
+
 ## When NOT to use this
 
 - You have 1-2 LLM call sites and a single provider — the abstraction overhead isn't worth it.

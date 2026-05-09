@@ -289,7 +289,7 @@ Skip it if:
 
 `llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (200+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
 
-Known limitations (each tracked publicly — click the issue number for details, workarounds, and progress):
+Known limitations (each tracked publicly — click the issue number for details, workarounds, and progress; the full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status)):
 
 - **[#1](https://github.com/baabakk/llm-ports/issues/1) — `runAgent` tool input schemas are passed as `{}` to the model.** Zod-to-JSON-Schema conversion is a stub in the OpenAI and Anthropic adapters. Tool calls work, but model accuracy on parameter names depends more on the tool's `description` string than on the schema. Workaround: name parameters explicitly in `description`.
 - **[#3](https://github.com/baabakk/llm-ports/issues/3) — No `onRetry` observability hook.** The OpenAI adapter retries internally on capability-rejection, transient-401 burst protection, and reasoning-starved responses; consumers can't currently observe these. `onResult` on capability factories still fires per logical call.

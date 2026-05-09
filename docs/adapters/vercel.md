@@ -74,6 +74,8 @@ interface VercelAdapterOptions {
 
 ## Limitations to know
 
+These are also surfaced in the cross-package [v0.1 status page](/v0-1-status) along with their resolution paths.
+
 - **`runAgent` is single-turn in v0.1.** Multi-step tool use through Vercel's own agent loop will land in v0.2 once the API surface is locked down. For multi-turn agents today, prefer the direct adapters.
 - **Multimodal is text-only in v0.1.** Image and audio content blocks pass through as a stringified `[image content]` placeholder. Direct adapters support full multimodal.
 - **You bring your own pricing.** No bundled table. Look up the rates for your chosen models from the provider's pricing page.
