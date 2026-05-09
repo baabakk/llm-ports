@@ -104,6 +104,27 @@ Source: openai.com/pricing. Verified 2026-04-10.
 
 `text`, `image` (base64 → data URI; URL passthrough), `audio` (base64 wav/mp3 only), `tool_use`, `tool_result`. The adapter throws `ContentBlockUnsupportedError` for unsupported variants.
 
+## Reasoning models (auto-handled)
+
+Reasoning models — OpenAI's `o3`, `o3-mini`, `gpt-5-nano`, plus compat-provider reasoning models like Cerebras `gpt-oss-120b` — burn tokens on internal chain-of-thought before producing visible output. A naive call with `maxOutputTokens: 20` against `gpt-5-nano` reliably returns empty text and `finish_reason=length` because the budget got consumed by reasoning.
+
+**The OpenAI adapter handles this automatically**, with no configuration:
+
+1. **Detection.** The adapter inspects each response for two reasoning signals: `usage.completion_tokens_details.reasoning_tokens > 0` (OpenAI o-series, gpt-5-nano shape) or a populated `message.reasoning` string field (Cerebras gpt-oss shape). Either signal marks the model as a reasoning model in a process-wide cache.
+2. **Auto-retry on starvation.** If a response shows the starvation signature (`text === ""` + `finish_reason === "length"` + reasoning signal), the adapter retries the call once with `max_completion_tokens` multiplied by a headroom factor (default 10×). The retry typically succeeds with visible output.
+3. **Subsequent calls skip discovery.** Once a model is marked reasoning in the cache, every later call to that model uses the multiplier up front — no wasted first-attempt round-trip.
+
+The default headroom multiplier (10×) is calibrated against o-series reasoning intensity. You can override per-model via `pricingOverrides[modelId].capabilities.reasoningHeadroomMultiplier`.
+
+> **First-call cost.** The first call to an unknown reasoning model in a given process pays one wasted round-trip (the starved attempt) before the cache learns the constraint. Tracked at [TD-LLMP-03](https://github.com/baabakk/llm-ports/blob/main/TECH-DEBT.md#td-llmp-03); mitigation is to seed `pricingOverrides[modelId].capabilities.reasoningModel = true` if you already know the model is reasoning.
+
+The adapter also handles two other transient OpenAI quirks transparently:
+
+- **Capability rejection.** Some models reject custom `temperature`, `response_format: { type: "json_object" }`, or a separate `system` message. The adapter catches the `unsupported_value` error, learns the constraint, retries with the offending parameter dropped, and remembers it for the rest of the process.
+- **Project-key burst protection (sk-proj-* keys).** New OpenAI project keys briefly return 401 "Incorrect API key" under burst protection — even when the key is valid. The adapter retries with exponential backoff (default 500ms / 1500ms / 4500ms), but only if a prior request on the same client succeeded (so a real bad key doesn't get masked). Configurable via the `transientAuthRetries` and `transientAuthBackoffMs` options.
+
+All three retry kinds are silent today — see [#3 — no `onRetry` observability hook](https://github.com/baabakk/llm-ports/issues/3) for the v0.2 plan.
+
 ## Reading next
 
 - [Multi-provider routing](/guides/multi-provider) — wire multiple compat providers as separate aliases

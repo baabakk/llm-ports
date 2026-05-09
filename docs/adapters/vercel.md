@@ -77,6 +77,8 @@ interface VercelAdapterOptions {
 - **`runAgent` is single-turn in v0.1.** Multi-step tool use through Vercel's own agent loop will land in v0.2 once the API surface is locked down. For multi-turn agents today, prefer the direct adapters.
 - **Multimodal is text-only in v0.1.** Image and audio content blocks pass through as a stringified `[image content]` placeholder. Direct adapters support full multimodal.
 - **You bring your own pricing.** No bundled table. Look up the rates for your chosen models from the provider's pricing page.
+- **No reasoning-model handling.** The Vercel adapter does NOT apply the headroom multiplier the OpenAI adapter does. Calling against `gpt-5-nano`, `o3`, `o3-mini`, Cerebras `gpt-oss-120b`, or other reasoning models with a small `maxOutputTokens` (e.g. 20) reliably starves the model and returns empty text. **Workaround**: set `maxOutputTokens` 5-10× higher than your visible-output budget, or use `@llm-ports/adapter-openai` directly for reasoning models in v0.1. Tracked at [#4](https://github.com/baabakk/llm-ports/issues/4).
+- **`generateStructured` throws `SyntaxError` on empty model responses.** When a reasoning model returns an empty completion (above), the JSON parser throws `SyntaxError: Unexpected end of JSON input`, which currently wraps as a generic `ProviderUnavailableError`. v0.2 ships a more specific `EmptyResponseError` class. Tracked at [#5](https://github.com/baabakk/llm-ports/issues/5).
 
 ## Reading next
 
