@@ -32,14 +32,21 @@ The Anthropic + OpenAI + Ollama adapters and the capability factories are the BE
 
 These are tracked publicly. Each row links to the GitHub issue with the full reproduction, workaround, and resolution path. Filter on the [`known-limitation` label](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-limitation) for the live list.
 
-### Medium-impact (you'll hit them in normal use)
+### Recently closed in 0.1.0-alpha.1 (2026-05-11)
 
-| Limitation | Surface | Workaround | Tracked at |
-|---|---|---|---|
-| `runAgent` tool input schemas pass as `{}` to the model — Zod field types are dropped during conversion | OpenAI + Anthropic adapters | Name parameters explicitly in the tool's `description` string. The Zod schema still validates `execute`'s input at runtime. | [#1](https://github.com/baabakk/llm-ports/issues/1) |
-| No `onRetry` observability hook — capability rejections, transient 401s, and reasoning-starved retries are silent | OpenAI adapter primarily | Use capability `onResult` to detect retries indirectly via latency / `validationAttempts`. | [#3](https://github.com/baabakk/llm-ports/issues/3) |
-| Vercel adapter does not apply the reasoning-model headroom multiplier the OpenAI adapter does | Vercel adapter, with `gpt-5-nano` / o-series / Cerebras `gpt-oss-120b` | Set `maxOutputTokens` 5-10× higher than your visible-output budget, or use `@llm-ports/adapter-openai` directly for reasoning models. | [#4](https://github.com/baabakk/llm-ports/issues/4) |
-| Vercel adapter `generateStructured` throws `SyntaxError: Unexpected end of JSON input` on empty model responses (root cause: same as previous row) | Vercel adapter | Same as previous row. v0.2 ships an `EmptyResponseError` class for this case. | [#5](https://github.com/baabakk/llm-ports/issues/5) |
+These items shipped fixes in the `0.1.0-alpha.1` patch. Listed here for context — they no longer apply on `@llm-ports/*@alpha`.
+
+| Was | Closed by |
+|---|---|
+| `runAgent` tool input schemas passed as `{}` to the model | [#1](https://github.com/baabakk/llm-ports/issues/1) — both adapters now wire `zod-to-json-schema`. |
+| No `onRetry` observability hook | [#3](https://github.com/baabakk/llm-ports/issues/3) — `OnRetry` / `RetryEvent` exported from `@llm-ports/core`; threaded through all four adapter-openai retry sites plus the Vercel adapter's starvation + validation-feedback retries. |
+| Vercel adapter starved reasoning models | [#4](https://github.com/baabakk/llm-ports/issues/4) — Vercel adapter now retries once with a 4× budget when finish=length, empty text, and tokens were consumed. |
+| Vercel `generateStructured` threw `SyntaxError: Unexpected end of JSON input` on empty responses | [#5](https://github.com/baabakk/llm-ports/issues/5) — adapter now throws typed `EmptyResponseError` carrying `alias` + `modelId`. |
+| Capability factories' default `taskType` values were not documented | [#6](https://github.com/baabakk/llm-ports/issues/6) — getting-started shows the `LLM_TASK_ROUTE_GENERAL` catch-all; the [task-routing concept page](/concepts/task-routing) documents per-capability defaults. |
+
+### Medium-impact (still open in v0.1)
+
+No medium-impact items are currently open. Five medium-impact issues from `0.1.0-alpha.0` were resolved in `0.1.0-alpha.1` (see the table above). New ones will land here as users report them.
 
 ### Lower-impact (real but rarely surfaced)
 
@@ -61,9 +68,7 @@ Roadmap target — not promises, but the work queue. Order is approximate; what 
 
 | Surface | What ships |
 |---|---|
-| `runAgent` tool schemas | Full Zod-to-JSON-Schema conversion via `zod-to-json-schema` for OpenAI + Anthropic adapters. Closes #1. |
-| Adapter observability | `onRetry` hook on adapter options. Closes #3. |
-| Vercel adapter feature parity | Reasoning-model handling (closes #4) + `EmptyResponseError` class (closes #5) + multi-turn `runAgent`. |
+| Vercel adapter feature parity | Multi-turn `runAgent` through Vercel's own agent loop. (Reasoning-model handling and `EmptyResponseError` already landed in `0.1.0-alpha.1` — #4, #5.) |
 | Registry runtime fallback | Retry-on-`ProviderUnavailableError` with chain walk. Catch-class configurable. |
 | Compat-provider test depth | Structured / streaming / agent / embeddings live tests across Cerebras, Groq, Together, Fireworks. |
 | `createAgent` capability factory | Higher-level ergonomics matching `createClassifier` / `createDrafter`. Bundles `wrapWithApprovalGate` + tool/message plumbing into one configure-once factory. The v0.1 path (`runAgent` directly) keeps working. |
