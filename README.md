@@ -303,9 +303,7 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-Pre-release. Packages are not yet on the npm `latest` tag.
-
-When v0.1 is released:
+`llm-ports` is in alpha (v0.1.0-alpha.0). Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
 npm install @llm-ports/core
@@ -317,8 +315,11 @@ Install adapters as needed:
 npm install @llm-ports/adapter-anthropic
 npm install @llm-ports/adapter-openai
 npm install @llm-ports/adapter-ollama
+npm install @llm-ports/adapter-vercel
 npm install @llm-ports/capabilities
 ```
+
+(All six packages are scoped under `@llm-ports`. They're versioned together via changesets.)
 
 Peer dependency: `zod >=3.24.0 <5`. Bring your own SDKs (`@anthropic-ai/sdk`, `openai`, `ollama`, `ai`).
 
