@@ -21,6 +21,8 @@
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm build && changeset publish",
+    "release:alpha": "pnpm release && node scripts/retag-alpha.mjs",
+    "retag:alpha": "node scripts/retag-alpha.mjs",
     "clean": "pnpm -r exec rm -rf dist .turbo node_modules/.cache",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
