@@ -60,6 +60,17 @@ No medium-impact items are currently open. Five medium-impact issues from `0.1.0
 | Vercel adapter has no bundled pricing table | Vercel adapter | Bring your own `pricing` map at `createVercelAdapter({ pricing: { ... } })`. The OpenAI / Anthropic / Ollama adapters ship pricing tables. |
 | Some compat-provider models require a `pricingOverrides` entry | Registry pricing-validation | Cerebras `gpt-oss-120b`, Groq's Llama variants, etc. need an explicit pricing override before the registry will admit them. |
 
+### Adapter-specific model quirks (observed 2026-05-12 in live alpha bake)
+
+These aren't adapter bugs — they're model-behavior quirks worth knowing if you target one model in particular. The typed error surface catches them; the call site decides whether to retry, route to a fallback, or surface to the user.
+
+| Model | Quirk | Where it surfaces | Workaround |
+|---|---|---|---|
+| `claude-haiku-4-5` | Occasionally omits a `z.string().min(N)`-constrained field entirely on first attempt. The model produces JSON missing the field rather than producing a too-short string. Retry-with-feedback sometimes recovers but not always when the prompt is generic. | `generateStructured` with constrained string fields | (a) Add explicit "ALWAYS include the `<field>` field" instruction in the prompt; (b) loosen the `.min(N)` constraint if the validator was being pedantic anyway; (c) catch `ValidationError` and route to a fallback model with `LLM_TASK_ROUTE_X=claude-haiku,gpt-4o-mini`. The typed-error surface works as designed — this is information, not failure. |
+| `gpt-4o-mini` | Occasionally returns extra fields not in the Zod schema. Zod ignores them by default. | `generateStructured` against a Zod object without `.strict()` | Add `.strict()` to the Zod object if you care about exact-shape, OR ignore (default Zod behavior is permissive). |
+
+These are observations, not regressions. The plumbing handles both cases predictably; only the user-facing prompt strategy needs awareness.
+
 ---
 
 ## What v0.2 adds

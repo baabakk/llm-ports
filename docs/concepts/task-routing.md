@@ -152,6 +152,27 @@ registry.listTasks();
 
 Useful for admin UIs, runtime debugging, "show me where this task would route" features.
 
+## Alias naming: env-var → lowercase, underscores become dashes
+
+The bit after `LLM_PROVIDER_` in the env-var name is your **alias**, with two transformations applied:
+
+1. lowercased
+2. underscores replaced with dashes
+
+```bash
+# env config
+LLM_PROVIDER_FAST_CACHE=anthropic|claude-haiku-4-5|cost:5/day
+
+# the registered alias is `fast-cache`, NOT `fast_cache`
+LLM_TASK_ROUTE_TRIAGE=fast-cache,smart
+```
+
+A common first-call surprise: writing `LLM_TASK_ROUTE_TRIAGE=fast_cache` (matching the env-var spelling) fails with `ConfigError: Task "triage" references provider "fast_cache" which is not configured`. Use the dashed form in task routes.
+
+If you prefer no transformation in your routes, just name your env vars without underscores: `LLM_PROVIDER_FASTCACHE` → alias `fastcache`.
+
+The same rule applies to task names: `LLM_TASK_ROUTE_EMAIL_DRAFT` becomes task `email-draft`. When calling `llm.generateText({ taskType: "email-draft", ... })`, use the dashed form. Internal consistency: the registry stores aliases and task names in lowercased-dashed form regardless of how they appear in the env.
+
 ## Reading next
 
 - [Cost vs request gating →](/concepts/cost-vs-request-gating) — how gating decisions are made
