@@ -9,9 +9,20 @@
     "@llm-ports/adapter-vercel": "0.0.0",
     "@llm-ports/benchmarks": "0.0.0",
     "@llm-ports/capabilities": "0.0.0",
-    "@llm-ports/core": "0.0.0"
+    "@llm-ports/core": "0.0.0",
+    "@llm-ports/example-agent-with-approval": "0.0.0",
+    "@llm-ports/example-basic": "0.0.0",
+    "@llm-ports/example-email-triage": "0.0.0",
+    "@llm-ports/example-extract-from-pdf": "0.0.0",
+    "@llm-ports/example-migrate-from-vercel-ai": "0.0.0",
+    "@llm-ports/example-multi-provider": "0.0.0",
+    "@llm-ports/example-streaming-chat": "0.0.0"
   },
   "changesets": [
-    "initial-alpha"
+    "capability-task-types-docs",
+    "initial-alpha",
+    "on-retry-hook",
+    "tool-schema-conversion",
+    "vercel-reasoning-and-empty"
   ]
 }
