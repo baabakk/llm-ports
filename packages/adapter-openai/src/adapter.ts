@@ -12,6 +12,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   computeChatCost,
   computeEmbeddingCost,
+  EmptyResponseError,
   failValidation,
   ProviderUnavailableError,
   type AgentResult,
@@ -293,6 +294,18 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         lastUsage = parseUsage(r);
         lastModelId = r.model ?? modelId;
         const raw = r.choices[0]?.message.content ?? "";
+        // If the response is empty after the executeChatRequest starvation
+        // retry, the model produced no JSON to parse. Throw a typed
+        // EmptyResponseError so the registry can route to a fallback model
+        // instead of seeing JSON.parse("") raise SyntaxError wrapped as
+        // ProviderUnavailableError. Mirrors @llm-ports/adapter-vercel.
+        if (raw.trim().length === 0) {
+          throw new EmptyResponseError(
+            alias,
+            lastModelId,
+            "generateStructured needs a JSON body to parse. Increase maxOutputTokens or route to a fallback model.",
+          );
+        }
         const parsed = options.schema.safeParse(extractJSON(raw));
         if (parsed.success) {
           return {
@@ -1041,6 +1054,9 @@ function wrapError(alias: string, err: unknown): Error {
   // ValidationError is what failValidation produces; the caller wants to see
   // it as-is, not wrapped as a provider failure.
   if (err instanceof ProviderUnavailableError) {
+    return err;
+  }
+  if (err instanceof EmptyResponseError) {
     return err;
   }
   if (err instanceof Error && err.name === "ValidationError") {

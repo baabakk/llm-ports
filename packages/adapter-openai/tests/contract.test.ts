@@ -93,5 +93,14 @@ runContractTests("openai", () => {
     setupNetworkError(error) {
       mockChatCompletionsCreate.mockRejectedValueOnce(error);
     },
+
+    createPortWithOnRetry(hook) {
+      // Fresh adapter so the hook is wired at construction time.
+      const adapterWithHook = createOpenAIAdapter({
+        apiKey: "test-key",
+        onRetry: hook,
+      });
+      return adapterWithHook.createLLMPort(MODEL_ID, ALIAS);
+    },
   };
 });
