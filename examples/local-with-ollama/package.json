@@ -1,0 +1,23 @@
+{
+  "name": "@llm-ports/example-local-with-ollama",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Local-first LLM dev loop with @llm-ports/adapter-ollama. Health check, auto-pull, generateText + generateStructured locally. Includes an optional cloud fallback chain that flips on one env var so the same code runs offline (Ollama) and online (Anthropic).",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@llm-ports/adapter-anthropic": "workspace:*",
+    "@llm-ports/adapter-ollama": "workspace:*",
+    "@llm-ports/core": "workspace:*",
+    "ollama": "^0.5.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}
