@@ -16,12 +16,15 @@
     "@llm-ports/example-extract-from-pdf": "0.0.0",
     "@llm-ports/example-migrate-from-vercel-ai": "0.0.0",
     "@llm-ports/example-multi-provider": "0.0.0",
-    "@llm-ports/example-streaming-chat": "0.0.0"
+    "@llm-ports/example-streaming-chat": "0.0.0",
+    "@llm-ports/example-local-with-ollama": "0.1.0-alpha.1",
+    "@llm-ports/example-with-onretry": "0.1.0-alpha.1"
   },
   "changesets": [
     "capability-task-types-docs",
     "initial-alpha",
     "on-retry-hook",
+    "openai-empty-response-parity",
     "tool-schema-conversion",
     "vercel-reasoning-and-empty"
   ]
