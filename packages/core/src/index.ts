@@ -106,7 +106,11 @@ export {
   BudgetExceededError,
   ConfigError,
   ContentBlockUnsupportedError,
+  EmptyResponseError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
   ValidationError,
 } from "./errors.js";
+
+// ─── Retry observability ─────────────────────────────────────────────
+export type { OnRetry, RetryEvent, RetryReason } from "./retry.js";

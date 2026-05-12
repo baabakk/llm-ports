@@ -27,6 +27,8 @@ import {
   type GenerateTextResult,
   type LLMPort,
   type ModelPricing,
+  type OnRetry,
+  type RetryEvent,
   type RunAgentOptions,
   type StreamStructuredOptions,
   type StreamTextOptions,
@@ -104,6 +106,16 @@ export interface OpenAIAdapterOptions {
    * 500ms, 1500ms, 4500ms... Tests inject `() => 0` to skip the wait.
    */
   transientAuthBackoffMs?: (attempt: number) => number;
+  /**
+   * Observability hook fired whenever the adapter retries an in-flight
+   * request for a known transient reason. Sync or async; called
+   * fire-and-forget. Throwing from the hook does NOT cancel the retry.
+   * Fires for: transient-auth (project-key burst-protection 401),
+   * capability-fallback (temperature/json_object/system-message rejection),
+   * reasoning-starvation (model used full budget on hidden reasoning),
+   * validation-feedback (structured output failed schema; retry with feedback).
+   */
+  onRetry?: OnRetry;
 }
 
 // ─── Internal context ────────────────────────────────────────────────
@@ -121,6 +133,23 @@ interface AdapterContext {
   hasSucceeded: { value: boolean };
   transientAuthRetries: number;
   transientAuthBackoffMs: (attempt: number) => number;
+  /** Observability hook for transient retries. Optional; no-op when unset. */
+  onRetry?: OnRetry;
+}
+
+/** Fire the onRetry hook without awaiting and without letting hook errors propagate. */
+function emitRetry(ctx: AdapterContext, event: RetryEvent): void {
+  if (!ctx.onRetry) return;
+  try {
+    const result = ctx.onRetry(event);
+    if (result && typeof (result as Promise<void>).then === "function") {
+      (result as Promise<void>).catch(() => {
+        /* swallow — hook is observability only */
+      });
+    }
+  } catch {
+    /* swallow — hook is observability only */
+  }
 }
 
 function makeClient(opts: OpenAIAdapterOptions): OpenAI {
@@ -174,6 +203,7 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     transientAuthRetries: opts.transientAuthRetries ?? 2,
     transientAuthBackoffMs:
       opts.transientAuthBackoffMs ?? ((attempt) => 500 * Math.pow(3, attempt)),
+    ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
   return {
@@ -283,6 +313,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
             .join("\n");
           correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
+          emitRetry(ctx, {
+            reason: "validation-feedback",
+            attempt: attempts - 1,
+            modelId: lastModelId,
+            providerAlias: alias,
+            delayMs: 0,
+            cause: parsed.error,
+          });
           continue;
         }
         failValidation(parsed.error.issues, attempts);
@@ -474,11 +512,15 @@ function createEmbeddings(
     async generateEmbedding(options: EmbeddingOptions): Promise<EmbeddingResult> {
       const start = Date.now();
       try {
-        const response = await withTransientAuthRetry(ctx, alias, () =>
-          ctx.client.embeddings.create({
-            model: modelId,
-            input: options.input,
-          }),
+        const response = await withTransientAuthRetry(
+          ctx,
+          alias,
+          () =>
+            ctx.client.embeddings.create({
+              model: modelId,
+              input: options.input,
+            }),
+          modelId,
         );
         const inputTokens = response.usage?.prompt_tokens ?? 0;
         const vector = response.data[0]?.embedding ?? [];
@@ -499,11 +541,15 @@ function createEmbeddings(
     async generateEmbeddings(options: BatchEmbeddingOptions): Promise<BatchEmbeddingResult> {
       const start = Date.now();
       try {
-        const response = await withTransientAuthRetry(ctx, alias, () =>
-          ctx.client.embeddings.create({
-            model: modelId,
-            input: options.inputs,
-          }),
+        const response = await withTransientAuthRetry(
+          ctx,
+          alias,
+          () =>
+            ctx.client.embeddings.create({
+              model: modelId,
+              input: options.inputs,
+            }),
+          modelId,
         );
         const inputTokens = response.usage?.prompt_tokens ?? 0;
         const vectors = response.data.map((d) => d.embedding);
@@ -760,8 +806,9 @@ function sleep(ms: number): Promise<void> {
  */
 async function withTransientAuthRetry<T>(
   ctx: AdapterContext,
-  _alias: string,
+  alias: string,
   fn: () => Promise<T>,
+  modelId: string,
 ): Promise<T> {
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition -- intentional retry loop; exits via return/throw/break
@@ -775,7 +822,16 @@ async function withTransientAuthRetry<T>(
         isTransientAuthError(err, ctx) &&
         attempt < ctx.transientAuthRetries
       ) {
-        await sleep(ctx.transientAuthBackoffMs(attempt));
+        const delayMs = ctx.transientAuthBackoffMs(attempt);
+        emitRetry(ctx, {
+          reason: "transient-auth",
+          attempt,
+          modelId,
+          providerAlias: alias,
+          delayMs,
+          cause: err,
+        });
+        await sleep(delayMs);
         attempt++;
         continue;
       }
@@ -825,6 +881,13 @@ async function executeChatRequest(
       // multiplier applied to max_completion_tokens. This is the recovery path
       // for first-call interactions with unknown reasoning models.
       if (reasoningStarvedResponse(response, req)) {
+        emitRetry(ctx, {
+          reason: "reasoning-starvation",
+          attempt: 0,
+          modelId: req.modelId,
+          providerAlias: alias,
+          delayMs: 0,
+        });
         try {
           const retried = await attempt();
           ctx.hasSucceeded.value = true;
@@ -842,11 +905,28 @@ async function executeChatRequest(
         transientRetries < ctx.transientAuthRetries
       ) {
         // Exponential backoff: 500ms, 1500ms, 4500ms... up to maxRetries
-        await sleep(ctx.transientAuthBackoffMs(transientRetries));
+        const delayMs = ctx.transientAuthBackoffMs(transientRetries);
+        emitRetry(ctx, {
+          reason: "transient-auth",
+          attempt: transientRetries,
+          modelId: req.modelId,
+          providerAlias: alias,
+          delayMs,
+          cause: err,
+        });
+        await sleep(delayMs);
         transientRetries++;
         continue;
       }
       if (!triedCapabilityFallback && learnConstraintsFromError(err, req)) {
+        emitRetry(ctx, {
+          reason: "capability-fallback",
+          attempt: 0,
+          modelId: req.modelId,
+          providerAlias: alias,
+          delayMs: 0,
+          cause: err,
+        });
         triedCapabilityFallback = true;
         continue;
       }
@@ -890,11 +970,28 @@ async function executeChatStream(
         isTransientAuthError(err, ctx) &&
         transientRetries < ctx.transientAuthRetries
       ) {
-        await sleep(ctx.transientAuthBackoffMs(transientRetries));
+        const delayMs = ctx.transientAuthBackoffMs(transientRetries);
+        emitRetry(ctx, {
+          reason: "transient-auth",
+          attempt: transientRetries,
+          modelId: streamReq.modelId,
+          providerAlias: alias,
+          delayMs,
+          cause: err,
+        });
+        await sleep(delayMs);
         transientRetries++;
         continue;
       }
       if (!triedCapabilityFallback && learnConstraintsFromError(err, streamReq)) {
+        emitRetry(ctx, {
+          reason: "capability-fallback",
+          attempt: 0,
+          modelId: streamReq.modelId,
+          providerAlias: alias,
+          delayMs: 0,
+          cause: err,
+        });
         triedCapabilityFallback = true;
         continue;
       }

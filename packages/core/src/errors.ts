@@ -79,3 +79,25 @@ export class ConfigError extends Error {
     super(message);
   }
 }
+
+/**
+ * Thrown by adapters when a model returns an empty/whitespace-only response
+ * where one is structurally required (e.g. generateStructured needs JSON to
+ * parse). Carries the model id + provider alias so the registry can route
+ * to a fallback. Common cause: reasoning models that spent the entire output
+ * budget on hidden reasoning tokens and produced no visible text.
+ */
+export class EmptyResponseError extends Error {
+  public override readonly name = "EmptyResponseError";
+  constructor(
+    public readonly alias: string,
+    public readonly modelId: string,
+    public readonly hint?: string,
+  ) {
+    super(
+      hint
+        ? `Provider "${alias}" returned an empty response for model "${modelId}". ${hint}`
+        : `Provider "${alias}" returned an empty response for model "${modelId}".`,
+    );
+  }
+}
