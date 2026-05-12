@@ -94,5 +94,14 @@ runContractTests("vercel", () => {
     setupNetworkError(error) {
       mockGenerateText.mockRejectedValueOnce(error);
     },
+
+    createPortWithOnRetry(hook) {
+      const adapterWithHook = createVercelAdapter({
+        models: { [MODEL_ID]: fakeLanguageModel },
+        pricing: { [MODEL_ID]: { inputPer1M: 1, outputPer1M: 4 } },
+        onRetry: hook,
+      });
+      return adapterWithHook.createLLMPort(MODEL_ID, ALIAS);
+    },
   };
 });

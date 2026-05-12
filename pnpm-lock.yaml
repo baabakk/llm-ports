@@ -139,6 +139,34 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  examples/local-with-ollama:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.32.1
+        version: 0.32.1
+      '@llm-ports/adapter-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/adapter-anthropic
+      '@llm-ports/adapter-ollama':
+        specifier: workspace:*
+        version: link:../../packages/adapter-ollama
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      ollama:
+        specifier: ^0.5.0
+        version: 0.5.18
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
   examples/migrate-from-vercel-ai:
     dependencies:
       '@ai-sdk/anthropic':
@@ -231,6 +259,31 @@ importers:
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.25
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  examples/with-onretry:
+    dependencies:
+      '@llm-ports/adapter-openai':
+        specifier: workspace:*
+        version: link:../../packages/adapter-openai
+      '@llm-ports/capabilities':
+        specifier: workspace:*
+        version: link:../../packages/capabilities
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      openai:
+        specifier: ^4.73.0
+        version: 4.104.0(zod@3.25.76)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
       tsx:
         specifier: ^4.19.0
         version: 4.21.0

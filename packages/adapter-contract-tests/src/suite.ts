@@ -4,7 +4,7 @@
  * register the conformance assertions.
  */
 
-import type { LLMPort, TokenUsage } from "@llm-ports/core";
+import type { LLMPort, OnRetry, RetryEvent, TokenUsage } from "@llm-ports/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -64,6 +64,15 @@ export interface ContractTestContext {
   setupRunAgent(response: MockedRunAgent): void;
   /** Make the next request fail with a network-style error. */
   setupNetworkError(error: Error): void;
+  /**
+   * Optional. When the adapter supports the {@link OnRetry} observability hook,
+   * implement this to return a fresh port wired to the given hook. The
+   * conformance suite uses this to verify the hook fires for the universal
+   * `validation-feedback` retry reason. Adapters that do not support onRetry
+   * (e.g. adapter-anthropic, adapter-ollama in v0.1) should leave it unset
+   * and the corresponding conformance tests will skip.
+   */
+  createPortWithOnRetry?: (hook: OnRetry) => LLMPort;
 }
 
 /** A factory for the test context. Called fresh for each test. */
@@ -200,6 +209,92 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
           ready: true,
           message: "done",
         });
+      });
+    });
+
+    describe("onRetry observability (conditional)", () => {
+      const Schema = z.object({
+        intent: z.enum(["question", "request"]),
+        urgency: z.enum(["low", "high"]),
+      });
+
+      it("fires for validation-feedback when adapter retries a structured response", async () => {
+        const ctx = await setup();
+        if (!ctx.createPortWithOnRetry) {
+          // Adapter does not support onRetry; skip without failing.
+          return;
+        }
+        ctx.setupGenerateStructured({
+          invalidFirstAttempt: { intent: "WRONG_VALUE", urgency: "high" },
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        const events: RetryEvent[] = [];
+        const hookedPort = ctx.createPortWithOnRetry((e) => {
+          events.push(e);
+        });
+
+        const result = await hookedPort.generateStructured({
+          taskType: "test-classify",
+          prompt: "classify this",
+          schema: Schema,
+          schemaName: "TestSchema",
+        });
+
+        expect(result.data).toEqual({ intent: "request", urgency: "high" });
+        expect(events.some((e) => e.reason === "validation-feedback")).toBe(true);
+        const ev = events.find((e) => e.reason === "validation-feedback")!;
+        expect(ev.providerAlias).toBe(ctx.expectedAlias);
+        expect(ev.modelId).toBe(ctx.expectedModelId);
+      });
+
+      it("hook errors do NOT cancel the retry (observability only)", async () => {
+        const ctx = await setup();
+        if (!ctx.createPortWithOnRetry) return;
+        ctx.setupGenerateStructured({
+          invalidFirstAttempt: { intent: "WRONG_VALUE", urgency: "high" },
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        const hookedPort = ctx.createPortWithOnRetry(() => {
+          throw new Error("hook exploded");
+        });
+
+        const result = await hookedPort.generateStructured({
+          taskType: "test-classify",
+          prompt: "classify this",
+          schema: Schema,
+          schemaName: "TestSchema",
+        });
+
+        // Despite the hook throwing, the retry succeeded.
+        expect(result.data).toEqual({ intent: "request", urgency: "high" });
+      });
+
+      it("async hook rejections do NOT cancel the retry", async () => {
+        const ctx = await setup();
+        if (!ctx.createPortWithOnRetry) return;
+        ctx.setupGenerateStructured({
+          invalidFirstAttempt: { intent: "WRONG_VALUE", urgency: "high" },
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        const hookedPort = ctx.createPortWithOnRetry(async () => {
+          await Promise.resolve();
+          throw new Error("hook rejected");
+        });
+
+        const result = await hookedPort.generateStructured({
+          taskType: "test-classify",
+          prompt: "classify this",
+          schema: Schema,
+          schemaName: "TestSchema",
+        });
+
+        expect(result.data).toEqual({ intent: "request", urgency: "high" });
       });
     });
 
