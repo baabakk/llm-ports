@@ -287,15 +287,15 @@ Skip it if:
 
 ## Known Limitations in Alpha
 
-`llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (200+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
+`llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (250+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
 
-Known limitations (each tracked publicly — click the issue number for details, workarounds, and progress; the full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status)):
+Five medium-impact alpha-bake issues ([#1](https://github.com/baabakk/llm-ports/issues/1), [#3](https://github.com/baabakk/llm-ports/issues/3), [#4](https://github.com/baabakk/llm-ports/issues/4), [#5](https://github.com/baabakk/llm-ports/issues/5), [#6](https://github.com/baabakk/llm-ports/issues/6)) shipped in `0.1.0-alpha.1` / `0.1.0-alpha.2` and are now closed: Zod-to-JSON-Schema in both adapters, `onRetry` observability hook, Vercel reasoning-starvation retry + typed `EmptyResponseError`, capability-factories task-routing docs, and `adapter-openai` `EmptyResponseError` parity. The full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status).
 
-- **[#1](https://github.com/baabakk/llm-ports/issues/1) — `runAgent` tool input schemas are passed as `{}` to the model.** Zod-to-JSON-Schema conversion is a stub in the OpenAI and Anthropic adapters. Tool calls work, but model accuracy on parameter names depends more on the tool's `description` string than on the schema. Workaround: name parameters explicitly in `description`.
-- **[#3](https://github.com/baabakk/llm-ports/issues/3) — No `onRetry` observability hook.** The OpenAI adapter retries internally on capability-rejection, transient-401 burst protection, and reasoning-starved responses; consumers can't currently observe these. `onResult` on capability factories still fires per logical call.
-- **[#4](https://github.com/baabakk/llm-ports/issues/4) — Vercel adapter starves reasoning models.** No headroom multiplier when used with OpenAI o-series, Cerebras gpt-oss-style models, etc. Workaround: set `maxOutputTokens` 5-10× higher than your visible-output budget.
-- **[#5](https://github.com/baabakk/llm-ports/issues/5) — Vercel `generateStructured` throws confusing `SyntaxError` on empty model responses.** Same root cause as #4. Will be fixed in two layers: the reasoning-aware retry, and a clearer typed `EmptyResponseError`.
+What's still open:
+
 - Some compat-provider models (Cerebras via OpenAI baseURL, Groq, Together AI, Fireworks) may require a `pricingOverrides` entry to satisfy the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default.
+- Vercel adapter `runAgent` is single-turn only (multi-turn lands in v0.2).
+- Registry walks the chain on **budget gating** but does not yet retry the next provider on **runtime errors** (v0.2). Catch `ProviderUnavailableError` at the call site for now.
 
 If you hit something not listed here, please [open an issue](https://github.com/baabakk/llm-ports/issues/new/choose) — the bug-report template captures the version + repro shape we need.
 
@@ -303,7 +303,7 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-`llm-ports` is in alpha (v0.1.0-alpha.0). Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
+`llm-ports` is in alpha (`v0.1.0-alpha.2`; `adapter-openai`) / `v0.1.0-alpha.1` (every other package). Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
 npm install @llm-ports/core
