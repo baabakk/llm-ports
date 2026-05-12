@@ -8,6 +8,7 @@
  */
 
 import OpenAI from "openai";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   computeChatCost,
   computeEmbeddingCost,
@@ -1030,14 +1031,38 @@ function toOpenAITools(tools: Record<string, ToolDefinition>): OpenAITool[] {
 }
 
 /**
- * Minimal Zod-to-JSONSchema for v0.1. Same caveat as adapter-anthropic.
- * Most users will pass `z.object({...})`, which we approximate as
- * `{ type: "object", properties: {} }`. For richer schema generation,
- * users can wire in `zod-to-json-schema`.
+ * Convert a Zod schema to the JSON Schema shape OpenAI's tool-use API
+ * expects (`parameters: { type: "object", properties: { ... }, required: [...] }`).
+ *
+ * Uses `zod-to-json-schema` with the OpenAI target so output is the
+ * exact dialect OpenAI accepts (no draft-07 `$schema` header, no
+ * `additionalProperties` injected unless the schema declares it, etc.).
+ *
+ * Falls back to the `{ type: "object", properties: {} }` shape if the
+ * schema is not a Zod schema or if conversion fails — defensive
+ * fallback so a malformed tool definition doesn't crash the agent loop.
  */
-function zodToParameters(_schema: unknown): {
+function zodToParameters(schema: unknown): {
   type: "object";
   properties: Record<string, unknown>;
+  required?: string[];
 } {
+  try {
+    const json = zodToJsonSchema(schema as never, {
+      target: "openAi",
+      $refStrategy: "none",
+    }) as Record<string, unknown>;
+    if (json && typeof json === "object" && json["type"] === "object") {
+      return {
+        type: "object",
+        properties: (json["properties"] as Record<string, unknown>) ?? {},
+        ...(Array.isArray(json["required"])
+          ? { required: json["required"] as string[] }
+          : {}),
+      };
+    }
+  } catch {
+    // fall through to the safe default
+  }
   return { type: "object", properties: {} };
 }

@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "@llm-ports/core": "workspace:*",
-    "openai": "^4.73.0"
+    "openai": "^4.73.0",
+    "zod-to-json-schema": "^3.24.1"
   },
   "peerDependencies": {
     "zod": ">=3.24.0 <5"

@@ -10,6 +10,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   computeChatCost,
   failValidation,
@@ -512,13 +513,34 @@ function toAnthropicTools(tools: Record<string, ToolDefinition>): Array<{
 }
 
 /**
- * Minimal Zod-to-JSONSchema for v0.1. Most users will pass `z.object({...})`,
- * which we approximate as `{ type: "object", properties: {} }`. Consumers who
- * need richer schema generation can wire in `zod-to-json-schema` themselves.
+ * Convert a Zod schema to the JSON Schema shape Anthropic's tool-use API
+ * expects (`input_schema: { type: "object", properties: { ... }, required: [...] }`).
  *
- * TODO(v0.2): adopt zod-to-json-schema as a peer dep so tool inputs round-trip
- * correctly across providers.
+ * Uses `zod-to-json-schema` (no provider-specific `target` option since
+ * Anthropic accepts standard JSON Schema). `$refStrategy: "none"` inlines
+ * any reused sub-schemas so the model sees a flat shape instead of
+ * `$ref`/`$defs` indirection.
+ *
+ * Falls back to the `{ type: "object", properties: {} }` shape if the
+ * schema is not a Zod schema or if conversion fails — defensive fallback
+ * so a malformed tool definition doesn't crash the agent loop.
  */
-function zodToInputSchema(_schema: unknown): AnthropicToolInputSchema {
+function zodToInputSchema(schema: unknown): AnthropicToolInputSchema {
+  try {
+    const json = zodToJsonSchema(schema as never, {
+      $refStrategy: "none",
+    }) as Record<string, unknown>;
+    if (json && typeof json === "object" && json["type"] === "object") {
+      return {
+        type: "object",
+        properties: (json["properties"] as Record<string, unknown>) ?? {},
+        ...(Array.isArray(json["required"])
+          ? { required: json["required"] as string[] }
+          : {}),
+      };
+    }
+  } catch {
+    // fall through to the safe default
+  }
   return { type: "object", properties: {} };
 }
