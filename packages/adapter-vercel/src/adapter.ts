@@ -22,6 +22,7 @@ import {
 import {
   computeChatCost,
   computeEmbeddingCost,
+  EmptyResponseError,
   failValidation,
   ProviderUnavailableError,
   type AgentResult,
@@ -36,12 +37,17 @@ import {
   type GenerateTextResult,
   type LLMPort,
   type ModelPricing,
+  type OnRetry,
+  type RetryEvent,
   type RunAgentOptions,
   type StreamStructuredOptions,
   type StreamTextOptions,
   type TokenUsage,
   type ValidationStrategy,
 } from "@llm-ports/core";
+
+/** Multiplier applied to maxOutputTokens when retrying a reasoning-starved call. */
+const REASONING_RETRY_MULTIPLIER = 4;
 
 // ─── Adapter options ─────────────────────────────────────────────────
 
@@ -65,6 +71,14 @@ export interface VercelAdapterOptions {
   pricing: Record<string, ModelPricing>;
   /** Default validation strategy if the registry doesn't override per-call. */
   validationStrategy?: ValidationStrategy;
+  /**
+   * Observability hook fired when the adapter retries an in-flight request.
+   * Vercel adapter currently fires for two reasons:
+   *   - reasoning-starvation (model spent its budget on hidden reasoning; retry with expanded budget)
+   *   - validation-feedback  (structured-output schema failed; retry with correction prompt)
+   * Sync or async; called fire-and-forget. Hook errors do NOT cancel the retry.
+   */
+  onRetry?: OnRetry;
 }
 
 interface AdapterContext {
@@ -72,6 +86,21 @@ interface AdapterContext {
   embeddingModels: Record<string, EmbeddingModel<string>>;
   pricing: Record<string, ModelPricing>;
   validationStrategy: ValidationStrategy;
+  onRetry?: OnRetry;
+}
+
+function emitRetry(ctx: AdapterContext, event: RetryEvent): void {
+  if (!ctx.onRetry) return;
+  try {
+    const result = ctx.onRetry(event);
+    if (result && typeof (result as Promise<void>).then === "function") {
+      (result as Promise<void>).catch(() => {
+        /* swallow — observability only */
+      });
+    }
+  } catch {
+    /* swallow — observability only */
+  }
 }
 
 function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
@@ -103,6 +132,7 @@ export function createVercelAdapter(opts: VercelAdapterOptions): VercelAdapter {
       maxAttempts: 2,
       includeOriginalError: true,
     },
+    ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
   return {
@@ -135,6 +165,59 @@ function getEmbeddingModel(ctx: AdapterContext, modelId: string): EmbeddingModel
 
 // ─── LLMPort implementation ──────────────────────────────────────────
 
+/**
+ * Heuristic for "model spent its budget on hidden reasoning and produced no
+ * visible text." Cerebras gpt-oss-*, OpenAI o-series, and gpt-5-nano all
+ * exhibit this when called with a small maxTokens. Vercel's generateText
+ * result does not expose reasoning_tokens directly, but the combination
+ * empty text + finishReason==="length" + tokens-consumed is strong evidence.
+ *
+ * Only fires when the caller actually set a maxOutputTokens; otherwise we
+ * have nothing to expand and would just loop.
+ */
+function isReasoningStarved(
+  result: { text?: string | null; finishReason?: string; usage?: { completionTokens?: number } },
+  hadMaxTokens: boolean,
+): boolean {
+  if (!hadMaxTokens) return false;
+  const text = (result.text ?? "").trim();
+  if (text.length > 0) return false;
+  const finish = result.finishReason;
+  const out = result.usage?.completionTokens ?? 0;
+  return finish === "length" && out > 0;
+}
+
+/**
+ * Call generateText. If the response looks reasoning-starved AND the caller
+ * supplied a maxOutputTokens, retry once with REASONING_RETRY_MULTIPLIER ×
+ * the budget. Fires onRetry with reason "reasoning-starvation" on the retry.
+ */
+async function generateWithStarvationRetry(
+  ctx: AdapterContext,
+  alias: string,
+  modelId: string,
+  baseRequest: Parameters<typeof generateText>[0] & { maxTokens?: number },
+): Promise<Awaited<ReturnType<typeof generateText>>> {
+  const result = await generateText(baseRequest);
+  if (
+    baseRequest.maxTokens !== undefined &&
+    isReasoningStarved(result, true)
+  ) {
+    emitRetry(ctx, {
+      reason: "reasoning-starvation",
+      attempt: 0,
+      modelId,
+      providerAlias: alias,
+      delayMs: 0,
+    });
+    return await generateText({
+      ...baseRequest,
+      maxTokens: baseRequest.maxTokens * REASONING_RETRY_MULTIPLIER,
+    });
+  }
+  return result;
+}
+
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
   const model = getModel(ctx, modelId);
@@ -143,7 +226,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       const start = Date.now();
       try {
-        const result = await generateText({
+        const result = await generateWithStarvationRetry(ctx, alias, modelId, {
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
           prompt: stringifyPrompt(options.prompt),
@@ -183,7 +266,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           const userPrompt = correctionPrompt
             ? `${stringifyPrompt(options.prompt)}\n\n${correctionPrompt}`
             : `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
-          const result = await generateText({
+          const result = await generateWithStarvationRetry(ctx, alias, modelId, {
             model,
             ...(options.instructions !== undefined ? { system: options.instructions } : {}),
             prompt: userPrompt,
@@ -192,6 +275,17 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           });
           lastUsage = parseUsage(result);
           lastModelId = result.response?.modelId ?? modelId;
+          // If the response is still empty (after the starvation retry), the
+          // model genuinely produced no JSON to parse. Throw a typed
+          // EmptyResponseError instead of letting JSON.parse("") raise a
+          // confusing SyntaxError that gets wrapped as ProviderUnavailableError.
+          if ((result.text ?? "").trim().length === 0) {
+            throw new EmptyResponseError(
+              alias,
+              lastModelId,
+              "generateStructured needs a JSON body to parse. Increase maxOutputTokens or route to a fallback model.",
+            );
+          }
           const parsed = options.schema.safeParse(extractJSON(result.text));
           if (parsed.success) {
             return {
@@ -212,6 +306,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
               .join("\n");
             correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
+            emitRetry(ctx, {
+              reason: "validation-feedback",
+              attempt: attempts - 1,
+              modelId: lastModelId,
+              providerAlias: alias,
+              delayMs: 0,
+              cause: parsed.error,
+            });
             continue;
           }
           failValidation(parsed.error.issues, attempts);
@@ -270,7 +372,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           role: m.role === "tool" ? "user" : (m.role as "system" | "user" | "assistant"),
           content: typeof m.content === "string" ? m.content : stringifyPrompt(m.content),
         }));
-        const result = await generateText({
+        const result = await generateWithStarvationRetry(ctx, alias, modelId, {
           model,
           system: options.instructions,
           messages,
@@ -369,6 +471,9 @@ function parseUsage(result: { usage?: { promptTokens?: number; completionTokens?
 function wrapError(alias: string, err: unknown): Error {
   // Idempotent: don't double-wrap framework errors that are already typed.
   if (err instanceof ProviderUnavailableError) {
+    return err;
+  }
+  if (err instanceof EmptyResponseError) {
     return err;
   }
   if (err instanceof Error && err.name === "ValidationError") {

@@ -24,15 +24,18 @@ export interface MockedGenerateText {
   promptTokens: number;
   completionTokens: number;
   modelId?: string;
+  finishReason?: "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other";
 }
 
 export function buildVercelGenerateTextResult(spec: MockedGenerateText): {
   text: string;
+  finishReason: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
   response: { modelId: string };
 } {
   return {
     text: spec.text,
+    finishReason: spec.finishReason ?? "stop",
     usage: {
       promptTokens: spec.promptTokens,
       completionTokens: spec.completionTokens,
@@ -40,6 +43,25 @@ export function buildVercelGenerateTextResult(spec: MockedGenerateText): {
     },
     response: { modelId: spec.modelId ?? "fake-model" },
   };
+}
+
+/**
+ * Build a result that simulates a reasoning model that spent its entire
+ * output budget on hidden reasoning and produced no visible text. The
+ * adapter should detect this and retry once with an expanded budget.
+ */
+export function buildVercelReasoningStarvedResult(spec: {
+  promptTokens: number;
+  completionTokens: number;
+  modelId?: string;
+}): ReturnType<typeof buildVercelGenerateTextResult> {
+  return buildVercelGenerateTextResult({
+    text: "",
+    promptTokens: spec.promptTokens,
+    completionTokens: spec.completionTokens,
+    modelId: spec.modelId,
+    finishReason: "length",
+  });
 }
 
 export function buildVercelStreamResult(chunks: string[]): {
