@@ -36,6 +36,12 @@ LLM_PROVIDER_SMART=anthropic|claude-sonnet-4-6-20250514|cost:50/day
 # the chain on budget gating — runtime-error fallback ships in v0.2)
 LLM_TASK_ROUTE_TRIAGE=fast,smart
 LLM_TASK_ROUTE_DRAFT=smart
+
+# Catch-all for anything else (including the capability factories' default
+# task types: classify, score, draft, summarize, extract, plan, analyze).
+# If you don't set this, capability factories will throw NoProvidersAvailableError
+# unless every implicit task type also has its own LLM_TASK_ROUTE_* entry.
+LLM_TASK_ROUTE_GENERAL=fast,smart
 ```
 
 > **What "first eligible wins" means in v0.1.** When a call comes in, the registry walks the chain in order and picks the first provider that's within its budget cap. If a provider is over budget, the registry walks past it. **The registry does not currently retry on the next provider when a runtime error fires** (network timeout, provider 5xx, 429); that ships in v0.2. See the [multi-provider guide](/guides/multi-provider) for full details, or the [v0.1 status page](/v0-1-status) for the full inventory of v0.1 limitations.

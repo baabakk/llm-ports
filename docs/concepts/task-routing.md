@@ -83,6 +83,52 @@ LLM_TASK_ROUTE_GENERAL=fast,smart
 
 Useful as a safety net while you're still wiring up specific routes. Without `general` and without a matching route for the requested task, calls throw `NoProvidersAvailableError`.
 
+## How capability factories route
+
+The capability factories (`createClassifier`, `createScorer`, `createDrafter`, `createSummarizer`, `createExtractor`, `createPlanner`, `createAnalyzer`) each use a default task type matching their canonical name. So `createClassifier(...)` calls hit `LLM_TASK_ROUTE_CLASSIFY`, `createDrafter(...)` hits `LLM_TASK_ROUTE_DRAFT`, etc.
+
+Default mapping:
+
+| Factory | Default `taskType` | Env route to configure |
+|---|---|---|
+| `createClassifier` | `"classify"` | `LLM_TASK_ROUTE_CLASSIFY` |
+| `createScorer` | `"score"` | `LLM_TASK_ROUTE_SCORE` |
+| `createDrafter` | `"draft"` | `LLM_TASK_ROUTE_DRAFT` |
+| `createSummarizer` | `"summarize"` | `LLM_TASK_ROUTE_SUMMARIZE` |
+| `createExtractor` | `"extract"` | `LLM_TASK_ROUTE_EXTRACT` |
+| `createPlanner` | `"plan"` | `LLM_TASK_ROUTE_PLAN` |
+| `createAnalyzer` | `"analyze"` | `LLM_TASK_ROUTE_ANALYZE` |
+
+Two ways to wire your registry to these:
+
+**Option 1 — set `LLM_TASK_ROUTE_GENERAL` as a universal catch-all.** Simplest. Every capability falls through to your `general` chain.
+
+```bash
+LLM_TASK_ROUTE_GENERAL=fast,smart
+```
+
+**Option 2 — give each capability its own route.** Lets you apply different fallback chains, cost caps, or model preferences per capability (e.g., cheap-fast for classify, smarter for draft).
+
+```bash
+LLM_TASK_ROUTE_CLASSIFY=fast
+LLM_TASK_ROUTE_DRAFT=smart,fast
+LLM_TASK_ROUTE_EXTRACT=fast,smart
+```
+
+**Option 3 — override `taskType` at factory construction.** Each capability factory accepts an optional `taskType` config so you can route a specific instance through a custom task name:
+
+```ts
+const classifyTickets = createClassifier({
+  port: llm,
+  schema: TicketSchema,
+  schemaName: "ticket-intent",
+  taskType: "ticket-triage",   // routes via LLM_TASK_ROUTE_TICKET_TRIAGE
+  // ...
+});
+```
+
+Useful when you have multiple instances of the same factory with different routing needs (e.g., one classifier for customer emails on a tight budget, another for internal logs on a generous budget).
+
 ## Priority tiers (0-3)
 
 | Priority | Meaning | Behavior |
