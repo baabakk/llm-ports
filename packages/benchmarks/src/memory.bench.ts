@@ -7,7 +7,7 @@
  *
  * Run: `pnpm bench:memory` from this package, or `node --expose-gc dist/...`.
  *
- * Methodology per implementation plan v3 §12.4:
+ * Methodology:
  *   - 10,000 sequential calls
  *   - GC-forced heap snapshots every 1,000 calls
  *   - Variance over the run < 50 MB target

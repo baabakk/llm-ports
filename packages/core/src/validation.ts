@@ -3,10 +3,11 @@
  *
  * The default is `retry-with-feedback` with maxAttempts=2: when validation
  * fails, the strategy injects the Zod errors into the next prompt and asks
- * the model to regenerate. BEPA's production NL workflow engine achieves
- * ~70% fix rate on the second attempt with this strategy.
+ * the model to regenerate. In the originating production workflow, this
+ * strategy achieves ~70% fix rate on the second attempt.
  *
- * See implementation plan v3 §6.7 and decision 13.
+ * See docs/concepts/validation-strategies for the full design rationale
+ * and when to swap strategies.
  */
 
 import type { z, ZodIssue } from "zod";

@@ -4,7 +4,7 @@ Internal benchmark scripts and live API integration tests. **Private; never publ
 
 ## Live API integration tests
 
-For [TEST-PLAN.md](../../../TEST-PLAN.md) Phase 2 (live adapter validation) and Phase 3 (live capability validation). Tests are gated on `RUN_LIVE_TESTS=1` plus the relevant provider's API key, so the suite skips cleanly without secrets and is safe to commit.
+Live tests against real provider APIs (Phase 2: adapter validation; Phase 3: capability validation). Tests are gated on `RUN_LIVE_TESTS=1` plus the relevant provider's API key, so the suite skips cleanly without secrets and is safe to commit.
 
 ### Run all live tests
 
@@ -90,7 +90,7 @@ All tests skip; nothing is hit.
 
 Measures the framework overhead `llm-ports` adds on top of a direct SDK call. Both the "direct" and "llm-ports" paths share an identical mock fetch that returns canned responses with zero network I/O, so the difference is pure framework cost.
 
-### Methodology (per implementation plan v3 §12.4)
+### Methodology
 
 - 100 iterations per operation after 10 warmup iterations
 - Operations measured: `generateText`, `generateStructured`, `runAgent`
@@ -106,7 +106,7 @@ pnpm bench
 
 ### Target
 
-p99 added latency under 5 ms per operation. The actual measured number is reported in the implementation plan §3 ("BEPA Track Record").
+p99 added latency under 5 ms per operation. The most recent measurement was **mean p50 0.04 ms, max p99 0.47 ms** (10× under target), reported on the [Why this exists](https://baabakk.github.io/llm-ports/why#production-track-record) docs page.
 
 ### What this measures vs what it doesn't
 

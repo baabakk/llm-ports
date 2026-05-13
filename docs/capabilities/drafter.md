@@ -116,7 +116,20 @@ export const draftTechnicalEmail = createDrafter({
 });
 ```
 
-In production, load samples from a database keyed by (channel, register, recipient_type) — see the BEPA `writing_samples` table pattern in the implementation plan.
+In production, load samples from a database keyed by `(channel, register, recipient_type)` and pass them through an async `writingSamples` resolver on the factory — that way new tone exemplars are picked up without a redeploy. A minimal schema:
+
+```sql
+CREATE TABLE writing_samples (
+  channel       text NOT NULL,         -- "email" | "sms" | "linkedin" | ...
+  register      text NOT NULL,         -- "warm" | "firm" | "strategic" | ...
+  recipient     text NOT NULL,         -- "internal" | "customer" | "investor"
+  sample_text   text NOT NULL,
+  is_active     boolean DEFAULT true,
+  updated_at    timestamptz DEFAULT now()
+);
+```
+
+Then resolve from the row matching the call site's `(channel, register, recipient)` triple.
 
 ## Output truncation
 

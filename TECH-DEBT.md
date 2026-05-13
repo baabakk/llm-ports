@@ -4,7 +4,7 @@ Append-only record of known compromises, design tradeoffs, and deferred work. Ea
 
 When resolving an item, mark **Status: Resolved** with the date and the commit SHA. Do not delete entries — the history is the value.
 
-Format: same convention as BEPA's `Development_TechDebt.md` (timestamp + system + subsystem heading).
+Format: timestamped headings (date + system + subsystem), severity + status fields, append-only.
 
 ---
 
@@ -98,9 +98,9 @@ Format: same convention as BEPA's `Development_TechDebt.md` (timestamp + system 
 
 - **Severity:** High (blocked test phases)
 - **Status:** Resolved 2026-05-04 — Babak rotated the key (now ends `cxmt`); both `/v1/models` and full Phase 2 suite reach the API. 22 of 26 live tests pass; remaining failures are model-output flakiness, not key issues.
-- **Files:** `.env` (BEPA root), `OPENAI_API_KEY`
-- **Problem:** Direct curl to `api.openai.com/v1/models` with the previous key (`...wrwA`) returned HTTP 401 "Incorrect API key" after working earlier in Phase 2.
-- **Impact:** TEST-PLAN.md Phase 2 (Live API integration) and Phase 3 (Capabilities live integration) couldn't complete the OpenAI portions. Cerebras compat worked throughout.
+- **Files:** local `.env`, `OPENAI_API_KEY`
+- **Problem:** Direct curl to `api.openai.com/v1/models` with the previous key (`...wrwA`) returned HTTP 401 "Incorrect API key" after working earlier in the test pass.
+- **Impact:** Live API integration and live capability integration phases couldn't complete the OpenAI portions. Cerebras compat worked throughout.
 - **Resolution:** Key rotated 2026-05-04. New key length 56 chars (standard service-key shape, not `sk-proj-*`). All OpenAI live test paths reachable.
 
 ### TD-LLMP-11: Vercel adapter does not handle reasoning models (no headroom multiplier)

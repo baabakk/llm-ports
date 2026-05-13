@@ -23,7 +23,7 @@ Nothing above that, nothing below it.
 
 ## Production track record
 
-`llm-ports` is extracted from [BEPA](https://github.com/baabakk/bepa-companion), a 24/7 AI executive assistant in production for 5+ months across 4 LLM providers (Anthropic, OpenAI, Cerebras, DeepInfra), processing millions of LLM calls.
+`llm-ports` is extracted from BEPA, a private 24/7 AI executive assistant the author has been running in production for 5+ months across 4 LLM providers (Anthropic, OpenAI, Cerebras, DeepInfra), processing millions of LLM calls.
 
 **The extracted core has 5 months of production runtime:**
 - Single Hetzner server, Docker, 24/7 uptime
@@ -34,7 +34,7 @@ Nothing above that, nothing below it.
 
 **v0.1 also extends that pattern with features the 2026 ecosystem requires** even though BEPA hasn't adopted them yet: multimodal content blocks, USD-denominated cost gating, split EmbeddingsPort, streamStructured. BEPA will absorb these back over time.
 
-The track record above is for the extracted core, not the extensions. Credibility is bidirectional: overclaiming "all of v0.1 is production-tested" gets refuted by anyone reading the BEPA git log; underclaiming undersells the part that genuinely is. The above is the precise truth.
+The track record above is for the extracted core, not the extensions. Credibility cuts both ways: overclaiming "all of v0.1 is production-tested" is wrong; underclaiming undersells the part that genuinely is. The above is the precise truth — the BEPA-extracted core has the runtime; the 2026-only additions (multimodal, USD gating, split EmbeddingsPort, streamStructured) ship in `0.1.0-alpha.*` as the test bake before they earn the same claim.
 
 For the per-surface picture — what's stable, what's still being hardened, what ships in v0.2 — see the [v0.1 status page](/v0-1-status). It's the canonical inventory.
 

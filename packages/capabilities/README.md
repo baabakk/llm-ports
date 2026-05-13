@@ -4,7 +4,7 @@ Reusable cognitive operation factories for [llm-ports](https://github.com/baabak
 
 ## Why factories?
 
-The factory pattern is the most important API choice in `llm-ports`. Three alternatives were considered and rejected (decision 19 in the implementation plan):
+The factory pattern is the most important API choice in `llm-ports`. Three alternatives were considered and rejected:
 
 - **Plain helpers**: force re-passing config (rubric, schema, hooks) on every call. Boilerplate at the call site.
 - **Decorators**: require `experimentalDecorators` config and pollute the type system.

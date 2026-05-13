@@ -1,5 +1,5 @@
 /**
- * Latency overhead benchmark: BEPA-direct vs BEPA-via-llm-ports.
+ * Latency overhead benchmark: direct SDK call vs same call via llm-ports.
  *
  * Measures the framework overhead llm-ports adds on top of a direct
  * Anthropic SDK call. Both paths share an identical mock fetch that
@@ -7,7 +7,7 @@
  * framework cost: registry lookup + budget gating + cost computation
  * + adapter translation + hook dispatch.
  *
- * Methodology per implementation plan v3 §12.4:
+ * Methodology:
  *   - 100 iterations per case after 10 warmup iterations
  *   - Mix: generateText, generateStructured, runAgent (no streaming)
  *   - Anthropic Sonnet shape (lowest natural latency variance)
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
   process.stdout.write(`\nAggregate:\n`);
   process.stdout.write(`  mean p50 overhead across operations: ${meanP50Overhead.toFixed(3)} ms\n`);
   process.stdout.write(`  max  p99 overhead across operations: ${maxP99Overhead.toFixed(3)} ms\n`);
-  process.stdout.write(`  target (per implementation plan v3 §12.4): p99 < 5 ms\n`);
+  process.stdout.write(`  target: p99 < 5 ms\n`);
   process.stdout.write(
     `  result: ${maxP99Overhead < 5 ? "PASS" : "FAIL"} (margin: ${(5 - maxP99Overhead).toFixed(3)} ms)\n`,
   );

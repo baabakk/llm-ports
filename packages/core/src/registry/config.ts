@@ -14,7 +14,7 @@
  *   cost:N/day       -> USD limit per day (also: /hour, /month)
  *   unlimited        -> no gating (useful for local Ollama)
  *
- * See implementation plan v3 §6.6.
+ * See docs/concepts/task-routing for the full design rationale.
  */
 
 import type { BudgetLimit, CostLimit } from "../budget/types.js";

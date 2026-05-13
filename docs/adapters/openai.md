@@ -123,7 +123,7 @@ The adapter also handles two other transient OpenAI quirks transparently:
 - **Capability rejection.** Some models reject custom `temperature`, `response_format: { type: "json_object" }`, or a separate `system` message. The adapter catches the `unsupported_value` error, learns the constraint, retries with the offending parameter dropped, and remembers it for the rest of the process.
 - **Project-key burst protection (sk-proj-* keys).** New OpenAI project keys briefly return 401 "Incorrect API key" under burst protection — even when the key is valid. The adapter retries with exponential backoff (default 500ms / 1500ms / 4500ms), but only if a prior request on the same client succeeded (so a real bad key doesn't get masked). Configurable via the `transientAuthRetries` and `transientAuthBackoffMs` options.
 
-All three retry kinds are silent today — see [#3 — no `onRetry` observability hook](https://github.com/baabakk/llm-ports/issues/3) for the v0.2 plan.
+All three retry kinds (plus `validation-feedback` retries inside `generateStructured`) fire the `onRetry` hook shipped in `0.1.0-alpha.1` — pass an `OnRetry` callback at adapter construction time to observe them. See [`examples/with-onretry/`](https://github.com/baabakk/llm-ports/tree/main/examples/with-onretry) for a worked example wiring the hook to a console logger and a metrics sink.
 
 ## Reading next
 

@@ -1,6 +1,6 @@
 # Cost Gating in Production
 
-`llm-ports` ships USD-denominated cost gating as a first-class feature. The thesis from [the implementation plan](https://github.com/baabakk/llm-ports/blob/main/PLAN.md): real users care about dollars per day, not requests per hour. Request-count gating is a weak proxy.
+`llm-ports` ships USD-denominated cost gating as a first-class feature. The thesis: real users care about dollars per day, not requests per hour. Request-count gating is a weak proxy — a 16k-token completion costs ~30× a 500-token one, but request count treats them the same.
 
 This guide covers: how cost is computed per call, how to set caps, how the in-memory backend works, when to swap in a Redis backend, and how to override pricing when providers raise prices between releases.
 

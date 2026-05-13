@@ -5,7 +5,7 @@
  * String content is syntactic sugar for `[{ type: "text", text: "..." }]`;
  * adapters accept either form and normalize internally.
  *
- * See implementation plan v3 §6.1.
+ * See docs/concepts/content-blocks for the full design rationale.
  */
 
 /** Either a plain string (sugar) or an array of typed content blocks. */

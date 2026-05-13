@@ -2,6 +2,8 @@
 
 Develop on Ollama, ship on Anthropic. One env var change, no application code changes. This is the headline use case for `@llm-ports/adapter-ollama`.
 
+> **Worked example:** [`examples/local-with-ollama/`](https://github.com/baabakk/llm-ports/tree/main/examples/local-with-ollama) — Ollama health check, `generateText`, `generateStructured`, plus the `FORCE_CLOUD=1` flag that simulates the production-flip on the same code path.
+
 ## The flow
 
 ```
