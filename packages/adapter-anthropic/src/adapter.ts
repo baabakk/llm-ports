@@ -13,8 +13,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   computeChatCost,
+  emitRetryEvent,
+  extractJSON,
   failValidation,
-  ProviderUnavailableError,
+  mergeTokenUsage,
+  stringifyContentBlocks,
+  tryParsePartialJSON,
+  wrapProviderError,
   type AgentResult,
   type ContentBlock,
   type GenerateStructuredOptions,
@@ -23,6 +28,7 @@ import {
   type GenerateTextResult,
   type LLMPort,
   type ModelPricing,
+  type OnRetry,
   type RunAgentOptions,
   type StreamStructuredOptions,
   type StreamTextOptions,
@@ -37,6 +43,29 @@ import {
   toAnthropicContent,
   toAnthropicMessages,
 } from "./content.js";
+import {
+  extractAnthropicErrorMessage,
+  getEffectiveCapabilities,
+  isTemperatureRejection,
+  rememberConstraint,
+  seedKnownConstraints,
+} from "./capabilities.js";
+import { checkSdkCompatibility, getInstalledSdkVersion } from "./version-check.js";
+
+// Package version is needed for the click-to-file URL in capability warnings.
+// Read at module load (synchronous) and cached.
+let CACHED_PACKAGE_VERSION: string | undefined;
+function getPackageVersion(): string {
+  if (CACHED_PACKAGE_VERSION !== undefined) return CACHED_PACKAGE_VERSION;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pkg = require("../package.json") as { version?: string };
+    CACHED_PACKAGE_VERSION = pkg.version ?? "unknown";
+  } catch {
+    CACHED_PACKAGE_VERSION = "unknown";
+  }
+  return CACHED_PACKAGE_VERSION;
+}
 
 // ─── Adapter options ─────────────────────────────────────────────────
 
@@ -50,6 +79,12 @@ export interface AnthropicAdapterOptions {
   validationStrategy?: ValidationStrategy;
   /** Override Anthropic pricing for any model id. Falls back to the bundled table. */
   pricingOverrides?: Record<string, ModelPricing>;
+  /**
+   * Observability hook fired when the adapter retries an in-flight request.
+   * Fired for `capability-fallback` reasons (currently only `temperatureLocked`).
+   * Called fire-and-forget; hook errors do NOT cancel the retry.
+   */
+  onRetry?: OnRetry;
 }
 
 // ─── Module-level state ──────────────────────────────────────────────
@@ -58,6 +93,7 @@ interface AdapterContext {
   client: Anthropic;
   validationStrategy: ValidationStrategy;
   pricingOverrides: Record<string, ModelPricing>;
+  onRetry?: OnRetry;
 }
 
 function makeClient(opts: AnthropicAdapterOptions): Anthropic {
@@ -87,6 +123,11 @@ export interface AnthropicAdapter {
 }
 
 export function createAnthropicAdapter(opts: AnthropicAdapterOptions): AnthropicAdapter {
+  // Surface "upgrade us or downgrade them" warning if the installed
+  // @anthropic-ai/sdk version is outside the tested range. Observability only;
+  // does not throw.
+  checkSdkCompatibility(getInstalledSdkVersion());
+
   // Merge user-supplied pricingOverrides into the adapter's exposed pricing
   // so the registry's pricing check sees them. (See same-named comment in
   // adapter-openai/adapter.ts for the rationale.)
@@ -103,6 +144,7 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
       includeOriginalError: true,
     },
     pricingOverrides: opts.pricingOverrides ?? {},
+    ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
   return {
@@ -116,23 +158,112 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
 
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
+  // Seed known-rejector catalog so first calls on claude-opus-4-5-style
+  // models skip the discovery round-trip on `temperature`.
+  seedKnownConstraints(modelId);
+
+  /**
+   * Execute a `messages.create` call with per-model capability handling and
+   * single-retry on detected parameter rejections (currently: temperature).
+   *
+   * - Applies learned capabilities (strips `temperature` for models that
+   *   reject it) before the outbound call.
+   * - On a 400 that matches the temperature-rejection pattern, learns the
+   *   constraint, fires the `onRetry` hook + the click-to-file warning, and
+   *   retries once with the parameter stripped.
+   * - Any other error propagates to wrapProviderError via the caller's
+   *   try/catch.
+   *
+   * The `req` parameter is a typed subset of Anthropic's
+   * `messages.create()` parameters. We omit `temperature` if the learned
+   * capability indicates the model rejects it.
+   */
+  async function executeMessageCreate<R>(
+    buildRequest: (capabilities: { temperatureLocked?: boolean }) => Parameters<
+      typeof ctx.client.messages.create
+    >[0],
+  ): Promise<R> {
+    const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
+    let caps = getEffectiveCapabilities(modelId, userCapabilities);
+    let attempt = 0;
+    // Single capability-fallback retry per call (the user-visible bug fix).
+    while (true) {
+      const req = buildRequest({ temperatureLocked: caps.temperatureLocked });
+      try {
+        return (await ctx.client.messages.create(req)) as R;
+      } catch (err) {
+        // Only retry on temperature rejection if we haven't already learned
+        // the constraint (otherwise we would loop).
+        if (
+          attempt === 0 &&
+          !caps.temperatureLocked &&
+          isTemperatureRejection(err)
+        ) {
+          rememberConstraint(
+            modelId,
+            { temperatureLocked: true },
+            {
+              providerErrorMessage: extractAnthropicErrorMessage(err),
+              adapterVersion: getPackageVersion(),
+              sdkVersion: getInstalledSdkVersion() ?? "unknown",
+            },
+          );
+          emitRetryEvent(ctx.onRetry, {
+            reason: "capability-fallback",
+            attempt,
+            modelId,
+            providerAlias: alias,
+            delayMs: 0,
+            cause: err,
+            capability: "temperatureLocked",
+          });
+          attempt++;
+          caps = getEffectiveCapabilities(modelId, userCapabilities);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Strip parameters from a request body that the model has been learned to
+   * reject. Currently handles `temperature`. Adapter-specific other params
+   * can be added here as Anthropic deprecates them.
+   */
+  function applyCapabilityFilter(
+    baseRequest: Parameters<typeof ctx.client.messages.create>[0],
+    capabilities: { temperatureLocked?: boolean },
+  ): Parameters<typeof ctx.client.messages.create>[0] {
+    if (!capabilities.temperatureLocked) return baseRequest;
+    // Strip temperature by copying and deleting; spreading with a rest type
+    // doesn't typecheck against Anthropic's union-typed params.
+    const filtered = { ...(baseRequest as unknown as Record<string, unknown>) };
+    delete filtered.temperature;
+    return filtered as unknown as Parameters<typeof ctx.client.messages.create>[0];
+  }
 
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       const start = Date.now();
       try {
-        const response = await ctx.client.messages.create({
-          model: modelId,
-          max_tokens: options.maxOutputTokens ?? 1024,
-          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-          messages: [
+        const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
+          applyCapabilityFilter(
             {
-              role: "user",
-              content: toAnthropicContent(options.prompt) as never,
+              model: modelId,
+              max_tokens: options.maxOutputTokens ?? 1024,
+              ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+              ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+              messages: [
+                {
+                  role: "user",
+                  content: toAnthropicContent(options.prompt) as never,
+                },
+              ],
             },
-          ],
-        });
+            caps,
+          ),
+        );
         const usage = parseUsage(response);
         const text = extractAssistantText(response.content as never);
         return {
@@ -144,7 +275,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -172,16 +303,21 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         attempts++;
         try {
           const userContent = correctionPrompt
-            ? `${stringifyPrompt(options.prompt)}\n\n${correctionPrompt}`
-            : `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences — only the JSON.`;
+            ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
+            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences. Only the JSON.`;
 
-          const response = await ctx.client.messages.create({
-            model: modelId,
-            max_tokens: options.maxOutputTokens ?? 2048,
-            ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-            temperature: options.temperature ?? 0,
-            messages: [{ role: "user", content: userContent }],
-          });
+          const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
+            applyCapabilityFilter(
+              {
+                model: modelId,
+                max_tokens: options.maxOutputTokens ?? 2048,
+                ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                temperature: options.temperature ?? 0,
+                messages: [{ role: "user", content: userContent }],
+              },
+              caps,
+            ),
+          );
           lastUsage = parseUsage(response);
           lastModelId = response.model ?? modelId;
           const raw = extractAssistantText(response.content as never);
@@ -205,12 +341,20 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
               .join("\n");
             correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
+            emitRetryEvent(ctx.onRetry, {
+              reason: "validation-feedback",
+              attempt: attempts - 1,
+              modelId: lastModelId,
+              providerAlias: alias,
+              delayMs: 0,
+              cause: parsed.error,
+            });
             continue;
           }
           failValidation(parsed.error.issues, attempts);
         } catch (err) {
           if (err instanceof Error) lastErr = err;
-          throw wrapError(alias, err);
+          throw wrapProviderError(alias, err);
         }
       }
       // Unreachable in practice; failValidation throws above.
@@ -218,12 +362,20 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      // Apply learned capabilities up front for the streaming call. Streaming
+      // retries on capability rejection are not yet supported (mid-stream
+      // retry requires buffering the entire response, which defeats the point
+      // of streaming). The pre-applied capabilities cover the known cases.
+      const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
+      const caps = getEffectiveCapabilities(modelId, userCapabilities);
       try {
         const stream = ctx.client.messages.stream({
           model: modelId,
           max_tokens: options.maxOutputTokens ?? 1024,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+          ...(options.temperature !== undefined && !caps.temperatureLocked
+            ? { temperature: options.temperature }
+            : {}),
           messages: [
             {
               role: "user",
@@ -240,23 +392,27 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           }
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       // Anthropic doesn't stream parsed JSON natively. We accumulate text deltas
       // and best-effort parse a partial JSON object after each chunk.
+      const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
+      const caps = getEffectiveCapabilities(modelId, userCapabilities);
       try {
         const stream = ctx.client.messages.stream({
           model: modelId,
           max_tokens: options.maxOutputTokens ?? 2048,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          temperature: options.temperature ?? 0,
+          // Omit temperature on models that reject it; otherwise default to 0
+          // for deterministic JSON parsing.
+          ...(caps.temperatureLocked ? {} : { temperature: options.temperature ?? 0 }),
           messages: [
             {
               role: "user",
-              content: `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
+              content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
             },
           ],
         });
@@ -272,7 +428,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           }
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -291,15 +447,20 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         for (let step = 0; step < maxSteps; step++) {
           stepsTaken = step + 1;
           const { system, messages } = toAnthropicMessages(conversation);
-          const response = await ctx.client.messages.create({
-            model: modelId,
-            max_tokens: options.maxOutputTokens ?? 4096,
-            system: system ?? options.instructions,
-            ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-            messages: messages as never,
-            tools: toAnthropicTools(options.tools),
-          });
-          totalUsage = mergeUsage(totalUsage, parseUsage(response));
+          const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
+            applyCapabilityFilter(
+              {
+                model: modelId,
+                max_tokens: options.maxOutputTokens ?? 4096,
+                system: system ?? options.instructions,
+                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                messages: messages as never,
+                tools: toAnthropicTools(options.tools),
+              },
+              caps,
+            ),
+          );
+          totalUsage = mergeTokenUsage(totalUsage, parseUsage(response));
           lastModelId = response.model ?? modelId;
           const blocks = response.content as never as Array<
             | { type: "text"; text: string }
@@ -366,7 +527,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           conversation.push({ role: "user", content: toolResults });
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
 
       return {
@@ -399,98 +560,6 @@ function parseUsage(response: { usage?: { input_tokens?: number; output_tokens?:
     ...(cacheRead !== undefined ? { cacheReadTokens: cacheRead } : {}),
     ...(cacheWrite !== undefined ? { cacheWriteTokens: cacheWrite } : {}),
   };
-}
-
-function mergeUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-    ...(a.cacheReadTokens !== undefined || b.cacheReadTokens !== undefined
-      ? { cacheReadTokens: (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0) }
-      : {}),
-    ...(a.cacheWriteTokens !== undefined || b.cacheWriteTokens !== undefined
-      ? { cacheWriteTokens: (a.cacheWriteTokens ?? 0) + (b.cacheWriteTokens ?? 0) }
-      : {}),
-  };
-}
-
-function wrapError(alias: string, err: unknown): Error {
-  // Idempotent: don't double-wrap framework errors that are already typed.
-  if (err instanceof ProviderUnavailableError) {
-    return err;
-  }
-  if (err instanceof Error && err.name === "ValidationError") {
-    return err;
-  }
-  if (err instanceof Error) {
-    return new ProviderUnavailableError(alias, err);
-  }
-  return new ProviderUnavailableError(alias, new Error(String(err)));
-}
-
-function stringifyPrompt(content: GenerateTextOptions["prompt"]): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((block) => {
-      if (block.type === "text") return block.text;
-      if (block.type === "image") return "[image content]";
-      if (block.type === "tool_use") return `[tool_use ${block.name}]`;
-      if (block.type === "tool_result") return `[tool_result for ${block.toolUseId}]`;
-      return "[non-text block]";
-    })
-    .join("\n");
-}
-
-/**
- * Find the first valid JSON object in the string. Tolerates code fences and
- * leading/trailing prose; the model sometimes ignores instructions and adds
- * explanation around the JSON.
- */
-function extractJSON(raw: string): unknown {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const candidate = fenced?.[1] ?? raw;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return JSON.parse(candidate);
-  }
-  return JSON.parse(candidate.slice(start, end + 1));
-}
-
-/** Best-effort partial JSON parse; returns null while the buffer is unparseable. */
-function tryParsePartialJSON(buffer: string): unknown | null {
-  // Try as-is first.
-  try {
-    const start = buffer.indexOf("{");
-    if (start === -1) return null;
-    return JSON.parse(buffer.slice(start));
-  } catch {
-    // Try greedily closing braces/brackets.
-    let opens = 0;
-    let closes = 0;
-    let opensq = 0;
-    let closesq = 0;
-    for (const ch of buffer) {
-      if (ch === "{") opens++;
-      else if (ch === "}") closes++;
-      else if (ch === "[") opensq++;
-      else if (ch === "]") closesq++;
-    }
-    let attempt =
-      buffer +
-      "}".repeat(Math.max(0, opens - closes)) +
-      "]".repeat(Math.max(0, opensq - closesq));
-    // Trim trailing commas that break JSON.
-    attempt = attempt.replace(/,\s*([}\]])/g, "$1");
-    try {
-      const start = attempt.indexOf("{");
-      if (start === -1) return null;
-      return JSON.parse(attempt.slice(start));
-    } catch {
-      return null;
-    }
-  }
 }
 
 interface AnthropicToolInputSchema {
