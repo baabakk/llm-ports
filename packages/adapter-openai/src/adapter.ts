@@ -12,9 +12,14 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   computeChatCost,
   computeEmbeddingCost,
+  emitRetryEvent,
   EmptyResponseError,
+  extractJSON,
   failValidation,
-  ProviderUnavailableError,
+  mergeTokenUsage,
+  stringifyContentBlocks,
+  tryParsePartialJSON,
+  wrapProviderError,
   type AgentResult,
   type BatchEmbeddingOptions,
   type BatchEmbeddingResult,
@@ -138,19 +143,10 @@ interface AdapterContext {
   onRetry?: OnRetry;
 }
 
-/** Fire the onRetry hook without awaiting and without letting hook errors propagate. */
+/** Fire the onRetry hook fire-and-forget. Delegates to the shared `emitRetryEvent`
+ *  helper from @llm-ports/core so semantics stay consistent across adapters. */
 function emitRetry(ctx: AdapterContext, event: RetryEvent): void {
-  if (!ctx.onRetry) return;
-  try {
-    const result = ctx.onRetry(event);
-    if (result && typeof (result as Promise<void>).then === "function") {
-      (result as Promise<void>).catch(() => {
-        /* swallow — hook is observability only */
-      });
-    }
-  } catch {
-    /* swallow — hook is observability only */
-  }
+  emitRetryEvent(ctx.onRetry, event);
 }
 
 function makeClient(opts: OpenAIAdapterOptions): OpenAI {
@@ -269,8 +265,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       while (attempts < maxAttempts) {
         attempts++;
         const userText = correctionPrompt
-          ? `${stringifyPrompt(options.prompt)}\n\n${correctionPrompt}`
-          : `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
+          ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
+          : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
 
         // executeChatRequest handles error wrapping and capability fallback.
         // Don't double-wrap here — let ProviderUnavailableError propagate, and
@@ -368,7 +364,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         messages: [
           {
             role: "user",
-            content: `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+            content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
           },
         ],
         ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
@@ -423,7 +419,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             }>;
             usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
           };
-          totalUsage = mergeUsage(totalUsage, parseUsage(r));
+          totalUsage = mergeTokenUsage(totalUsage, parseUsage(r));
           lastModelId = r.model ?? modelId;
 
           const aMsg = r.choices[0]?.message;
@@ -493,7 +489,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           conversation.push({ role: "user", content: toolResults });
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
 
       return {
@@ -547,7 +543,7 @@ function createEmbeddings(
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -576,7 +572,7 @@ function createEmbeddings(
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
   };
@@ -864,7 +860,7 @@ async function withTransientAuthRetry<T>(
  *   3. Capability rejection (temperature, json_object, system message)  →
  *      learn the constraint, retry once with offending param dropped.
  *
- * Anything else propagates as ProviderUnavailableError via {@link wrapError}.
+ * Anything else propagates as ProviderUnavailableError via {@link wrapProviderError}.
  */
 async function executeChatRequest(
   client: OpenAI,
@@ -907,7 +903,7 @@ async function executeChatRequest(
           learnFromResponse(req.modelId, retried);
           return { response: retried, modelId: req.modelId };
         } catch (retryErr) {
-          throw wrapError(alias, retryErr);
+          throw wrapProviderError(alias, retryErr);
         }
       }
 
@@ -943,7 +939,7 @@ async function executeChatRequest(
         triedCapabilityFallback = true;
         continue;
       }
-      throw wrapError(alias, err);
+      throw wrapProviderError(alias, err);
     }
   }
 }
@@ -1008,7 +1004,7 @@ async function executeChatStream(
         triedCapabilityFallback = true;
         continue;
       }
-      throw wrapError(alias, err);
+      throw wrapProviderError(alias, err);
     }
   }
 }
@@ -1034,93 +1030,6 @@ function parseUsage(response: {
     ...(cached !== undefined && cached > 0 ? { cacheReadTokens: cached } : {}),
     ...(reasoning !== undefined && reasoning > 0 ? { reasoningTokens: reasoning } : {}),
   };
-}
-
-function mergeUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-    ...(a.cacheReadTokens !== undefined || b.cacheReadTokens !== undefined
-      ? { cacheReadTokens: (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0) }
-      : {}),
-  };
-}
-
-function wrapError(alias: string, err: unknown): Error {
-  // Idempotent: don't double-wrap framework errors that are already typed.
-  // ProviderUnavailableError is what executeChatRequest produces; passing it
-  // through unchanged means runAgent's outer try/catch can stay simple.
-  // ValidationError is what failValidation produces; the caller wants to see
-  // it as-is, not wrapped as a provider failure.
-  if (err instanceof ProviderUnavailableError) {
-    return err;
-  }
-  if (err instanceof EmptyResponseError) {
-    return err;
-  }
-  if (err instanceof Error && err.name === "ValidationError") {
-    return err;
-  }
-  if (err instanceof Error) {
-    return new ProviderUnavailableError(alias, err);
-  }
-  return new ProviderUnavailableError(alias, new Error(String(err)));
-}
-
-function stringifyPrompt(content: GenerateTextOptions["prompt"]): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((block) => {
-      if (block.type === "text") return block.text;
-      if (block.type === "image") return "[image content]";
-      if (block.type === "tool_use") return `[tool_use ${block.name}]`;
-      if (block.type === "tool_result") return `[tool_result for ${block.toolUseId}]`;
-      return "[non-text block]";
-    })
-    .join("\n");
-}
-
-function extractJSON(raw: string): unknown {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const candidate = fenced?.[1] ?? raw;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return JSON.parse(candidate);
-  }
-  return JSON.parse(candidate.slice(start, end + 1));
-}
-
-function tryParsePartialJSON(buffer: string): unknown | null {
-  try {
-    const start = buffer.indexOf("{");
-    if (start === -1) return null;
-    return JSON.parse(buffer.slice(start));
-  } catch {
-    let opens = 0;
-    let closes = 0;
-    let opensq = 0;
-    let closesq = 0;
-    for (const ch of buffer) {
-      if (ch === "{") opens++;
-      else if (ch === "}") closes++;
-      else if (ch === "[") opensq++;
-      else if (ch === "]") closesq++;
-    }
-    let attempt =
-      buffer +
-      "}".repeat(Math.max(0, opens - closes)) +
-      "]".repeat(Math.max(0, opensq - closesq));
-    attempt = attempt.replace(/,\s*([}\]])/g, "$1");
-    try {
-      const start = attempt.indexOf("{");
-      if (start === -1) return null;
-      return JSON.parse(attempt.slice(start));
-    } catch {
-      return null;
-    }
-  }
 }
 
 interface OpenAITool {

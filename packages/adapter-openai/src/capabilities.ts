@@ -18,35 +18,38 @@
  * Users who already know their model's constraints can supply them via
  * `ModelCapabilities` in pricingOverrides — that takes precedence over
  * discovery (no first-call learning round-trip).
+ *
+ * The learner instance + Map machinery is shared across all adapters via
+ * `createCapabilityLearner` from `@llm-ports/core`. This file contributes
+ * the OpenAI-specific error classifiers.
  */
 
+import { createCapabilityLearner } from "@llm-ports/core";
 import type { ModelCapabilities } from "@llm-ports/core";
 
-// ─── Process-wide learned constraints ────────────────────────────────
+// ─── Process-wide learned constraints (one learner shared by this adapter) ─
 
-const learnedConstraints = new Map<string, ModelCapabilities>();
+const learner = createCapabilityLearner();
 
 /** Get the effective capabilities for a model: user-supplied OR learned at runtime. */
 export function getEffectiveCapabilities(
   modelId: string,
   userSupplied: ModelCapabilities | undefined,
 ): ModelCapabilities {
-  const learned = learnedConstraints.get(modelId) ?? {};
-  return { ...learned, ...userSupplied };
+  return learner.get(modelId, userSupplied);
 }
 
 /** Record a discovered constraint; used by the adapter after a fallback retry. */
 export function rememberConstraint(modelId: string, constraint: Partial<ModelCapabilities>): void {
-  const existing = learnedConstraints.get(modelId) ?? {};
-  learnedConstraints.set(modelId, { ...existing, ...constraint });
+  learner.remember(modelId, constraint);
 }
 
 /** Test-only: clear learned state. */
 export function _resetLearnedConstraints(): void {
-  learnedConstraints.clear();
+  learner._reset();
 }
 
-// ─── Error classification ────────────────────────────────────────────
+// ─── Error classification (OpenAI-specific) ──────────────────────────
 
 interface OpenAIErrorShape {
   status?: number;
