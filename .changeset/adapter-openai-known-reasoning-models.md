@@ -13,6 +13,9 @@ Catalog covers:
 
 Runtime learning still catches unknown reasoning models on first call; the catalog only saves the first-call round-trip for known ones. User-supplied `pricingOverrides[modelId].capabilities.reasoningModel` still overrides the catalog.
 
-The compat-providers table in `docs/adapters/openai.md` now lists Clarifai and SambaNova alongside Groq, Together, Fireworks, etc., with worked-example configs.
+The compat-providers table in `docs/adapters/openai.md` now lists Clarifai and SambaNova alongside Groq, Together, Fireworks, etc., with worked-example configs and concrete pricing:
+
+- Clarifai Qwen3.6 35B A3B FP8: $0.76 input / $0.43 output per 1M; 262k context (output cheaper than input — FP8 quantization quirk)
+- SambaNova MiniMax-M2.7: $0.60 input / $2.40 output per 1M; 197k context
 
 Exports added: `KNOWN_REASONING_MODELS` from `@llm-ports/adapter-openai` (read-only catalog). Public API otherwise unchanged.

@@ -106,7 +106,7 @@ describe("First-call behavior for seeded reasoning models", () => {
       apiKey: "test",
       baseURL: "https://api.clarifai.com/v2/ext/openai/v1",
       pricingOverrides: {
-        "Qwen3_6-35B-A3B-FP8": { inputPer1M: 1, outputPer1M: 4 },
+        "Qwen3_6-35B-A3B-FP8": { inputPer1M: 0.76, outputPer1M: 0.43 },
       },
     });
     const port = adapter.createLLMPort("Qwen3_6-35B-A3B-FP8", "clarifai-qwen");
@@ -135,7 +135,7 @@ describe("First-call behavior for seeded reasoning models", () => {
       apiKey: "test",
       baseURL: "https://api.sambanova.ai/v1",
       pricingOverrides: {
-        "MiniMax-M2.7": { inputPer1M: 1, outputPer1M: 4 },
+        "MiniMax-M2.7": { inputPer1M: 0.60, outputPer1M: 2.40 },
       },
     });
     const port = adapter.createLLMPort("MiniMax-M2.7", "sambanova-minimax");

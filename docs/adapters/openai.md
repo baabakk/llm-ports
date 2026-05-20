@@ -69,14 +69,17 @@ const clarifai = createOpenAIAdapter({
   displayName: "clarifai",
   pricingOverrides: {
     "Qwen3_6-35B-A3B-FP8": {
-      inputPer1M: /* from Clarifai pricing */ 0,
-      outputPer1M: /* from Clarifai pricing */ 0,
+      inputPer1M: 0.76,
+      outputPer1M: 0.43,
+      // Blended ~$0.72/1M; 262k context window.
       // reasoningModel: true is auto-seeded via KNOWN_REASONING_MODELS;
       // setting it here would override the catalog if you ever need to.
     },
   },
 });
 ```
+
+> **Pricing note**: Clarifai's Qwen3.6 FP8 has output pricing *lower* than input ($0.43 vs $0.76 per 1M). That's not a typo. The FP8 quantization makes output token generation cheaper than the prefill stage; most providers price the other way, so verify with [Clarifai's pricing page](https://clarifai.com/pricing) before locking it in.
 
 ### Worked example: SambaNova (MiniMax M2.7)
 
@@ -89,14 +92,17 @@ const sambanova = createOpenAIAdapter({
   displayName: "sambanova",
   pricingOverrides: {
     "MiniMax-M2.7": {
-      inputPer1M: /* from SambaNova pricing */ 0,
-      outputPer1M: /* from SambaNova pricing */ 0,
+      inputPer1M: 0.60,
+      outputPer1M: 2.40,
+      // Blended ~$0.78/1M; 197k context window.
     },
   },
 });
 ```
 
 > **Reasoning models need budget.** Both Qwen3.6 and MiniMax-M2.7 burn tokens on hidden reasoning before producing visible output. Always supply `maxOutputTokens` (8k+ recommended) so the auto-retry headroom multiplier has a number to expand. Calls without `maxOutputTokens` skip the safety net.
+
+> **Cost shape**: At blended $0.72/1M (Clarifai Qwen3.6) and $0.78/1M (SambaNova MiniMax-M2.7), these are comparable to Cerebras GptOSS 120B ($0.65 in / $0.85 out per 1M) and substantially cheaper than Claude Sonnet 4.5 ($3 in / $15 out). The 4:1 output:input premium on MiniMax-M2.7 means reasoning-heavy workloads (long internal chain-of-thought) will skew higher than the blended number suggests — budget on output tokens, not the blend.
 
 ## Adapter options
 
