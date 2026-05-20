@@ -130,3 +130,9 @@ export {
   _resetWarnedState,
   type FirstLearningEvent,
 } from "./notify-learning.js";
+
+// ─── Shared adapter utilities ────────────────────────────────────────
+export { wrapProviderError } from "./utils/wrap-provider-error.js";
+export { stringifyContentBlocks } from "./utils/stringify-content.js";
+export { extractJSON, tryParsePartialJSON } from "./utils/json.js";
+export { mergeTokenUsage } from "./utils/usage.js";
