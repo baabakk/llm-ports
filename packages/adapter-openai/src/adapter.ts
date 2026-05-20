@@ -55,6 +55,7 @@ import {
   isSystemMessageRejection,
   isTemperatureRejection,
   rememberConstraint,
+  seedKnownConstraints,
 } from "./capabilities.js";
 
 // ─── Adapter options ─────────────────────────────────────────────────
@@ -215,6 +216,9 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
 
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
+  // Seed known-reasoning catalog so first calls on o-series / gpt-5-nano /
+  // gpt-oss / Qwen3.6 / MiniMax-M2.7 skip the starvation-retry round-trip.
+  seedKnownConstraints(modelId);
 
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {

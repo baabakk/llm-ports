@@ -22,3 +22,4 @@
 
 export { createOpenAIAdapter, type OpenAIAdapter, type OpenAIAdapterOptions } from "./adapter.js";
 export { OPENAI_PRICING, lookupOpenAIPricing } from "./pricing.js";
+export { KNOWN_REASONING_MODELS } from "./capabilities.js";

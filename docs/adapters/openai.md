@@ -37,6 +37,8 @@ export const llm = registry.getPort();
 | DeepInfra | `https://api.deepinfra.com/v1/openai` | Open models |
 | Perplexity | `https://api.perplexity.ai` | Online models with citations |
 | Cerebras | `https://api.cerebras.ai/v1` | Fast inference |
+| Clarifai | `https://api.clarifai.com/v2/ext/openai/v1` | Personal Access Token (PAT) as `apiKey`; hosts Qwen3.6 + others |
+| SambaNova | `https://api.sambanova.ai/v1` | Bearer token as `apiKey`; hosts MiniMax-M2.7 + others |
 | LiteLLM proxy | self-hosted, e.g. `http://localhost:4000` | Self-hosted proxy |
 | Ollama (compat mode) | `http://localhost:11434/v1` | Prefer [`adapter-ollama`](/adapters/ollama) for native API + management |
 
@@ -53,6 +55,48 @@ createOpenAIAdapter({
   },
 });
 ```
+
+### Worked example: Clarifai (Qwen3.6 35B A3B FP8)
+
+Clarifai exposes an OpenAI-compatible surface at `/v2/ext/openai/v1`. Authenticate with a Personal Access Token (PAT), pass the model ID exactly as published by Clarifai (`Qwen3_6-35B-A3B-FP8`), and the adapter handles the rest. Qwen3.6 is a reasoning model and ships in `KNOWN_REASONING_MODELS`, so the first call already uses the reasoning-headroom multiplier — no wasted round-trip.
+
+```ts
+import { createOpenAIAdapter } from "@llm-ports/adapter-openai";
+
+const clarifai = createOpenAIAdapter({
+  apiKey: process.env.CLARIFAI_PAT!,
+  baseURL: "https://api.clarifai.com/v2/ext/openai/v1",
+  displayName: "clarifai",
+  pricingOverrides: {
+    "Qwen3_6-35B-A3B-FP8": {
+      inputPer1M: /* from Clarifai pricing */ 0,
+      outputPer1M: /* from Clarifai pricing */ 0,
+      // reasoningModel: true is auto-seeded via KNOWN_REASONING_MODELS;
+      // setting it here would override the catalog if you ever need to.
+    },
+  },
+});
+```
+
+### Worked example: SambaNova (MiniMax M2.7)
+
+SambaNova exposes an OpenAI-compatible surface at `https://api.sambanova.ai/v1`. Pass your SambaNova bearer token as `apiKey`, use the published model ID (`MiniMax-M2.7`). MiniMax-M2.7 is also pre-seeded as a reasoning model.
+
+```ts
+const sambanova = createOpenAIAdapter({
+  apiKey: process.env.SAMBANOVA_API_KEY!,
+  baseURL: "https://api.sambanova.ai/v1",
+  displayName: "sambanova",
+  pricingOverrides: {
+    "MiniMax-M2.7": {
+      inputPer1M: /* from SambaNova pricing */ 0,
+      outputPer1M: /* from SambaNova pricing */ 0,
+    },
+  },
+});
+```
+
+> **Reasoning models need budget.** Both Qwen3.6 and MiniMax-M2.7 burn tokens on hidden reasoning before producing visible output. Always supply `maxOutputTokens` (8k+ recommended) so the auto-retry headroom multiplier has a number to expand. Calls without `maxOutputTokens` skip the safety net.
 
 ## Adapter options
 
@@ -116,7 +160,15 @@ Reasoning models — OpenAI's `o3`, `o3-mini`, `gpt-5-nano`, plus compat-provide
 
 The default headroom multiplier (10×) is calibrated against o-series reasoning intensity. You can override per-model via `pricingOverrides[modelId].capabilities.reasoningHeadroomMultiplier`.
 
-> **First-call cost.** The first call to an unknown reasoning model in a given process pays one wasted round-trip (the starved attempt) before the cache learns the constraint. Tracked at [TD-LLMP-03](https://github.com/baabakk/llm-ports/blob/main/TECH-DEBT.md#td-llmp-03); mitigation is to seed `pricingOverrides[modelId].capabilities.reasoningModel = true` if you already know the model is reasoning.
+> **First-call cost.** The first call to an unknown reasoning model in a given process pays one wasted round-trip (the starved attempt) before the cache learns the constraint. The adapter ships a `KNOWN_REASONING_MODELS` static catalog that pre-seeds the cache for well-known reasoning lineups so the wasted round-trip is skipped. Models the catalog already knows about (as of `0.1.0-alpha.4`):
+>
+> - OpenAI o-series (`o1*`, `o3*`, `o4*`)
+> - OpenAI `gpt-5-nano*`
+> - Cerebras `gpt-oss-*` (via `baseURL=https://api.cerebras.ai/v1`)
+> - Clarifai `Qwen3_6-*` (via `baseURL=https://api.clarifai.com/v2/ext/openai/v1`)
+> - SambaNova `MiniMax-M2.7` (via `baseURL=https://api.sambanova.ai/v1`)
+>
+> For other reasoning models the adapter doesn't know yet, runtime learning still catches the constraint on first call. To skip even that one wasted round-trip, set `pricingOverrides[modelId].capabilities.reasoningModel = true`. Tracked at [TD-LLMP-03](https://github.com/baabakk/llm-ports/blob/main/TECH-DEBT.md#td-llmp-03).
 
 The adapter also handles two other transient OpenAI quirks transparently:
 

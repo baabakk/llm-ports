@@ -33,6 +33,22 @@ Detected via `isTemperatureRejection` matching:
 
 No static catalog yet (the adapter learns from the first call). If you want to skip the wasted round-trip, supply `pricingOverrides[modelId].capabilities.temperatureLocked = true` at adapter construction.
 
+### Models with reasoning (hidden chain-of-thought)
+
+Reasoning models burn output tokens on internal reasoning before producing visible text. A naive call with a small `maxOutputTokens` returns empty visible text + `finish_reason=length`. The adapter detects this and retries once with a headroom-multiplier-expanded budget.
+
+The static catalog `KNOWN_REASONING_MODELS` (in `packages/adapter-openai/src/capabilities.ts`) pre-seeds the learner so the first call against these models already uses the multiplier — no wasted round-trip.
+
+| Model pattern | Provider example | First seen |
+|---|---|---|
+| `o1*` / `o3*` / `o4*` | OpenAI native | alpha.4 (2026-05) |
+| `gpt-5-nano*` | OpenAI native | alpha.4 (2026-05) |
+| `gpt-oss-*` (case-insensitive) | Cerebras (`baseURL=https://api.cerebras.ai/v1`) | alpha.4 (2026-05) |
+| `qwen3[._-]?6*` (case-insensitive) | Clarifai (`baseURL=https://api.clarifai.com/v2/ext/openai/v1`); canonical ID `Qwen3_6-35B-A3B-FP8` | alpha.4 (2026-05) |
+| `minimax[-_]?m2[._]7*` (case-insensitive) | SambaNova (`baseURL=https://api.sambanova.ai/v1`); canonical ID `MiniMax-M2.7` | alpha.4 (2026-05) |
+
+To extend: add a new `KnownModelConstraint` entry to `KNOWN_REASONING_MODELS` and ship a patch release. Or wait for runtime learning to catch the new model on first use; the adapter retries and learns automatically. Or supply `pricingOverrides[modelId].capabilities.reasoningModel = true` per call site.
+
 ### Models that reject `response_format: json_object`
 
 Some reasoning models don't support OpenAI's native JSON mode. The adapter falls back to prompted-JSON-plus-Zod-retry automatically.

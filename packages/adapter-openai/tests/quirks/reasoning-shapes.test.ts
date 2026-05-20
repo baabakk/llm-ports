@@ -35,11 +35,15 @@ beforeEach(() => {
 
 describe("Group A: Cerebras gpt-oss-style reasoning (message.reasoning, no content)", () => {
   it("starved first call → auto-retry with expanded budget → returns visible content", async () => {
+    // Use a placeholder model ID that is NOT in KNOWN_REASONING_MODELS so this
+    // test still exercises the runtime-learning path (`gpt-oss-*` is pre-seeded
+    // in alpha.4+, which would skip the wasted-round-trip the test verifies).
+    const UNKNOWN_REASONING_MODEL = "cerebras-future-reasoner-v0";
     const adapter = createOpenAIAdapter({
       apiKey: "test",
-      pricingOverrides: { "gpt-oss-120b": { inputPer1M: 0.65, outputPer1M: 0.85 } },
+      pricingOverrides: { [UNKNOWN_REASONING_MODEL]: { inputPer1M: 0.65, outputPer1M: 0.85 } },
     });
-    const port = adapter.createLLMPort("gpt-oss-120b", "live-cerebras");
+    const port = adapter.createLLMPort(UNKNOWN_REASONING_MODEL, "live-cerebras");
 
     // First call: starved. Cerebras puts CoT in message.reasoning, omits content,
     // reports finish=length and reasoning_tokens=0 in usage.
@@ -49,6 +53,7 @@ describe("Group A: Cerebras gpt-oss-style reasoning (message.reasoning, no conte
         promptTokens: 75,
         completionTokens: 20,
         finishReason: "length",
+        modelId: UNKNOWN_REASONING_MODEL,
       }),
     );
     // Second call (auto-retry with multiplier): adapter sends max=200, model
@@ -60,6 +65,7 @@ describe("Group A: Cerebras gpt-oss-style reasoning (message.reasoning, no conte
         promptTokens: 75,
         completionTokens: 30,
         finishReason: "stop",
+        modelId: UNKNOWN_REASONING_MODEL,
       }),
     );
 

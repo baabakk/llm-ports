@@ -25,7 +25,7 @@
  */
 
 import { createCapabilityLearner } from "@llm-ports/core";
-import type { ModelCapabilities } from "@llm-ports/core";
+import type { KnownModelConstraint, ModelCapabilities } from "@llm-ports/core";
 
 // ─── Process-wide learned constraints (one learner shared by this adapter) ─
 
@@ -47,6 +47,45 @@ export function rememberConstraint(modelId: string, constraint: Partial<ModelCap
 /** Test-only: clear learned state. */
 export function _resetLearnedConstraints(): void {
   learner._reset();
+}
+
+// ─── Static catalog of known reasoning models ────────────────────────
+
+/**
+ * Models we already know exhibit reasoning behavior (hidden chain-of-thought
+ * consuming output budget). Pre-seeds the learner so the first call against
+ * these models skips the "starve, learn, retry with multiplier" round-trip.
+ *
+ * The runtime `learnFromResponse` path catches new reasoning models anyway
+ * by inspecting `usage.completion_tokens_details.reasoning_tokens` and
+ * `choices[0].message.reasoning`. This catalog only saves the first call.
+ *
+ * Patterns are case-insensitive and tolerate underscore-vs-hyphen +
+ * dot-vs-underscore variation, since OpenAI-compat providers normalize
+ * model IDs inconsistently (Clarifai uses `Qwen3_6`, others use `qwen-3.6`).
+ *
+ * Extend this list as new reasoning models ship behind OpenAI-compat
+ * baseURLs (Clarifai, SambaNova, Groq, Together AI, Fireworks, Cerebras,
+ * Perplexity, DeepInfra, LiteLLM proxy, etc.).
+ */
+export const KNOWN_REASONING_MODELS: readonly KnownModelConstraint[] = [
+  // OpenAI o-series (already learned at runtime; pre-seed saves first call)
+  { pattern: /^o1(-|$)/, constraints: { reasoningModel: true } },
+  { pattern: /^o3(-|$)/, constraints: { reasoningModel: true } },
+  { pattern: /^o4(-|$)/, constraints: { reasoningModel: true } },
+  { pattern: /^gpt-5-nano/, constraints: { reasoningModel: true } },
+  // Cerebras gpt-oss reasoning lineup (via baseURL=cerebras)
+  { pattern: /^gpt-oss-/i, constraints: { reasoningModel: true } },
+  // Qwen 3.6 reasoning (Clarifai: Qwen3_6-35B-A3B-FP8; other compats may
+  // use qwen-3.6-* or qwen3.6-*).
+  { pattern: /^qwen3[._-]?6/i, constraints: { reasoningModel: true } },
+  // MiniMax M2.7 reasoning (SambaNova: MiniMax-M2.7).
+  { pattern: /^minimax[-_]?m2[._]7/i, constraints: { reasoningModel: true } },
+];
+
+/** Seed the learner with this adapter's known-reasoning catalog for a model. */
+export function seedKnownConstraints(modelId: string): void {
+  learner.seedFromCatalog(modelId, KNOWN_REASONING_MODELS);
 }
 
 // ─── Error classification (OpenAI-specific) ──────────────────────────
