@@ -43,6 +43,7 @@ These items shipped fixes in the `0.1.0-alpha.1` patch. Listed here for context 
 | Vercel adapter starved reasoning models | [#4](https://github.com/baabakk/llm-ports/issues/4) — Vercel adapter now retries once with a 4× budget when finish=length, empty text, and tokens were consumed. |
 | Vercel `generateStructured` threw `SyntaxError: Unexpected end of JSON input` on empty responses | [#5](https://github.com/baabakk/llm-ports/issues/5) — adapter now throws typed `EmptyResponseError` carrying `alias` + `modelId`. |
 | Capability factories' default `taskType` values were not documented | [#6](https://github.com/baabakk/llm-ports/issues/6) — getting-started shows the `LLM_TASK_ROUTE_GENERAL` catch-all; the [task-routing concept page](/concepts/task-routing) documents per-capability defaults. |
+| `adapter-anthropic` forwarded `temperature` to models that reject it (Claude 4.5+ reasoning) | [#12](https://github.com/baabakk/llm-ports/issues/12) — adapter now learns the constraint at runtime, strips temperature, retries automatically. Includes static catalog for known rejectors, `onRetry` plumbing (parity with adapter-openai / adapter-vercel), and click-to-file GitHub URL when new constraints are learned. See [`known-quirks.md`](/known-quirks). |
 
 ### Medium-impact (still open in v0.1)
 
