@@ -114,3 +114,19 @@ export {
 
 // ─── Retry observability ─────────────────────────────────────────────
 export type { OnRetry, RetryEvent, RetryReason } from "./retry.js";
+export { emitRetryEvent } from "./retry-emit.js";
+
+// ─── Capability learning (shared across adapters) ────────────────────
+export {
+  createCapabilityLearner,
+  type CapabilityLearner,
+  type KnownModelConstraint,
+} from "./capabilities-learning.js";
+
+// ─── Notification on runtime-learned constraints ─────────────────────
+export {
+  buildLearningIssueUrl,
+  emitFirstLearningWarning,
+  _resetWarnedState,
+  type FirstLearningEvent,
+} from "./notify-learning.js";
