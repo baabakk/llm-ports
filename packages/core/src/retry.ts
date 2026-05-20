@@ -43,6 +43,15 @@ export interface RetryEvent {
    * forward the Zod issues here.
    */
   cause?: unknown;
+  /**
+   * When `reason === "capability-fallback"`, names the specific capability
+   * the adapter learned about (e.g. `temperatureLocked`, `jsonModeUnsupported`,
+   * `systemMessageInUserOnly`). Lets observability stacks distinguish "we
+   * stripped temperature" from "we stripped json_object" from each other.
+   * Adapter authors should populate this whenever the retry was driven by a
+   * specific capability rejection. Omitted for other retry reasons.
+   */
+  capability?: string;
 }
 
 /**
