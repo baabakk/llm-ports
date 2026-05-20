@@ -13,8 +13,12 @@ import { Ollama } from "ollama";
 import {
   computeChatCost,
   computeEmbeddingCost,
+  extractJSON,
   failValidation,
-  ProviderUnavailableError,
+  mergeTokenUsage,
+  stringifyContentBlocks,
+  tryParsePartialJSON,
+  wrapProviderError,
   type AgentResult,
   type BatchEmbeddingOptions,
   type BatchEmbeddingResult,
@@ -218,7 +222,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -244,8 +248,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             messages.push({ role: "system", content: options.instructions });
           }
           const userText = correctionPrompt
-            ? `${stringifyPrompt(options.prompt)}\n\n${correctionPrompt}`
-            : `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only.`;
+            ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
+            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only.`;
           messages.push({ role: "user", content: userText });
 
           const response = await ctx.client.chat({
@@ -287,7 +291,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           }
           failValidation(parsed.error.issues, attempts);
         } catch (err) {
-          throw wrapError(alias, err);
+          throw wrapProviderError(alias, err);
         }
       }
       throw new Error("generateStructured exhausted attempts");
@@ -318,7 +322,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           if (typeof text === "string" && text.length > 0) yield text;
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -331,7 +335,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         }
         messages.push({
           role: "user",
-          content: `${stringifyPrompt(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+          content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
         });
         const stream = await ctx.client.chat({
           model: modelId,
@@ -353,7 +357,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           if (partial !== null) yield partial;
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -389,7 +393,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               ...(options.maxOutputTokens !== undefined ? { num_predict: options.maxOutputTokens } : {}),
             },
           });
-          totalUsage = mergeUsage(totalUsage, parseUsage(response));
+          totalUsage = mergeTokenUsage(totalUsage, parseUsage(response));
           lastModelId = response.model ?? modelId;
           const aMsg = response.message;
           if (!aMsg) {
@@ -454,7 +458,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           conversation.push({ role: "user", content: toolResults });
         }
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
 
       return {
@@ -500,7 +504,7 @@ function createEmbeddings(
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
 
@@ -521,7 +525,7 @@ function createEmbeddings(
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapError(alias, err);
+        throw wrapProviderError(alias, err);
       }
     },
   };
@@ -547,83 +551,6 @@ function parseUsage(response: OllamaChatResponse): TokenUsage {
     outputTokens,
     totalTokens: inputTokens + outputTokens,
   };
-}
-
-function mergeUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-  };
-}
-
-function wrapError(alias: string, err: unknown): Error {
-  // Idempotent: don't double-wrap framework errors that are already typed.
-  if (err instanceof ProviderUnavailableError) {
-    return err;
-  }
-  if (err instanceof Error && err.name === "ValidationError") {
-    return err;
-  }
-  if (err instanceof Error) {
-    return new ProviderUnavailableError(alias, err);
-  }
-  return new ProviderUnavailableError(alias, new Error(String(err)));
-}
-
-function stringifyPrompt(content: GenerateTextOptions["prompt"]): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((block) => {
-      if (block.type === "text") return block.text;
-      if (block.type === "image") return "[image content]";
-      if (block.type === "tool_use") return `[tool_use ${block.name}]`;
-      if (block.type === "tool_result") return `[tool_result for ${block.toolUseId}]`;
-      return "[non-text block]";
-    })
-    .join("\n");
-}
-
-function extractJSON(raw: string): unknown {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const candidate = fenced?.[1] ?? raw;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return JSON.parse(candidate);
-  }
-  return JSON.parse(candidate.slice(start, end + 1));
-}
-
-function tryParsePartialJSON(buffer: string): unknown | null {
-  try {
-    const start = buffer.indexOf("{");
-    if (start === -1) return null;
-    return JSON.parse(buffer.slice(start));
-  } catch {
-    let opens = 0;
-    let closes = 0;
-    let opensq = 0;
-    let closesq = 0;
-    for (const ch of buffer) {
-      if (ch === "{") opens++;
-      else if (ch === "}") closes++;
-      else if (ch === "[") opensq++;
-      else if (ch === "]") closesq++;
-    }
-    let attempt =
-      buffer +
-      "}".repeat(Math.max(0, opens - closes)) +
-      "]".repeat(Math.max(0, opensq - closesq));
-    attempt = attempt.replace(/,\s*([}\]])/g, "$1");
-    try {
-      const start = attempt.indexOf("{");
-      if (start === -1) return null;
-      return JSON.parse(attempt.slice(start));
-    } catch {
-      return null;
-    }
-  }
 }
 
 interface OllamaToolParameterProperty {
