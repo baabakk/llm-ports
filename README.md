@@ -289,7 +289,7 @@ Skip it if:
 
 `llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (250+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
 
-Five medium-impact alpha-bake issues ([#1](https://github.com/baabakk/llm-ports/issues/1), [#3](https://github.com/baabakk/llm-ports/issues/3), [#4](https://github.com/baabakk/llm-ports/issues/4), [#5](https://github.com/baabakk/llm-ports/issues/5), [#6](https://github.com/baabakk/llm-ports/issues/6)) shipped in `0.1.0-alpha.1` / `0.1.0-alpha.2` and are now closed: Zod-to-JSON-Schema in both adapters, `onRetry` observability hook, Vercel reasoning-starvation retry + typed `EmptyResponseError`, capability-factories task-routing docs, and `adapter-openai` `EmptyResponseError` parity. The full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status).
+Six medium-impact alpha-bake issues ([#1](https://github.com/baabakk/llm-ports/issues/1), [#3](https://github.com/baabakk/llm-ports/issues/3), [#4](https://github.com/baabakk/llm-ports/issues/4), [#5](https://github.com/baabakk/llm-ports/issues/5), [#6](https://github.com/baabakk/llm-ports/issues/6), [#12](https://github.com/baabakk/llm-ports/issues/12)) shipped in `0.1.0-alpha.1` → `0.1.0-alpha.3` and are now closed: Zod-to-JSON-Schema in both adapters, `onRetry` observability hook, Vercel reasoning-starvation retry + typed `EmptyResponseError`, capability-factories task-routing docs, `adapter-openai` `EmptyResponseError` parity, and `adapter-anthropic` temperature-rejection auto-strip + runtime capability learning. `0.1.0-alpha.3` additionally hoists 5 shared adapter utilities into `@llm-ports/core` and adds a static `KNOWN_REASONING_MODELS` catalog for OpenAI-compat reasoning models (o-series, gpt-5-nano, Cerebras gpt-oss, Clarifai Qwen3.6, SambaNova MiniMax-M2.7) so first calls skip the wasted starvation-retry round-trip. The full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status).
 
 What's still open:
 
@@ -303,7 +303,7 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-`llm-ports` is in alpha (`v0.1.0-alpha.2`; `adapter-openai`) / `v0.1.0-alpha.1` (every other package). Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
+`llm-ports` is in alpha. All packages are now at `v0.1.0-alpha.3`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
 npm install @llm-ports/core
