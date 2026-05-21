@@ -204,6 +204,7 @@ The key shift:
 | `@llm-ports/capabilities` | Reusable LLM operation factories |
 | `@llm-ports/adapter-openai` | OpenAI SDK adapter with `baseURL` support for compatible providers |
 | `@llm-ports/adapter-anthropic` | Anthropic SDK adapter |
+| `@llm-ports/adapter-google` | Google Gemini native adapter (@google/genai SDK) — full multimodal, bundled pricing |
 | `@llm-ports/adapter-ollama` | Ollama native adapter with model management |
 | `@llm-ports/adapter-vercel` | Vercel AI SDK adapter for migration and compatibility |
 
@@ -289,7 +290,7 @@ Skip it if:
 
 `llm-ports` is pre-release. The core architecture is stable and the offline regression suite is comprehensive (250+ tests, latency p99 under 1 ms, no doc-rot detected across 110+ snippets). Some adapter and agent paths are still being hardened.
 
-Six medium-impact alpha-bake issues ([#1](https://github.com/baabakk/llm-ports/issues/1), [#3](https://github.com/baabakk/llm-ports/issues/3), [#4](https://github.com/baabakk/llm-ports/issues/4), [#5](https://github.com/baabakk/llm-ports/issues/5), [#6](https://github.com/baabakk/llm-ports/issues/6), [#12](https://github.com/baabakk/llm-ports/issues/12)) shipped in `0.1.0-alpha.1` → `0.1.0-alpha.3` and are now closed: Zod-to-JSON-Schema in both adapters, `onRetry` observability hook, Vercel reasoning-starvation retry + typed `EmptyResponseError`, capability-factories task-routing docs, `adapter-openai` `EmptyResponseError` parity, and `adapter-anthropic` temperature-rejection auto-strip + runtime capability learning. `0.1.0-alpha.3` additionally hoists 5 shared adapter utilities into `@llm-ports/core` and adds a static `KNOWN_REASONING_MODELS` catalog for OpenAI-compat reasoning models (o-series, gpt-5-nano, Cerebras gpt-oss, Clarifai Qwen3.6, SambaNova MiniMax-M2.7) so first calls skip the wasted starvation-retry round-trip. `0.1.0-alpha.4` adds an optional `detail` field to `ImageSource` (forwarded to OpenAI's `image_url.detail`) for cost-vs-fidelity control on vision-heavy workloads — `"low"` ~9× cheaper than `"high"` for screenshot triage — plus an image-content-block conformance test in the contract suite so a future adapter can't ship with broken image handling. The full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status).
+Eleven medium-impact alpha-bake issues ([#1](https://github.com/baabakk/llm-ports/issues/1), [#3](https://github.com/baabakk/llm-ports/issues/3), [#4](https://github.com/baabakk/llm-ports/issues/4), [#5](https://github.com/baabakk/llm-ports/issues/5), [#6](https://github.com/baabakk/llm-ports/issues/6), [#12](https://github.com/baabakk/llm-ports/issues/12), [#14](https://github.com/baabakk/llm-ports/issues/14), [#16](https://github.com/baabakk/llm-ports/issues/16), [#19](https://github.com/baabakk/llm-ports/issues/19), [#20](https://github.com/baabakk/llm-ports/issues/20), [#21](https://github.com/baabakk/llm-ports/issues/21)) shipped in `0.1.0-alpha.1` → `0.1.0-alpha.5` and are now closed. `0.1.0-alpha.5` is the big one: new native Google Gemini adapter (full multimodal, bundled pricing), two-layer validation hardening (`jsonrepair` syntactic fallback in `extractJSON` + BEPA-style deterministic Zod-issue repair pass before retry-with-feedback), image-block boundary validation (typed `ImageTooLargeError` + `InvalidImageUrlError` at the adapter boundary), session-scoped cost gating (`Registry.openCostSession({ budgetUSD })` → hard USD cap independent of per-provider gates, designed for screen-capture / OCR loops), and assistant-response `image_url` decoding in `adapter-openai`. The full per-surface inventory lives at the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status).
 
 What's still open:
 
@@ -303,7 +304,7 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-`llm-ports` is in alpha. All packages are now at `v0.1.0-alpha.4`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
+`llm-ports` is in alpha. All packages are now at `v0.1.0-alpha.5`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
 npm install @llm-ports/core
@@ -314,6 +315,7 @@ Install adapters as needed:
 ```bash
 npm install @llm-ports/adapter-anthropic
 npm install @llm-ports/adapter-openai
+npm install @llm-ports/adapter-google
 npm install @llm-ports/adapter-ollama
 npm install @llm-ports/adapter-vercel
 npm install @llm-ports/capabilities
