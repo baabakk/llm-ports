@@ -51,8 +51,8 @@ if (openaiKey) {
   env.LLM_PROVIDER_VISION_OPENAI = "openai|gpt-4o-mini|cost:1/day";
 }
 
-env.LLM_TASK_ROUTE_DESCRIBE_ANTHROPIC = "vision_anthropic";
-env.LLM_TASK_ROUTE_DESCRIBE_OPENAI = "vision_openai";
+env.LLM_TASK_ROUTE_DESCRIBE_ANTHROPIC = "vision-anthropic";
+env.LLM_TASK_ROUTE_DESCRIBE_OPENAI = "vision-openai";
 
 const registry = createRegistryFromEnv({ env, adapters });
 
@@ -62,7 +62,7 @@ if (anthropicKey) {
   console.log("--- live vision: Anthropic (base64 PNG) ---");
   try {
     const result = await registry.getPort().generateText({
-      taskType: "describe_anthropic",
+      taskType: "describe-anthropic",
       prompt: [
         { type: "text", text: "What color is this image? Reply in one word." },
         { type: "image", source: { kind: "base64", mediaType: "image/png", data: TINY_PNG } },
@@ -84,7 +84,7 @@ if (openaiKey) {
   console.log("\n--- live vision: OpenAI base64 PNG + detail='low' ---");
   try {
     const result = await registry.getPort().generateText({
-      taskType: "describe_openai",
+      taskType: "describe-openai",
       prompt: [
         { type: "text", text: "What color is this image? Reply in one word." },
         {
@@ -113,7 +113,7 @@ if (openaiKey) {
   try {
     // Use a stable, public 1×1 PNG. Wikimedia Commons hosts one.
     const result = await registry.getPort().generateText({
-      taskType: "describe_openai",
+      taskType: "describe-openai",
       prompt: [
         { type: "text", text: "What color is the image? Reply in one word." },
         {
