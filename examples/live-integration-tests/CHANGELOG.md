@@ -1,19 +1,13 @@
-# @llm-ports/example-with-onretry
+# @llm-ports/example-live-integration-tests
 
 ## 0.1.0-alpha.3
 
 ### Patch Changes
 
 - Updated dependencies [fbbd507]
+- Updated dependencies [fbbd507]
 - Updated dependencies [e5d058f]
 - Updated dependencies [fbbd507]
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.3
   - @llm-ports/adapter-openai@0.1.0-alpha.3
   - @llm-ports/core@0.1.0-alpha.3
-  - @llm-ports/capabilities@0.1.0-alpha.3
-
-## 0.1.0-alpha.2
-
-### Patch Changes
-
-- Updated dependencies
-  - @llm-ports/adapter-openai@0.1.0-alpha.2

@@ -18,10 +18,17 @@
     "@llm-ports/example-multi-provider": "0.0.0",
     "@llm-ports/example-streaming-chat": "0.0.0",
     "@llm-ports/example-local-with-ollama": "0.1.0-alpha.1",
-    "@llm-ports/example-with-onretry": "0.1.0-alpha.1"
+    "@llm-ports/example-with-onretry": "0.1.0-alpha.1",
+    "@llm-ports/example-live-integration-tests": "0.1.0-alpha.2"
   },
   "changesets": [
+    "adapter-anthropic-temperature-fix",
+    "adapter-ollama-consume-core-utils",
+    "adapter-openai-consume-core-utils",
+    "adapter-openai-known-reasoning-models",
+    "adapter-vercel-consume-core-utils",
     "capability-task-types-docs",
+    "core-shared-utilities",
     "initial-alpha",
     "on-retry-hook",
     "openai-empty-response-parity",

@@ -1,5 +1,20 @@
 # @llm-ports/adapter-ollama
 
+## 0.1.0-alpha.3
+
+### Patch Changes
+
+- fbbd507: Non-functional refactor: consumes shared utilities from `@llm-ports/core` instead of local duplicates.
+  - `wrapError` → `wrapProviderError` (from core)
+  - `stringifyPrompt` → `stringifyContentBlocks` (from core)
+  - `mergeUsage` → `mergeTokenUsage` (from core)
+  - `extractJSON` and `tryParsePartialJSON` (from core)
+
+  `onRetry` plumbing parity remains a follow-up (no retry sites today). Public API unchanged. All 30 adapter-ollama tests pass identically.
+
+- Updated dependencies [fbbd507]
+  - @llm-ports/core@0.1.0-alpha.3
+
 ## 0.1.0-alpha.1
 
 ### Patch Changes

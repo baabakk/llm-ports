@@ -1,5 +1,12 @@
 # @llm-ports/capabilities
 
+## 0.1.0-alpha.3
+
+### Patch Changes
+
+- Updated dependencies [fbbd507]
+  - @llm-ports/core@0.1.0-alpha.3
+
 ## 0.1.0-alpha.1
 
 ### Patch Changes

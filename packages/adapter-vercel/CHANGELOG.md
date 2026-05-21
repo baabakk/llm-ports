@@ -1,5 +1,20 @@
 # @llm-ports/adapter-vercel
 
+## 0.1.0-alpha.3
+
+### Patch Changes
+
+- fbbd507: Non-functional refactor: consumes shared utilities from `@llm-ports/core` instead of local duplicates.
+  - `wrapError` → `wrapProviderError` (from core)
+  - `stringifyPrompt` → `stringifyContentBlocks` (from core)
+  - `extractJSON` and `tryParsePartialJSON` (from core)
+  - Local `emitRetry` is now a thin wrapper around `emitRetryEvent` (from core)
+
+  Public API unchanged. All 19 adapter-vercel tests pass identically.
+
+- Updated dependencies [fbbd507]
+  - @llm-ports/core@0.1.0-alpha.3
+
 ## 0.1.0-alpha.1
 
 ### Minor Changes
