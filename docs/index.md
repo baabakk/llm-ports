@@ -27,8 +27,8 @@ features:
     title: 17 capability factories
     details: classify, score, draft, summarize, extract, plan, analyze (v0.1) — configure once, call many times. 10 more in v0.2.
   - icon: 🌐
-    title: 4 adapters, 14+ providers
-    details: Anthropic, OpenAI (+10 compatible providers via baseURL), Ollama (local + model management), Vercel AI SDK migration helper.
+    title: 4 adapters, 16+ providers
+    details: Anthropic, OpenAI (+12 compatible providers via baseURL — Groq, Together, Fireworks, Cerebras, Clarifai, SambaNova, and others), Ollama (local + model management), Vercel AI SDK migration helper.
   - icon: 🛡️
     title: Tool-use security primitives
     details: Mark tools destructive, requireConfirmation, set output size limits. Safety isn't an afterthought.

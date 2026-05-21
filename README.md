@@ -293,7 +293,7 @@ Five medium-impact alpha-bake issues ([#1](https://github.com/baabakk/llm-ports/
 
 What's still open:
 
-- Some compat-provider models (Cerebras via OpenAI baseURL, Groq, Together AI, Fireworks) may require a `pricingOverrides` entry to satisfy the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default.
+- Some compat-provider models (Cerebras via OpenAI baseURL, Groq, Together AI, Fireworks, Clarifai, SambaNova) may require a `pricingOverrides` entry to satisfy the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default. Worked examples for Clarifai's Qwen3.6 35B A3B FP8 and SambaNova's MiniMax-M2.7 are in the [openai adapter docs](https://baabakk.github.io/llm-ports/adapters/openai).
 - Vercel adapter `runAgent` is single-turn only (multi-turn lands in v0.2).
 - Registry walks the chain on **budget gating** but does not yet retry the next provider on **runtime errors** (v0.2). Catch `ProviderUnavailableError` at the call site for now.
 
