@@ -100,7 +100,14 @@ function toOpenAIContentPart(block: ContentBlock): OpenAIContentPart {
         block.source.kind === "url"
           ? block.source.url
           : `data:${block.source.mediaType};base64,${block.source.data}`;
-      return { type: "image_url", image_url: { url } };
+      // detail is optional on both ImageSource variants; forward only when set
+      // so we don't override OpenAI's per-account default ("auto") on calls
+      // that didn't request a specific mode.
+      const image_url: { url: string; detail?: "auto" | "low" | "high" } = { url };
+      if (block.source.detail !== undefined) {
+        image_url.detail = block.source.detail;
+      }
+      return { type: "image_url", image_url };
     }
     case "audio": {
       // OpenAI only accepts base64-encoded audio; URL audio is not supported

@@ -73,6 +73,21 @@ export interface ContractTestContext {
    * and the corresponding conformance tests will skip.
    */
   createPortWithOnRetry?: (hook: OnRetry) => LLMPort;
+
+  /**
+   * Optional. Declares the adapter's image-content support. Used to gate the
+   * conformance suite's image-pipeline tests:
+   *   - `"base64"`: adapter accepts base64 ImageBlocks only (Ollama).
+   *   - `"url"`: adapter accepts URL ImageBlocks only (no known adapter today).
+   *   - `"base64+url"`: adapter accepts both (Anthropic, OpenAI).
+   *   - `"none"` (or undefined): adapter does not pass image blocks through to
+   *     the underlying model (Vercel v0.1 — degrades to text placeholder).
+   * When set to anything other than `"none"` / undefined, the conformance suite
+   * asserts that `generateText` with an image+text prompt completes without
+   * throwing and returns the expected response. Adapters that degrade images
+   * to text placeholders should leave this unset so the test skips.
+   */
+  imageContentSupport?: "none" | "base64" | "url" | "base64+url";
 }
 
 /** A factory for the test context. Called fresh for each test. */
@@ -295,6 +310,71 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         });
 
         expect(result.data).toEqual({ intent: "request", urgency: "high" });
+      });
+    });
+
+    describe("image content blocks (conditional)", () => {
+      // A 1×1 transparent PNG, base64-encoded. Smallest possible image payload —
+      // works on every vision-capable model the adapters target.
+      const tinyPng =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+      it("generateText accepts a base64 ImageBlock in the prompt", async () => {
+        const ctx = await setup();
+        if (
+          ctx.imageContentSupport === undefined ||
+          ctx.imageContentSupport === "none" ||
+          ctx.imageContentSupport === "url"
+        ) {
+          return;
+        }
+
+        ctx.setupGenerateText({
+          text: "I see a 1x1 image",
+          usage: { inputTokens: 200, outputTokens: 10, totalTokens: 210 },
+        });
+
+        const result = await ctx.port.generateText({
+          taskType: "test-vision",
+          prompt: [
+            { type: "text", text: "What is in this image?" },
+            {
+              type: "image",
+              source: { kind: "base64", mediaType: "image/png", data: tinyPng },
+            },
+          ],
+        });
+
+        expect(result.text).toBe("I see a 1x1 image");
+        expect(result.usage.totalTokens).toBe(210);
+        expect(result.providerAlias).toBe(ctx.expectedAlias);
+      });
+
+      it("generateText accepts a URL ImageBlock in the prompt", async () => {
+        const ctx = await setup();
+        if (
+          ctx.imageContentSupport === undefined ||
+          ctx.imageContentSupport === "none" ||
+          ctx.imageContentSupport === "base64"
+        ) {
+          return;
+        }
+
+        ctx.setupGenerateText({
+          text: "I see a cat",
+          usage: { inputTokens: 250, outputTokens: 8, totalTokens: 258 },
+        });
+
+        const result = await ctx.port.generateText({
+          taskType: "test-vision-url",
+          prompt: [
+            { type: "text", text: "What is in this image?" },
+            { type: "image", source: { kind: "url", url: "https://example.com/cat.png" } },
+          ],
+        });
+
+        expect(result.text).toBe("I see a cat");
+        expect(result.providerAlias).toBe(ctx.expectedAlias);
       });
     });
 

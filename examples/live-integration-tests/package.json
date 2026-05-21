@@ -9,7 +9,8 @@
     "smoke:multi": "node live-multi-provider.mjs",
     "smoke:anthropic": "node live-anthropic.mjs",
     "smoke:chain": "node live-cross-adapter-chain.mjs",
-    "smoke:all": "node live.mjs && node live-multi-provider.mjs && node live-anthropic.mjs && node live-cross-adapter-chain.mjs",
+    "smoke:vision": "node live-vision.mjs",
+    "smoke:all": "node live.mjs && node live-multi-provider.mjs && node live-anthropic.mjs && node live-cross-adapter-chain.mjs && node live-vision.mjs",
     "build": "node -e \"console.log('no build step; .mjs files run directly')\""
   },
   "dependencies": {

@@ -36,10 +36,25 @@ export type ImageSource =
       kind: "base64";
       mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
       data: string;
+      /**
+       * Cost-vs-fidelity hint for the OpenAI vision pipeline.
+       * - `"auto"` (default): provider decides based on image size.
+       * - `"low"`: ~85 tokens regardless of image size; suitable for triage
+       *   and broad classification.
+       * - `"high"`: full per-tile analysis (~170 tokens per 512×512 tile);
+       *   needed for OCR, fine-grained reasoning, small text.
+       *
+       * Honored by `@llm-ports/adapter-openai` (forwarded to OpenAI's
+       * `image_url.detail`). Other adapters ignore the field — Anthropic and
+       * Ollama don't have an equivalent knob.
+       */
+      detail?: "auto" | "low" | "high";
     }
   | {
       kind: "url";
       url: string;
+      /** See base64 variant. Same semantics. */
+      detail?: "auto" | "low" | "high";
     };
 
 /** Audio input (audio-capable models). */

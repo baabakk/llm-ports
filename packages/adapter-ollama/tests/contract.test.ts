@@ -27,6 +27,7 @@ runContractTests("ollama", () => {
     port,
     expectedAlias: ALIAS,
     expectedModelId: MODEL_ID,
+    imageContentSupport: "base64",
 
     setupGenerateText(response) {
       mockChat.mockResolvedValueOnce(

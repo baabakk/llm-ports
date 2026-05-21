@@ -36,6 +36,7 @@ runContractTests("vercel", () => {
     port,
     expectedAlias: ALIAS,
     expectedModelId: MODEL_ID,
+    imageContentSupport: "none", // v0.1: image blocks degrade to placeholder strings
 
     setupGenerateText(response) {
       mockGenerateText.mockResolvedValueOnce(

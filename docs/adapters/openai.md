@@ -154,6 +154,38 @@ Source: openai.com/pricing. Verified 2026-04-10.
 
 `text`, `image` (base64 → data URI; URL passthrough), `audio` (base64 wav/mp3 only), `tool_use`, `tool_result`. The adapter throws `ContentBlockUnsupportedError` for unsupported variants.
 
+### Image cost-vs-fidelity: the `detail` hint
+
+OpenAI's vision pipeline accepts a `detail` hint per image: `"auto"` (default), `"low"`, or `"high"`.
+
+| `detail` | Token cost | Use case |
+|---|---|---|
+| `"low"` | ~85 tokens regardless of image size | Triage, broad classification, "is this a screenshot of X?" |
+| `"high"` | ~170 tokens per 512×512 tile (so a 1024×1024 image is ~765 tokens) | OCR, small-text reading, fine-grained reasoning |
+| `"auto"` (default) | OpenAI picks based on image size | Sensible default for mixed workloads |
+
+The field lives on `ImageSource` and is forwarded to `image_url.detail` when set:
+
+```ts
+const result = await llm.generateText({
+  taskType: "screenshot_triage",
+  prompt: [
+    { type: "text", text: "Is this a login form or a settings page?" },
+    {
+      type: "image",
+      source: {
+        kind: "base64",
+        mediaType: "image/png",
+        data: screenshotBase64,
+        detail: "low",  // 85 tokens vs ~765 for the default — 9x cheaper for triage
+      },
+    },
+  ],
+});
+```
+
+Other adapters ignore the field — Anthropic and Ollama don't have an equivalent knob.
+
 ## Reasoning models (auto-handled)
 
 Reasoning models — OpenAI's `o3`, `o3-mini`, `gpt-5-nano`, plus compat-provider reasoning models like Cerebras `gpt-oss-120b` — burn tokens on internal chain-of-thought before producing visible output. A naive call with `maxOutputTokens: 20` against `gpt-5-nano` reliably returns empty text and `finish_reason=length` because the budget got consumed by reasoning.

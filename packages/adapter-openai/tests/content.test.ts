@@ -45,6 +45,45 @@ describe("toOpenAIUserContent", () => {
     ]);
   });
 
+  it("forwards detail='low' on base64 image", () => {
+    expect(
+      toOpenAIUserContent([
+        {
+          type: "image",
+          source: { kind: "base64", mediaType: "image/png", data: "deadbeef", detail: "low" },
+        },
+      ]),
+    ).toEqual([
+      {
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,deadbeef", detail: "low" },
+      },
+    ]);
+  });
+
+  it("forwards detail='high' on URL image", () => {
+    expect(
+      toOpenAIUserContent([
+        {
+          type: "image",
+          source: { kind: "url", url: "https://example.com/cat.png", detail: "high" },
+        },
+      ]),
+    ).toEqual([
+      {
+        type: "image_url",
+        image_url: { url: "https://example.com/cat.png", detail: "high" },
+      },
+    ]);
+  });
+
+  it("omits detail field when not specified (lets OpenAI default to 'auto')", () => {
+    const result = toOpenAIUserContent([
+      { type: "image", source: { kind: "url", url: "https://example.com/cat.png" } },
+    ]) as Array<{ type: string; image_url: { url: string; detail?: string } }>;
+    expect(result[0]?.image_url.detail).toBeUndefined();
+  });
+
   it("converts base64 audio (wav/mp3) to input_audio part", () => {
     expect(
       toOpenAIUserContent([
