@@ -1,5 +1,14 @@
 # @llm-ports/example-agent-with-approval
 
+## 0.1.0-alpha.4
+
+### Patch Changes
+
+- Updated dependencies [f0885e6]
+- Updated dependencies [f0885e6]
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.4
+  - @llm-ports/core@0.1.0-alpha.4
+
 ## 0.1.0-alpha.3
 
 ### Patch Changes

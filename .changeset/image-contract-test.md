@@ -1,5 +1,4 @@
 ---
-"@llm-ports/adapter-contract-tests": minor
 "@llm-ports/adapter-anthropic": patch
 "@llm-ports/adapter-openai": patch
 "@llm-ports/adapter-ollama": patch

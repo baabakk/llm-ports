@@ -1,5 +1,49 @@
 # @llm-ports/adapter-openai
 
+## 0.1.0-alpha.4
+
+### Minor Changes
+
+- f0885e6: Add optional `detail?: "auto" | "low" | "high"` field to `ImageSource` (both base64 and URL variants). Forwarded to OpenAI's `image_url.detail` to control the cost-vs-fidelity tradeoff:
+  - `"low"` ~85 tokens regardless of image size; suitable for triage / broad classification
+  - `"high"` ~170 tokens per 512×512 tile; needed for OCR and fine-grained reasoning
+  - `"auto"` (default) lets OpenAI decide based on image size
+
+  For screenshot-heavy or document-OCR workloads, switching to `"low"` for triage can cut per-image vision cost ~9x. The field is additive — existing call sites work unchanged.
+
+  Other adapters (Anthropic, Ollama) ignore the field. Anthropic and Ollama have no equivalent knob in their respective image APIs.
+
+  ```ts
+  {
+    type: "image",
+    source: {
+      kind: "base64",
+      mediaType: "image/png",
+      data: screenshotBase64,
+      detail: "low",
+    },
+  }
+  ```
+
+### Patch Changes
+
+- f0885e6: Add image-content-block conformance tests to the shared contract suite. Closes a gap where a new adapter could ship with broken image handling and the conformance suite would still pass.
+
+  The contract suite now includes two conditional tests under `image content blocks (conditional)`:
+  1. `generateText accepts a base64 ImageBlock in the prompt`
+  2. `generateText accepts a URL ImageBlock in the prompt`
+
+  Each test gates on a new `ContractTestContext.imageContentSupport` flag:
+  - `"base64"` — Ollama (URL form is not supported by the underlying API)
+  - `"url"` — none today
+  - `"base64+url"` — Anthropic, OpenAI
+  - `"none"` / undefined — Vercel (v0.1 degrades images to placeholder strings)
+
+  Each per-adapter `contract.test.ts` now declares its support level. Total contract-suite tests per adapter went from 8 to 10.
+
+- Updated dependencies [f0885e6]
+  - @llm-ports/core@0.1.0-alpha.4
+
 ## 0.1.0-alpha.3
 
 ### Patch Changes

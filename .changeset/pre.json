@@ -29,6 +29,8 @@
     "adapter-vercel-consume-core-utils",
     "capability-task-types-docs",
     "core-shared-utilities",
+    "image-contract-test",
+    "image-detail-field",
     "initial-alpha",
     "on-retry-hook",
     "openai-empty-response-parity",
