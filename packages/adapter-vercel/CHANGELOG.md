@@ -1,5 +1,58 @@
 # @llm-ports/adapter-vercel
 
+## 0.1.0-alpha.5
+
+### Minor Changes
+
+- b00ff65: Image-block boundary validation (closes issues #19, #20, #21 from the image-pipeline audit).
+
+  **New errors** in `@llm-ports/core`:
+  - `ImageTooLargeError(alias, imageIndex, byteSize, limitBytes)` — base64 image exceeds the provider's per-image byte limit
+  - `InvalidImageUrlError(alias, url, reason)` — URL-form image with `file://`, `data:`, missing scheme, or other bad shape
+
+  **New helpers** in `@llm-ports/core`:
+  - `validateImageBlocks(blocks, opts)` — call at the adapter boundary on every outgoing `ContentBlock[]`
+  - `validateImageUrl(url, alias, allowFileUrl)` — standalone URL-shape check
+
+  **Per-adapter boundary checks** wired in every port method (`generateText`, `generateStructured`, `streamText`, `streamStructured`, `runAgent`) with adapter-specific defaults:
+
+  | Adapter             | Default `imageSizeLimitBytes` | Source                                  |
+  | ------------------- | ----------------------------- | --------------------------------------- |
+  | `adapter-anthropic` | 5 MB                          | Anthropic's documented per-image limit  |
+  | `adapter-openai`    | 20 MB                         | OpenAI's documented per-image limit     |
+  | `adapter-ollama`    | unset (model-dependent)       | Ollama itself doesn't enforce           |
+  | `adapter-vercel`    | 20 MB                         | Matches the underlying SDK's image path |
+  | `adapter-google`    | 20 MB (new package)           | Gemini's documented inline limit        |
+
+  **Assistant `image_url` decoding** in `adapter-openai`: `fromOpenAIAssistantMessage` now decodes any `image_url` content part in an assistant response back to an `ImageBlock` (data URI → base64, http(s) → URL). Previously these were silently dropped (commented "very rare"). Zero models emit this today, but future-proofs the round-trip.
+
+  17 new tests in `@llm-ports/core` + 3 new tests in `@llm-ports/adapter-openai`.
+
+### Patch Changes
+
+- b00ff65: Two-layer validation hardening that reduces retry-with-feedback round-trips:
+
+  **Layer 1 — `extractJSON()` falls back to `jsonrepair`** when plain `JSON.parse` fails. Catches trailing commas, single quotes, smart quotes, unquoted keys, Python `None`/`True`/`False`, comments, missing braces, and most other LLM syntactic quirks before paying for a retry. Gated on "input has `{` or `[`" so prose-only input still throws cleanly.
+
+  **Layer 2 — `attemptValidationRepair()` ported from BEPA** runs between Zod `safeParse` failure and the retry-with-feedback step. Deterministic, schema-driven repair of 6 patterns:
+  1. `null` where a non-null type is expected → delete key (lets `.optional()` succeed)
+  2. string `"9"` where `number` expected → coerce to `9`
+  3. string `"true"`/`"false"` where `boolean` expected → coerce to `true`/`false`
+  4. number `9` where `string` expected → coerce to `"9"`
+  5. enum case/whitespace drift (`"HIGH"`) → `.toLowerCase().trim()` (`"high"`)
+  6. `null` in optional union → delete key
+
+  Wired into `generateStructured` on every adapter. Each match avoids an LLM retry round-trip.
+
+  Compatible with both Zod v3 (`invalid_enum_value`) and Zod v4 (`invalid_value`).
+
+  20 new tests in `@llm-ports/core` (8 jsonrepair + 12 repair-validation).
+
+- Updated dependencies [b00ff65]
+- Updated dependencies [b00ff65]
+- Updated dependencies [b00ff65]
+  - @llm-ports/core@0.1.0-alpha.5
+
 ## 0.1.0-alpha.4
 
 ### Patch Changes

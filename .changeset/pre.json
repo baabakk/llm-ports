@@ -19,22 +19,27 @@
     "@llm-ports/example-streaming-chat": "0.0.0",
     "@llm-ports/example-local-with-ollama": "0.1.0-alpha.1",
     "@llm-ports/example-with-onretry": "0.1.0-alpha.1",
-    "@llm-ports/example-live-integration-tests": "0.1.0-alpha.2"
+    "@llm-ports/example-live-integration-tests": "0.1.0-alpha.2",
+    "@llm-ports/adapter-google": "0.1.0-alpha.4"
   },
   "changesets": [
     "adapter-anthropic-temperature-fix",
+    "adapter-google",
     "adapter-ollama-consume-core-utils",
     "adapter-openai-consume-core-utils",
     "adapter-openai-known-reasoning-models",
     "adapter-vercel-consume-core-utils",
     "capability-task-types-docs",
     "core-shared-utilities",
+    "image-boundary-validation",
     "image-contract-test",
     "image-detail-field",
     "initial-alpha",
     "on-retry-hook",
     "openai-empty-response-parity",
+    "session-cost-gate",
     "tool-schema-conversion",
+    "validation-hardening",
     "vercel-reasoning-and-empty"
   ]
 }

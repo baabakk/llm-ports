@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-email-triage",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "private": true,
   "description": "Email triage example: classify intent + urgency, draft a suggested reply, log everything for quality tracking. Composes two capability factories with the fallback-chain registry.",
   "type": "module",
