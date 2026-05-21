@@ -21,6 +21,29 @@ export class BudgetExceededError extends Error {
   }
 }
 
+/**
+ * Thrown when an active CostSession exceeds its USD budget. Distinct from
+ * `BudgetExceededError` (which gates per-provider hour/day/month) so call
+ * sites can recover differently — typically by closing the session and
+ * informing the user, not by routing to a fallback provider.
+ *
+ * Use case: continuous screen-capture loops where one stuck-open window
+ * could otherwise burn arbitrary dollars overnight. The session-scoped
+ * cap is a hard backstop independent of the per-provider gates.
+ */
+export class SessionBudgetExceededError extends Error {
+  public override readonly name = "SessionBudgetExceededError";
+  constructor(
+    public readonly sessionId: string,
+    public readonly budgetUSD: number,
+    public readonly spentUSD: number,
+  ) {
+    super(
+      `Cost session "${sessionId}" exceeded its budget: $${spentUSD.toFixed(6)} > $${budgetUSD.toFixed(6)}`,
+    );
+  }
+}
+
 /** Thrown when a configured provider is unreachable, returns an error, or is misconfigured. */
 export class ProviderUnavailableError extends Error {
   public override readonly name = "ProviderUnavailableError";
@@ -77,6 +100,49 @@ export class ConfigError extends Error {
   public override readonly name = "ConfigError";
   constructor(message: string) {
     super(message);
+  }
+}
+
+/**
+ * Thrown by adapters when an image content block exceeds the provider's
+ * per-image byte limit. Caught at the adapter boundary BEFORE the SDK call,
+ * so the caller sees a typed error instead of an opaque 413/400 wrapped as
+ * ProviderUnavailableError.
+ *
+ * Each adapter knows its own default limit (Anthropic 5MB, OpenAI 20MB,
+ * Ollama model-dependent), and the limit can be overridden per-adapter at
+ * port creation via `imageSizeLimitBytes`.
+ *
+ * `imageIndex` is the 0-indexed position of the offending image in the
+ * caller's `prompt` ContentBlock[] array.
+ */
+export class ImageTooLargeError extends Error {
+  public override readonly name = "ImageTooLargeError";
+  constructor(
+    public readonly alias: string,
+    public readonly imageIndex: number,
+    public readonly byteSize: number,
+    public readonly limitBytes: number,
+  ) {
+    super(
+      `Image at index ${imageIndex} is ${byteSize} bytes; exceeds the ${limitBytes}-byte limit for provider "${alias}".`,
+    );
+  }
+}
+
+/**
+ * Thrown by adapters when an image content block's URL form is malformed —
+ * `file://` scheme, `data:` URI passed as `kind: "url"` instead of base64,
+ * or a URL with no scheme. Caught at the adapter boundary BEFORE the SDK call.
+ */
+export class InvalidImageUrlError extends Error {
+  public override readonly name = "InvalidImageUrlError";
+  constructor(
+    public readonly alias: string,
+    public readonly url: string,
+    public readonly reason: string,
+  ) {
+    super(`Invalid image URL for provider "${alias}": ${reason}. URL: ${url.slice(0, 100)}`);
   }
 }
 

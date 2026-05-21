@@ -229,8 +229,17 @@ export function fromOpenAIAssistantMessage(message: {
     for (const part of message.content) {
       if (part.type === "text") {
         blocks.push({ type: "text", text: part.text });
+      } else if (part.type === "image_url") {
+        // Decode assistant-emitted image_url back into an ImageBlock so
+        // callers don't silently lose data when a vision model emits an
+        // image in its response. Detects data: URIs vs http(s) and routes
+        // them to the correct ImageSource kind. (Gap 5 / issue #20.)
+        const decoded = decodeAssistantImageUrl(part.image_url.url);
+        if (decoded) blocks.push(decoded);
       }
-      // image_url and input_audio in assistant responses are very rare; ignore
+      // input_audio: still rare in assistant responses; OpenAI exposes
+      // output audio via a separate `audio` field on the message, not as
+      // an `input_audio` content part. Skip until a real use case shows.
     }
   }
   if (message.tool_calls) {
@@ -250,6 +259,48 @@ export function fromOpenAIAssistantMessage(message: {
     }
   }
   return blocks;
+}
+
+/**
+ * Decode an assistant-emitted `image_url.url` back into an llm-ports
+ * `ImageBlock`. Returns null when the URL is malformed.
+ *
+ * Routing rule:
+ *   - `data:<mediaType>;base64,<payload>` → `{ kind: "base64", mediaType, data }`
+ *   - `http(s)://...`                       → `{ kind: "url", url }`
+ *   - Anything else (file://, missing scheme, etc.) → null
+ *
+ * The mediaType union is constrained to the four formats `ImageBlock`
+ * supports. If a model emits an exotic type (svg+xml, bmp, tiff), the
+ * decoder returns null and the assistant message is treated as if the
+ * image part wasn't there. That's preferred to a structurally-invalid
+ * ImageBlock that downstream code would crash on.
+ */
+function decodeAssistantImageUrl(url: string): ContentBlock | null {
+  if (typeof url !== "string" || url.length === 0) return null;
+
+  // data: URI form
+  const dataMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+  if (dataMatch && dataMatch[1] && dataMatch[2]) {
+    const mediaType = dataMatch[1];
+    const data = dataMatch[2];
+    if (
+      mediaType === "image/jpeg" ||
+      mediaType === "image/png" ||
+      mediaType === "image/gif" ||
+      mediaType === "image/webp"
+    ) {
+      return { type: "image", source: { kind: "base64", mediaType, data } };
+    }
+    return null;
+  }
+
+  // URL form
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return { type: "image", source: { kind: "url", url } };
+  }
+
+  return null;
 }
 
 /** Best-effort: extract just the assistant's text response. */

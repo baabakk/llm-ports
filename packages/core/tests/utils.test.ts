@@ -139,6 +139,57 @@ describe("extractJSON", () => {
   it("throws on invalid JSON", () => {
     expect(() => extractJSON("not even json")).toThrow();
   });
+
+  // ─── jsonrepair fallback (alpha.5) ──────────────────────────────────
+
+  it("repairs trailing commas via jsonrepair", () => {
+    expect(extractJSON('{"a": 1, "b": 2,}')).toEqual({ a: 1, b: 2 });
+  });
+
+  it("repairs single quotes via jsonrepair", () => {
+    expect(extractJSON("{'name': 'alice', 'age': 30}")).toEqual({
+      name: "alice",
+      age: 30,
+    });
+  });
+
+  it("repairs unquoted keys via jsonrepair", () => {
+    expect(extractJSON('{name: "alice", age: 30}')).toEqual({
+      name: "alice",
+      age: 30,
+    });
+  });
+
+  it("repairs Python None/True/False via jsonrepair", () => {
+    expect(extractJSON('{"a": None, "b": True, "c": False}')).toEqual({
+      a: null,
+      b: true,
+      c: false,
+    });
+  });
+
+  it("repairs missing closing brace via jsonrepair", () => {
+    expect(extractJSON('{"a": 1, "b": 2')).toEqual({ a: 1, b: 2 });
+  });
+
+  it("repairs comments via jsonrepair", () => {
+    expect(extractJSON('{"a": 1 /* this is a comment */, "b": 2}')).toEqual({
+      a: 1,
+      b: 2,
+    });
+  });
+
+  it("repairs LLM output with markdown fences AND syntactic quirks", () => {
+    expect(
+      extractJSON("```json\n{'name': 'alice', age: 30,}\n```"),
+    ).toEqual({ name: "alice", age: 30 });
+  });
+
+  it("surfaces ORIGINAL JSON parse error when even jsonrepair can't fix it", () => {
+    // jsonrepair's output is also unparseable; we want the actual SyntaxError
+    // from the first attempt, not the secondary one.
+    expect(() => extractJSON("definitely not json at all")).toThrow(SyntaxError);
+  });
 });
 
 describe("tryParsePartialJSON", () => {

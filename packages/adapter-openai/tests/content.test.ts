@@ -240,6 +240,53 @@ describe("fromOpenAIAssistantMessage", () => {
   it("returns empty when content is null and no tool_calls", () => {
     expect(fromOpenAIAssistantMessage({ content: null })).toEqual([]);
   });
+
+  // ─── alpha.5: assistant image_url decoding (gap 5 / issue #20) ────────
+
+  it("decodes assistant-emitted data: URI image_url back to a base64 ImageBlock", () => {
+    const blocks = fromOpenAIAssistantMessage({
+      content: [
+        { type: "text", text: "Here's a diagram:" },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,iVBORw0KGgo" },
+        },
+      ],
+    });
+    expect(blocks).toEqual([
+      { type: "text", text: "Here's a diagram:" },
+      {
+        type: "image",
+        source: { kind: "base64", mediaType: "image/png", data: "iVBORw0KGgo" },
+      },
+    ]);
+  });
+
+  it("decodes assistant-emitted https image_url back to a URL ImageBlock", () => {
+    const blocks = fromOpenAIAssistantMessage({
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: "https://example.com/diagram.png" },
+        },
+      ],
+    });
+    expect(blocks).toEqual([
+      { type: "image", source: { kind: "url", url: "https://example.com/diagram.png" } },
+    ]);
+  });
+
+  it("silently drops malformed image_url (no scheme, unknown media type) instead of crashing", () => {
+    const blocks = fromOpenAIAssistantMessage({
+      content: [
+        { type: "text", text: "ok" },
+        { type: "image_url", image_url: { url: "data:image/svg+xml;base64,PHN2Zz4=" } },
+        { type: "image_url", image_url: { url: "garbage" } },
+      ],
+    });
+    // Text survives; unknown-media-type data URI and scheme-less URL dropped.
+    expect(blocks).toEqual([{ type: "text", text: "ok" }]);
+  });
 });
 
 describe("extractAssistantText", () => {

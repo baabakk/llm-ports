@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
+  attemptValidationRepair,
   computeChatCost,
   computeEmbeddingCost,
   emitRetryEvent,
@@ -19,11 +20,13 @@ import {
   mergeTokenUsage,
   stringifyContentBlocks,
   tryParsePartialJSON,
+  validateImageBlocks,
   wrapProviderError,
   type AgentResult,
   type BatchEmbeddingOptions,
   type BatchEmbeddingResult,
   type ContentBlock,
+  type MessageContent,
   type EmbeddingOptions,
   type EmbeddingResult,
   type EmbeddingsPort,
@@ -114,6 +117,11 @@ export interface OpenAIAdapterOptions {
    */
   transientAuthBackoffMs?: (attempt: number) => number;
   /**
+   * Maximum bytes per base64 image. Defaults to 20MB (OpenAI's per-image
+   * limit). Set to 0 or a negative number to disable size validation.
+   */
+  imageSizeLimitBytes?: number;
+  /**
    * Observability hook fired whenever the adapter retries an in-flight
    * request for a known transient reason. Sync or async; called
    * fire-and-forget. Throwing from the hook does NOT cancel the retry.
@@ -140,6 +148,8 @@ interface AdapterContext {
   hasSucceeded: { value: boolean };
   transientAuthRetries: number;
   transientAuthBackoffMs: (attempt: number) => number;
+  /** 0 means "no size check"; positive number is the per-image byte limit. */
+  imageSizeLimitBytes: number;
   /** Observability hook for transient retries. Optional; no-op when unset. */
   onRetry?: OnRetry;
 }
@@ -201,6 +211,7 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     transientAuthRetries: opts.transientAuthRetries ?? 2,
     transientAuthBackoffMs:
       opts.transientAuthBackoffMs ?? ((attempt) => 500 * Math.pow(3, attempt)),
+    imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
@@ -220,8 +231,24 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   // gpt-oss / Qwen3.6 / MiniMax-M2.7 skip the starvation-retry round-trip.
   seedKnownConstraints(modelId);
 
+  // Validate image content blocks at the adapter boundary. Throws typed
+  // ImageTooLargeError or InvalidImageUrlError if a base64 image exceeds
+  // the size limit or a URL-form image has a bad scheme.
+  const validateContent = (content: MessageContent): void => {
+    if (Array.isArray(content)) {
+      validateImageBlocks(content, {
+        alias,
+        ...(ctx.imageSizeLimitBytes > 0 ? { limitBytes: ctx.imageSizeLimitBytes } : {}),
+      });
+    }
+  };
+  const validateMessages = (messages: ReadonlyArray<{ content: MessageContent }>): void => {
+    for (const msg of messages) validateContent(msg.content);
+  };
+
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      validateContent(options.prompt);
       const start = Date.now();
       const userMsg: OpenAIMessage = {
         role: "user",
@@ -255,6 +282,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -306,7 +334,16 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             "generateStructured needs a JSON body to parse. Increase maxOutputTokens or route to a fallback model.",
           );
         }
-        const parsed = options.schema.safeParse(extractJSON(raw));
+        const decoded = extractJSON(raw);
+        let parsed = options.schema.safeParse(decoded);
+        if (!parsed.success) {
+          // Programmatic repair pass — catches the 6 common LLM output
+          // quirks (null where not expected, "9" vs 9, "true" vs true, etc.)
+          // before paying for a retry-with-feedback round-trip.
+          const repaired = attemptValidationRepair(decoded, parsed.error);
+          const reparsed = options.schema.safeParse(repaired);
+          if (reparsed.success) parsed = reparsed;
+        }
         if (parsed.success) {
           return {
             data: parsed.data as T,
@@ -342,6 +379,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      validateContent(options.prompt);
       const userMsg: OpenAIMessage = {
         role: "user",
         content: toOpenAIUserContent(options.prompt),
@@ -363,6 +401,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      validateContent(options.prompt);
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
         messages: [
@@ -388,6 +427,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      validateMessages(options.messages);
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
       const conversation = [...options.messages];

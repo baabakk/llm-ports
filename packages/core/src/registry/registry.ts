@@ -43,6 +43,7 @@ import {
 } from "../errors.js";
 import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
+import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
 
 // ─── Adapter contract used internally by the registry ────────────────
 
@@ -197,6 +198,23 @@ export class Registry {
   /** Returns an EmbeddingsPort whose methods route to the selected adapter per call. */
   getEmbeddingsPort(): EmbeddingsPort {
     return new RegistryEmbeddingsPort(this);
+  }
+
+  /**
+   * Open a session-scoped cost gate. Returns a {@link CostSession} that
+   * wraps an LLMPort with a hard USD cap, independent of the per-provider
+   * hour/day/month gates. Throws `SessionBudgetExceededError` mid-loop
+   * when the cap is reached.
+   *
+   * Designed for continuous-call workloads (screen capture loops, OCR
+   * pipelines, multi-step agents) where a single stuck-open session can
+   * otherwise burn arbitrary dollars.
+   *
+   * The returned session has its own LLMPort via `session.getPort()`; the
+   * underlying registry's per-provider budget gates still apply on top.
+   */
+  openCostSession(opts: OpenCostSessionOptions): CostSession {
+    return new CostSession(this.getPort(), opts);
   }
 
   /** Introspection: list all provider aliases. */

@@ -107,8 +107,11 @@ export {
   ConfigError,
   ContentBlockUnsupportedError,
   EmptyResponseError,
+  ImageTooLargeError,
+  InvalidImageUrlError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
+  SessionBudgetExceededError,
   ValidationError,
 } from "./errors.js";
 
@@ -136,3 +139,10 @@ export { wrapProviderError } from "./utils/wrap-provider-error.js";
 export { stringifyContentBlocks } from "./utils/stringify-content.js";
 export { extractJSON, tryParsePartialJSON } from "./utils/json.js";
 export { mergeTokenUsage } from "./utils/usage.js";
+export { attemptValidationRepair } from "./utils/repair-validation.js";
+export { validateImageBlocks, validateImageUrl } from "./utils/validate-image.js";
+export type { ValidateImageOptions } from "./utils/validate-image.js";
+
+// ─── Cost session ────────────────────────────────────────────────────
+export { CostSession } from "./registry/cost-session.js";
+export type { OpenCostSessionOptions } from "./registry/cost-session.js";

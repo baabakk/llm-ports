@@ -12,6 +12,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
+  attemptValidationRepair,
   computeChatCost,
   emitRetryEvent,
   extractJSON,
@@ -19,9 +20,11 @@ import {
   mergeTokenUsage,
   stringifyContentBlocks,
   tryParsePartialJSON,
+  validateImageBlocks,
   wrapProviderError,
   type AgentResult,
   type ContentBlock,
+  type MessageContent,
   type GenerateStructuredOptions,
   type GenerateStructuredResult,
   type GenerateTextOptions,
@@ -80,6 +83,11 @@ export interface AnthropicAdapterOptions {
   /** Override Anthropic pricing for any model id. Falls back to the bundled table. */
   pricingOverrides?: Record<string, ModelPricing>;
   /**
+   * Maximum bytes per base64 image. Defaults to 5MB (Anthropic's per-image
+   * limit). Set to 0 or a negative number to disable size validation.
+   */
+  imageSizeLimitBytes?: number;
+  /**
    * Observability hook fired when the adapter retries an in-flight request.
    * Fired for `capability-fallback` reasons (currently only `temperatureLocked`).
    * Called fire-and-forget; hook errors do NOT cancel the retry.
@@ -93,6 +101,8 @@ interface AdapterContext {
   client: Anthropic;
   validationStrategy: ValidationStrategy;
   pricingOverrides: Record<string, ModelPricing>;
+  /** 0 means "no size check"; positive number is the per-image byte limit. */
+  imageSizeLimitBytes: number;
   onRetry?: OnRetry;
 }
 
@@ -144,6 +154,7 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
       includeOriginalError: true,
     },
     pricingOverrides: opts.pricingOverrides ?? {},
+    imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 5 * 1024 * 1024,
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
@@ -158,6 +169,20 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
 
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
+  // Validate image blocks in any outgoing prompt/messages. Throws typed
+  // ImageTooLargeError or InvalidImageUrlError at the adapter boundary so
+  // callers see a meaningful error instead of an opaque provider 4xx.
+  const validateContent = (content: MessageContent): void => {
+    if (Array.isArray(content)) {
+      validateImageBlocks(content, {
+        alias,
+        ...(ctx.imageSizeLimitBytes > 0 ? { limitBytes: ctx.imageSizeLimitBytes } : {}),
+      });
+    }
+  };
+  const validateMessages = (messages: ReadonlyArray<{ content: MessageContent }>): void => {
+    for (const msg of messages) validateContent(msg.content);
+  };
   // Seed known-rejector catalog so first calls on claude-opus-4-5-style
   // models skip the discovery round-trip on `temperature`.
   seedKnownConstraints(modelId);
@@ -246,6 +271,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       const start = Date.now();
+      validateContent(options.prompt);
       try {
         const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
           applyCapabilityFilter(
@@ -286,6 +312,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       // to the user content. Many production users would use Anthropic's "tool"
       // pattern for structured output; for v0.1 we use the simpler prompted JSON
       // approach plus retry-with-feedback. Tool-mode can be added later.
+      validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
       let lastErr: Error | null = null;
@@ -321,7 +348,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           lastUsage = parseUsage(response);
           lastModelId = response.model ?? modelId;
           const raw = extractAssistantText(response.content as never);
-          const parsed = options.schema.safeParse(extractJSON(raw));
+          const decoded = extractJSON(raw);
+          let parsed = options.schema.safeParse(decoded);
+          if (!parsed.success) {
+            // Programmatic repair pass — catches the 6 common LLM output
+            // quirks before paying for a retry-with-feedback round-trip.
+            const repaired = attemptValidationRepair(decoded, parsed.error);
+            const reparsed = options.schema.safeParse(repaired);
+            if (reparsed.success) parsed = reparsed;
+          }
           if (parsed.success) {
             return {
               data: parsed.data as T,
@@ -362,6 +397,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      validateContent(options.prompt);
       // Apply learned capabilities up front for the streaming call. Streaming
       // retries on capability rejection are not yet supported (mid-stream
       // retry requires buffering the entire response, which defeats the point
@@ -397,6 +433,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      validateContent(options.prompt);
       // Anthropic doesn't stream parsed JSON natively. We accumulate text deltas
       // and best-effort parse a partial JSON object after each chunk.
       const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
@@ -433,6 +470,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      validateMessages(options.messages);
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
       const conversation = [...options.messages];

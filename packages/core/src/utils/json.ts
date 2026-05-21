@@ -5,16 +5,21 @@
  *   - `extractJSON(raw)`: parses a string that may include markdown fences
  *     and surrounding prose into a JavaScript value. Throws on parse failure
  *     (callers handle the failure via the retry-with-feedback validation
- *     strategy upstream).
+ *     strategy upstream). Falls back to `jsonrepair` when plain JSON.parse
+ *     fails, which catches trailing commas, single quotes, smart quotes,
+ *     Python-style None/True/False, unquoted keys, comments, and most other
+ *     LLM-quirk syntactic issues.
  *
  *   - `tryParsePartialJSON(buffer)`: best-effort parse of an in-progress
  *     streaming buffer. Returns `null` if no JSON can yet be recovered;
  *     returns the parsed value if balancing the buffer's open braces /
  *     brackets and trimming trailing commas produces a valid parse.
  *
- * Hoisted from per-adapter copies in alpha.3. Every adapter that previously
- * wrote its own `extractJSON` / `tryParsePartialJSON` now imports these.
+ * Hoisted from per-adapter copies in alpha.3. jsonrepair fallback added in
+ * alpha.5 to reduce retry-with-feedback round-trips on syntactic quirks.
  */
+
+import { jsonrepair } from "jsonrepair";
 
 /**
  * Parse a JSON value out of a string that may be wrapped in markdown fences
@@ -25,18 +30,40 @@
  *      inner content.
  *   2. Find the first `{` and the last `}`. If both exist and `{` precedes
  *      `}`, parse the slice.
- *   3. Otherwise fall back to parsing the candidate as-is (lets the caller
- *      see the SyntaxError from JSON.parse).
+ *   3. If the parse fails, run the candidate through `jsonrepair` and try
+ *      again. This catches trailing commas, smart quotes, single quotes,
+ *      Python literals, unquoted keys, comments, and most syntactic LLM
+ *      quirks before we waste a retry-with-feedback round-trip.
+ *   4. If repair also fails, surface the underlying SyntaxError to the
+ *      caller (validation strategy decides whether to retry against the LLM).
  */
 export function extractJSON(raw: string): unknown {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   const candidate = fenced?.[1] ?? raw;
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return JSON.parse(candidate);
+  const sliced =
+    start === -1 || end === -1 || end <= start
+      ? candidate
+      : candidate.slice(start, end + 1);
+  try {
+    return JSON.parse(sliced);
+  } catch (parseErr) {
+    // Only fall back to jsonrepair when the input has structural JSON markers
+    // (a brace or bracket). Otherwise jsonrepair will happily wrap arbitrary
+    // prose like "not even json" in quotes and call it a valid JSON string —
+    // which silently breaks every caller that expected an object or array.
+    if (!sliced.includes("{") && !sliced.includes("[")) {
+      throw parseErr;
+    }
+    try {
+      return JSON.parse(jsonrepair(sliced));
+    } catch {
+      // Surface the ORIGINAL parse error, not the repair error — its message
+      // is the actually-useful diagnostic for retry-with-feedback.
+      throw parseErr;
+    }
   }
-  return JSON.parse(candidate.slice(start, end + 1));
 }
 
 /**

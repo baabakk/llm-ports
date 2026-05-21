@@ -20,6 +20,7 @@ import {
   type CoreMessage,
 } from "ai";
 import {
+  attemptValidationRepair,
   computeChatCost,
   computeEmbeddingCost,
   emitRetryEvent,
@@ -28,6 +29,7 @@ import {
   failValidation,
   stringifyContentBlocks,
   tryParsePartialJSON,
+  validateImageBlocks,
   wrapProviderError,
   type AgentResult,
   type BatchEmbeddingOptions,
@@ -38,6 +40,7 @@ import {
   type GenerateStructuredOptions,
   type GenerateStructuredResult,
   type GenerateTextOptions,
+  type MessageContent,
   type GenerateTextResult,
   type LLMPort,
   type ModelPricing,
@@ -76,6 +79,14 @@ export interface VercelAdapterOptions {
   /** Default validation strategy if the registry doesn't override per-call. */
   validationStrategy?: ValidationStrategy;
   /**
+   * Maximum bytes per base64 image. Defaults to 20MB. Note: in v0.1 the
+   * Vercel adapter degrades image blocks to `[image content]` placeholder
+   * strings, so this primarily matters for the URL-form validation (rejecting
+   * `file://`, etc.). When multi-modal lands in v0.2 the size check becomes
+   * the primary gate.
+   */
+  imageSizeLimitBytes?: number;
+  /**
    * Observability hook fired when the adapter retries an in-flight request.
    * Vercel adapter currently fires for two reasons:
    *   - reasoning-starvation (model spent its budget on hidden reasoning; retry with expanded budget)
@@ -90,6 +101,7 @@ interface AdapterContext {
   embeddingModels: Record<string, EmbeddingModel<string>>;
   pricing: Record<string, ModelPricing>;
   validationStrategy: ValidationStrategy;
+  imageSizeLimitBytes: number;
   onRetry?: OnRetry;
 }
 
@@ -126,6 +138,7 @@ export function createVercelAdapter(opts: VercelAdapterOptions): VercelAdapter {
       maxAttempts: 2,
       includeOriginalError: true,
     },
+    imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
@@ -216,8 +229,21 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   const pricing = pricingFor(ctx, modelId);
   const model = getModel(ctx, modelId);
 
+  const validateContent = (content: MessageContent): void => {
+    if (Array.isArray(content)) {
+      validateImageBlocks(content, {
+        alias,
+        ...(ctx.imageSizeLimitBytes > 0 ? { limitBytes: ctx.imageSizeLimitBytes } : {}),
+      });
+    }
+  };
+  const validateMessages = (messages: ReadonlyArray<{ content: MessageContent }>): void => {
+    for (const msg of messages) validateContent(msg.content);
+  };
+
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      validateContent(options.prompt);
       const start = Date.now();
       try {
         const result = await generateWithStarvationRetry(ctx, alias, modelId, {
@@ -244,6 +270,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -280,7 +307,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               "generateStructured needs a JSON body to parse. Increase maxOutputTokens or route to a fallback model.",
             );
           }
-          const parsed = options.schema.safeParse(extractJSON(result.text));
+          const decoded = extractJSON(result.text);
+          let parsed = options.schema.safeParse(decoded);
+          if (!parsed.success) {
+            // Programmatic repair pass — catches the 6 common LLM output
+            // quirks before paying for a retry-with-feedback round-trip.
+            const repaired = attemptValidationRepair(decoded, parsed.error);
+            const reparsed = options.schema.safeParse(repaired);
+            if (reparsed.success) parsed = reparsed;
+          }
           if (parsed.success) {
             return {
               data: parsed.data as T,
@@ -319,6 +354,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      validateContent(options.prompt);
       try {
         const stream = streamText({
           model,
@@ -336,6 +372,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      validateContent(options.prompt);
       try {
         const stream = streamText({
           model,
@@ -360,6 +397,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       // we use a simpler single-turn approach for shape consistency with
       // other adapters; users wanting multi-step tool use via Vercel can
       // call the underlying SDK directly. This will be enhanced in v0.2.
+      validateMessages(options.messages);
       const start = Date.now();
       try {
         const messages: CoreMessage[] = options.messages.map((m) => ({

@@ -11,6 +11,7 @@
 
 import { Ollama } from "ollama";
 import {
+  attemptValidationRepair,
   computeChatCost,
   computeEmbeddingCost,
   extractJSON,
@@ -18,11 +19,13 @@ import {
   mergeTokenUsage,
   stringifyContentBlocks,
   tryParsePartialJSON,
+  validateImageBlocks,
   wrapProviderError,
   type AgentResult,
   type BatchEmbeddingOptions,
   type BatchEmbeddingResult,
   type ContentBlock,
+  type MessageContent,
   type EmbeddingOptions,
   type EmbeddingResult,
   type EmbeddingsPort,
@@ -59,6 +62,13 @@ export interface OllamaAdapterOptions {
   validationStrategy?: ValidationStrategy;
   /** Override pricing for any model id. Falls back to OLLAMA_PRICING then DEFAULT (zero-cost). */
   pricingOverrides?: Record<string, ModelPricing>;
+  /**
+   * Maximum bytes per base64 image. Ollama itself doesn't enforce a limit
+   * (it's model-dependent: LLaVA tolerates ~1500×1500 px, others vary).
+   * Defaults to undefined (no size check). Set explicitly if you want
+   * client-side enforcement.
+   */
+  imageSizeLimitBytes?: number;
 }
 
 // ─── ModelManagement interface implementation ────────────────────────
@@ -84,6 +94,8 @@ interface AdapterContext {
   autoPull: boolean;
   keepAlive: string;
   pulled: Set<string>;
+  /** undefined = no size check (Ollama default — model-dependent). */
+  imageSizeLimitBytes?: number;
 }
 
 function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
@@ -134,6 +146,9 @@ export function createOllamaAdapter(opts: OllamaAdapterOptions = {}): OllamaAdap
     autoPull: opts.autoPull ?? false,
     keepAlive: opts.keepAlive ?? "5m",
     pulled: new Set(),
+    ...(opts.imageSizeLimitBytes !== undefined
+      ? { imageSizeLimitBytes: opts.imageSizeLimitBytes }
+      : {}),
   };
 
   return {
@@ -187,8 +202,26 @@ export function createOllamaAdapter(opts: OllamaAdapterOptions = {}): OllamaAdap
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
 
+  // Image-block validation closure. Ollama has no built-in size limit
+  // (model-dependent), but if the caller set imageSizeLimitBytes the check
+  // fires. URL-form images are always rejected (Ollama doesn't fetch URLs).
+  const validateContent = (content: MessageContent): void => {
+    if (Array.isArray(content)) {
+      validateImageBlocks(content, {
+        alias,
+        ...(ctx.imageSizeLimitBytes !== undefined && ctx.imageSizeLimitBytes > 0
+          ? { limitBytes: ctx.imageSizeLimitBytes }
+          : {}),
+      });
+    }
+  };
+  const validateMessages = (messages: ReadonlyArray<{ content: MessageContent }>): void => {
+    for (const msg of messages) validateContent(msg.content);
+  };
+
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      validateContent(options.prompt);
       const start = Date.now();
       try {
         await ensurePulled(ctx, modelId);
@@ -229,6 +262,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -267,7 +301,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           lastUsage = parseUsage(response);
           lastModelId = response.model ?? modelId;
           const raw = response.message?.content ?? "";
-          const parsed = options.schema.safeParse(extractJSON(raw));
+          const decoded = extractJSON(raw);
+          let parsed = options.schema.safeParse(decoded);
+          if (!parsed.success) {
+            // Programmatic repair pass — catches the 6 common LLM output
+            // quirks before paying for a retry-with-feedback round-trip.
+            const repaired = attemptValidationRepair(decoded, parsed.error);
+            const reparsed = options.schema.safeParse(repaired);
+            if (reparsed.success) parsed = reparsed;
+          }
           if (parsed.success) {
             return {
               data: parsed.data as T,
@@ -298,6 +340,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      validateContent(options.prompt);
       try {
         await ensurePulled(ctx, modelId);
         const messages: OllamaMessage[] = [];
@@ -327,6 +370,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      validateContent(options.prompt);
       try {
         await ensurePulled(ctx, modelId);
         const messages: OllamaMessage[] = [];
@@ -362,6 +406,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      validateMessages(options.messages);
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
       const conversation = [...options.messages];
