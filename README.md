@@ -296,7 +296,7 @@ What's still open:
 
 - Some compat-provider models (Cerebras via OpenAI baseURL, Groq, Together AI, Fireworks, Clarifai, SambaNova) may require a `pricingOverrides` entry to satisfy the registry's pricing-validation step. Bundled pricing tables cover OpenAI, Anthropic, and Ollama by default. Worked examples for Clarifai's Qwen3.6 35B A3B FP8 and SambaNova's MiniMax-M2.7 are in the [openai adapter docs](https://baabakk.github.io/llm-ports/adapters/openai).
 - Vercel adapter `runAgent` is single-turn only (multi-turn lands in v0.2).
-- Registry walks the chain on **budget gating** but does not yet retry the next provider on **runtime errors** (v0.2). Catch `ProviderUnavailableError` at the call site for now.
+- Registry walks the chain on **budget gating** AND on **runtime errors** (alpha.7+, default predicate: `ProviderUnavailableError`). Configurable via `runtimeFallback: "none" | "default" | { shouldFallback }`. Streaming methods walk only on stream-creation failure, not mid-iteration.
 
 If you hit something not listed here, please [open an issue](https://github.com/baabakk/llm-ports/issues/new/choose) — the bug-report template captures the version + repro shape we need.
 
@@ -304,7 +304,7 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-`llm-ports` is in alpha. All packages are now at `v0.1.0-alpha.6`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
+`llm-ports` is in alpha. All packages are now at `v0.1.0-alpha.7`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
 npm install @llm-ports/core
