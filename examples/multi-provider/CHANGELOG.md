@@ -1,5 +1,15 @@
 # @llm-ports/example-multi-provider
 
+## 0.1.0-alpha.7
+
+### Patch Changes
+
+- Updated dependencies [c805169]
+  - @llm-ports/core@0.1.0-alpha.7
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.7
+  - @llm-ports/adapter-openai@0.1.0-alpha.7
+  - @llm-ports/capabilities@0.1.0-alpha.7
+
 ## 0.1.0-alpha.6
 
 ### Patch Changes

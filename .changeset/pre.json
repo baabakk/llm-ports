@@ -38,6 +38,7 @@
     "initial-alpha",
     "on-retry-hook",
     "openai-empty-response-parity",
+    "runtime-fallback-and-force-provider",
     "session-cost-gate",
     "tool-schema-conversion",
     "validation-hardening",
