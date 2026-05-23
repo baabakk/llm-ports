@@ -23,6 +23,7 @@
     "@llm-ports/adapter-google": "0.1.0-alpha.4"
   },
   "changesets": [
+    "abort-signal-options",
     "adapter-anthropic-temperature-fix",
     "adapter-google",
     "adapter-ollama-consume-core-utils",

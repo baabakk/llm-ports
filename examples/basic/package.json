@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-basic",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "description": "Minimal single-provider llm-ports example: configure one adapter, call generateText.",
   "type": "module",

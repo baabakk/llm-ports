@@ -1,5 +1,14 @@
 # @llm-ports/example-live-integration-tests
 
+## 0.1.0-alpha.6
+
+### Patch Changes
+
+- Updated dependencies [34cd6cd]
+  - @llm-ports/core@0.1.0-alpha.6
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.6
+  - @llm-ports/adapter-openai@0.1.0-alpha.6
+
 ## 0.1.0-alpha.5
 
 ### Patch Changes
