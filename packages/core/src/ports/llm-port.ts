@@ -101,6 +101,15 @@ export interface CostUsage {
  * Cancellation semantics are best-effort and per-adapter; some SDKs return
  * a typed `AbortError`, others reject with the original `signal.reason`.
  * Callers should `catch` and inspect the error rather than assume one shape.
+ *
+ * `forceProviderAlias?: string` (alpha.7+) overrides the task-routing chain
+ * for this call only. The registry routes directly to the named provider
+ * alias, skipping the `LLM_TASK_ROUTE_*` lookup. Per-provider budget gates
+ * still apply (so `forceProviderAlias` can't be used to bypass a hard cap);
+ * runtime fallback also does NOT engage — if the forced provider fails, the
+ * error propagates. Useful for UIs where the operator picks a specific
+ * provider, or for one-off "use the expensive model for this single call"
+ * patterns.
  */
 
 export interface GenerateTextOptions {
@@ -114,6 +123,8 @@ export interface GenerateTextOptions {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
+  forceProviderAlias?: string;
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -128,6 +139,8 @@ export interface GenerateStructuredOptions<T> {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
+  forceProviderAlias?: string;
 }
 
 export interface StreamTextOptions {
@@ -139,6 +152,8 @@ export interface StreamTextOptions {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
+  forceProviderAlias?: string;
 }
 
 export interface StreamStructuredOptions<T> {
@@ -152,6 +167,8 @@ export interface StreamStructuredOptions<T> {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
+  forceProviderAlias?: string;
 }
 
 export interface RunAgentOptions {
@@ -165,6 +182,8 @@ export interface RunAgentOptions {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
+  forceProviderAlias?: string;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────

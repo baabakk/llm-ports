@@ -40,6 +40,7 @@ import {
 import {
   ConfigError,
   NoProvidersAvailableError,
+  ProviderUnavailableError,
 } from "../errors.js";
 import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
@@ -78,6 +79,28 @@ export interface RegistryOptions {
   validationStrategy?: ValidationStrategy;
   /** Override pricing for specific model ids (key = modelId). */
   pricingOverrides?: Record<string, ModelPricing>;
+  /**
+   * Runtime-error fallback configuration. When a call to the first viable
+   * provider in a task's fallback chain throws an error matching `catchClass`,
+   * the registry walks to the next viable provider and retries — without the
+   * caller having to catch and re-route themselves.
+   *
+   * Default: walks on `ProviderUnavailableError` only (the safest class —
+   * covers 5xx, network errors, rate-limit-style 429s the SDK wraps).
+   *
+   * Set to `"none"` to disable runtime fallback entirely (v0.1 behavior;
+   * caller catches `ProviderUnavailableError` and routes manually).
+   *
+   * Set to a custom predicate for finer control (e.g. walk on
+   * `EmptyResponseError` too, or skip 429s and let the SDK's own backoff
+   * handle them).
+   *
+   * Added in `0.1.0-alpha.7`.
+   */
+  runtimeFallback?:
+    | "default" // walk on ProviderUnavailableError
+    | "none" // disable; caller handles errors
+    | { shouldFallback: (err: unknown) => boolean };
 }
 
 // ─── Selection result ────────────────────────────────────────────────
@@ -98,6 +121,11 @@ export class Registry {
   public readonly budget: BudgetBackend;
   public readonly cost: CostBackend;
   public readonly validationStrategy: ValidationStrategy;
+  /**
+   * Returns true if an error should cause the registry to walk to the next
+   * viable provider in the fallback chain. See `RegistryOptions.runtimeFallback`.
+   */
+  public readonly shouldFallback: (err: unknown) => boolean;
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -108,6 +136,7 @@ export class Registry {
     this.cost = opts.cost ?? new InMemoryCost();
     this.validationStrategy = opts.validationStrategy ?? DEFAULT_VALIDATION_STRATEGY;
     this.pricingOverrides = opts.pricingOverrides ?? {};
+    this.shouldFallback = resolveRuntimeFallback(opts.runtimeFallback);
     this.validateConfig();
   }
 
@@ -190,6 +219,126 @@ export class Registry {
     throw new NoProvidersAvailableError(taskType, chain, reasons);
   }
 
+  /**
+   * Resolve a single provider by alias, bypassing the task-routing chain.
+   * Used by `forceProviderAlias` (alpha.7+). Per-provider budget gates still
+   * apply (P0 priority bypasses them, matching `selectModel`). Throws
+   * `NoProvidersAvailableError` if the alias is unconfigured or fails gating.
+   */
+  async selectByAlias(
+    alias: string,
+    priority: 0 | 1 | 2 | 3 = 2,
+  ): Promise<ModelSelection> {
+    const entry = this.config.providers[alias];
+    if (!entry) {
+      throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
+        [alias]: "provider not configured",
+      });
+    }
+    const adapter = this.adapters[entry.adapter];
+    if (!adapter) {
+      throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
+        [alias]: `adapter "${entry.adapter}" not registered`,
+      });
+    }
+    if (priority > 0) {
+      const budgetCheck = await this.budget.check(alias, entry.budgetLimit);
+      if (!budgetCheck.allowed) {
+        throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
+          [alias]: budgetCheck.reason ?? "budget exceeded",
+        });
+      }
+      const costCheck = await this.cost.check(alias, entry.costLimit);
+      if (!costCheck.allowed) {
+        throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
+          [alias]: costCheck.reason ?? "cost cap exceeded",
+        });
+      }
+    }
+    const pricing =
+      this.pricingOverrides[entry.modelId] ?? adapter.pricing[entry.modelId];
+    if (!pricing) {
+      throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
+        [alias]: `no pricing entry for model "${entry.modelId}"`,
+      });
+    }
+    return {
+      alias,
+      adapter,
+      modelId: entry.modelId,
+      pricing,
+      port: adapter.createLLMPort?.(entry.modelId, alias),
+      embeddingsPort: adapter.createEmbeddingsPort?.(entry.modelId, alias),
+    };
+  }
+
+  /**
+   * Resolve EVERY usable provider in the task's fallback chain, in order.
+   * Used by the registry's port proxy to walk the chain on runtime errors
+   * (alpha.7+). The eligibility checks (provider configured, adapter
+   * registered, budget allows, cost cap allows, pricing exists) are the
+   * same as `selectModel`; the difference is this method returns the full
+   * viable list instead of just the first.
+   *
+   * Throws `NoProvidersAvailableError` if NO providers in the chain are
+   * viable. Returns at least one `ModelSelection` otherwise.
+   */
+  async selectViableChain(
+    taskType: string,
+    priority: 0 | 1 | 2 | 3 = 2,
+  ): Promise<ModelSelection[]> {
+    const chain = this.config.taskRoutes[taskType] ?? this.config.taskRoutes["general"] ?? [];
+    if (chain.length === 0) {
+      throw new NoProvidersAvailableError(taskType, [], {
+        general: `No fallback chain configured for task "${taskType}" or "general"`,
+      });
+    }
+    const viable: ModelSelection[] = [];
+    const reasons: Record<string, string> = {};
+    for (const alias of chain) {
+      const entry = this.config.providers[alias];
+      if (!entry) {
+        reasons[alias] = "provider not configured";
+        continue;
+      }
+      const adapter = this.adapters[entry.adapter];
+      if (!adapter) {
+        reasons[alias] = `adapter "${entry.adapter}" not registered`;
+        continue;
+      }
+      if (priority > 0) {
+        const budgetCheck = await this.budget.check(alias, entry.budgetLimit);
+        if (!budgetCheck.allowed) {
+          reasons[alias] = budgetCheck.reason ?? "budget exceeded";
+          continue;
+        }
+        const costCheck = await this.cost.check(alias, entry.costLimit);
+        if (!costCheck.allowed) {
+          reasons[alias] = costCheck.reason ?? "cost cap exceeded";
+          continue;
+        }
+      }
+      const pricing =
+        this.pricingOverrides[entry.modelId] ?? adapter.pricing[entry.modelId];
+      if (!pricing) {
+        reasons[alias] = `no pricing entry for model "${entry.modelId}"`;
+        continue;
+      }
+      viable.push({
+        alias,
+        adapter,
+        modelId: entry.modelId,
+        pricing,
+        port: adapter.createLLMPort?.(entry.modelId, alias),
+        embeddingsPort: adapter.createEmbeddingsPort?.(entry.modelId, alias),
+      });
+    }
+    if (viable.length === 0) {
+      throw new NoProvidersAvailableError(taskType, chain, reasons);
+    }
+    return viable;
+  }
+
   /** Returns an LLMPort whose methods route to the selected adapter per call. */
   getPort(): LLMPort {
     return new RegistryPort(this);
@@ -240,55 +389,152 @@ export function createRegistryFromEnv(opts: RegistryOptions): Registry {
 
 // ─── Internal port proxies ───────────────────────────────────────────
 
-class RegistryPort implements LLMPort {
-  constructor(private readonly registry: Registry) {}
-
-  private async resolve(taskType: string, priority?: 0 | 1 | 2 | 3): Promise<ModelSelection> {
-    const sel = await this.registry.selectModel(taskType, priority);
+/**
+ * Resolve the viable chain, filter to selections that actually have an
+ * LLMPort, and walk through them attempting `attempt(sel)`. Walks on errors
+ * matching `registry.shouldFallback`; surfaces other errors immediately.
+ *
+ * Records budget + cost ONLY on the successful attempt. If every viable
+ * provider fails (or the chain is empty after filtering), throws a
+ * `NoProvidersAvailableError` whose `reasons` map carries the per-alias
+ * fallback error for diagnostics.
+ */
+async function walkChain<R>(
+  registry: Registry,
+  taskType: string,
+  priority: 0 | 1 | 2 | 3 | undefined,
+  attempt: (sel: ModelSelection) => Promise<R>,
+  recordCost: (sel: ModelSelection, result: R) => Promise<void>,
+  forceProviderAlias?: string,
+): Promise<R> {
+  // forceProviderAlias short-circuit: bypass task routing entirely. Single-
+  // element chain. Runtime fallback does NOT engage — caller explicitly asked
+  // for this provider; falling back would defeat the point.
+  if (forceProviderAlias !== undefined) {
+    const sel = await registry.selectByAlias(forceProviderAlias, priority);
     if (!sel.port) {
-      throw new NoProvidersAvailableError(taskType, [sel.alias], {
+      throw new NoProvidersAvailableError(`forced:${forceProviderAlias}`, [sel.alias], {
         [sel.alias]: `adapter "${sel.adapter.name}" does not implement LLMPort`,
       });
     }
-    return sel;
+    const result = await attempt(sel);
+    await registry.budget.recordRequest(sel.alias);
+    await recordCost(sel, result);
+    return result;
   }
+  const chain = await registry.selectViableChain(taskType, priority);
+  const reasons: Record<string, string> = {};
+  let lastErr: unknown;
+  for (const sel of chain) {
+    if (!sel.port) {
+      reasons[sel.alias] = `adapter "${sel.adapter.name}" does not implement LLMPort`;
+      continue;
+    }
+    try {
+      const result = await attempt(sel);
+      await registry.budget.recordRequest(sel.alias);
+      await recordCost(sel, result);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (!registry.shouldFallback(err)) throw err;
+      const message =
+        err instanceof Error ? err.message : typeof err === "string" ? err : "unknown error";
+      reasons[sel.alias] = `runtime fallback: ${message}`;
+      continue;
+    }
+  }
+  // Empty viable chain or every provider in the chain failed and fell through.
+  const attempted = chain.map((s) => s.alias);
+  if (lastErr instanceof Error && attempted.length > 0) {
+    // Surface the last error's message in the NoProviders summary so the
+    // caller doesn't have to dig through .reasons to see what actually failed.
+    throw new NoProvidersAvailableError(taskType, attempted, reasons);
+  }
+  throw new NoProvidersAvailableError(taskType, attempted, reasons);
+}
+
+class RegistryPort implements LLMPort {
+  constructor(private readonly registry: Registry) {}
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
-    const sel = await this.resolve(options.taskType, options.priority);
-    const result = await sel.port!.generateText(options);
-    await this.registry.budget.recordRequest(sel.alias);
-    await this.registry.cost.recordCost(sel.alias, result.cost.totalUSD);
-    return result;
+    return walkChain(
+      this.registry,
+      options.taskType,
+      options.priority,
+      (sel) => sel.port!.generateText(options),
+      (sel, result) => this.registry.cost.recordCost(sel.alias, result.cost.totalUSD),
+      options.forceProviderAlias,
+    );
   }
 
   async generateStructured<T>(
     options: GenerateStructuredOptions<T>,
   ): Promise<GenerateStructuredResult<T>> {
-    const sel = await this.resolve(options.taskType, options.priority);
-    const result = await sel.port!.generateStructured(options);
-    await this.registry.budget.recordRequest(sel.alias);
-    await this.registry.cost.recordCost(sel.alias, result.cost.totalUSD);
-    return result;
+    return walkChain(
+      this.registry,
+      options.taskType,
+      options.priority,
+      (sel) => sel.port!.generateStructured(options),
+      (sel, result) => this.registry.cost.recordCost(sel.alias, result.cost.totalUSD),
+      options.forceProviderAlias,
+    );
   }
 
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
-    const sel = await this.resolve(options.taskType, options.priority);
-    await this.registry.budget.recordRequest(sel.alias);
-    yield* sel.port!.streamText(options);
+    // Streaming runtime fallback is more nuanced — once we start yielding
+    // chunks, switching providers mid-stream would emit a confusing mix.
+    // For alpha.7 we walk the chain on the INITIAL `streamText()` call
+    // (most failures happen at stream-creation time anyway), then yield
+    // through whatever stream opened successfully. Mid-stream errors
+    // propagate as-is to the consumer; users handle them with a try/catch
+    // inside the for-await. Document this limit in the cancellation guide.
+    const startStream = async (sel: ModelSelection): Promise<AsyncIterable<string>> => {
+      await this.registry.budget.recordRequest(sel.alias);
+      return sel.port!.streamText(options);
+    };
+    const stream = await walkChain(
+      this.registry,
+      options.taskType,
+      options.priority,
+      startStream,
+      // No cost to record at stream-creation; streaming costs surface as the
+      // stream completes, and the existing v0.1 contract doesn't record per-chunk.
+      async () => {
+        /* noop */
+      },
+      options.forceProviderAlias,
+    );
+    yield* stream;
   }
 
   async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
-    const sel = await this.resolve(options.taskType, options.priority);
-    await this.registry.budget.recordRequest(sel.alias);
-    yield* sel.port!.streamStructured(options);
+    const startStream = async (sel: ModelSelection): Promise<AsyncIterable<Partial<T>>> => {
+      await this.registry.budget.recordRequest(sel.alias);
+      return sel.port!.streamStructured(options);
+    };
+    const stream = await walkChain(
+      this.registry,
+      options.taskType,
+      options.priority,
+      startStream,
+      async () => {
+        /* noop */
+      },
+      options.forceProviderAlias,
+    );
+    yield* stream;
   }
 
   async runAgent(options: RunAgentOptions): Promise<AgentResult> {
-    const sel = await this.resolve(options.taskType, options.priority);
-    const result = await sel.port!.runAgent(options);
-    await this.registry.budget.recordRequest(sel.alias);
-    await this.registry.cost.recordCost(sel.alias, result.cost.totalUSD);
-    return result;
+    return walkChain(
+      this.registry,
+      options.taskType,
+      options.priority,
+      (sel) => sel.port!.runAgent(options),
+      (sel, result) => this.registry.cost.recordCost(sel.alias, result.cost.totalUSD),
+      options.forceProviderAlias,
+    );
   }
 }
 
@@ -320,4 +566,25 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
     await this.registry.cost.recordCost(sel.alias, result.cost.totalUSD);
     return result;
   }
+}
+
+// ─── Runtime-fallback predicate resolution ───────────────────────────
+
+/**
+ * Translate the user-friendly `runtimeFallback` config into a predicate
+ * the registry uses to decide whether to walk the chain on an error.
+ *
+ *   - `"default"` (or undefined): walk on `ProviderUnavailableError` only.
+ *   - `"none"`: never walk — preserves v0.1 behavior.
+ *   - `{ shouldFallback }`: caller-supplied predicate.
+ */
+function resolveRuntimeFallback(
+  opt: RegistryOptions["runtimeFallback"],
+): (err: unknown) => boolean {
+  if (opt === "none") return () => false;
+  if (opt && typeof opt === "object" && "shouldFallback" in opt) {
+    return opt.shouldFallback;
+  }
+  // Default
+  return (err) => err instanceof ProviderUnavailableError;
 }

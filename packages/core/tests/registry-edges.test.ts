@@ -116,16 +116,16 @@ describe("Group J: registry + budget gating offline", () => {
     expect(reason).toMatch(/cost|budget|exceed/);
   });
 
-  it("documents current behavior: runtime ProviderUnavailableError propagates — does NOT trigger fallback (TD-LLMP-09)", async () => {
-    // CURRENT BEHAVIOR (v0.1): the registry only walks the fallback chain at
-    // selectModel-time (budget gating, missing pricing, unregistered adapter).
-    // Once a provider is selected, runtime errors from its port propagate
-    // unchanged. There is no try/catch around `sel.port.generateText(...)` in
-    // RegistryPort that retries the next chain entry on ProviderUnavailableError.
+  it("runtime ProviderUnavailableError on the first provider triggers fallback to the next (alpha.7+)", async () => {
+    // alpha.7 BEHAVIOR: the registry walks the fallback chain on runtime
+    // errors matching the `runtimeFallback` predicate. Default is to walk on
+    // `ProviderUnavailableError`. The `fast` provider 503s, the registry
+    // moves to `backup`, and the call succeeds.
     //
-    // FUTURE (TD-LLMP-09): runtime fallback would be a real resilience win for
-    // multi-provider setups. Tracked as tech debt; this test pins current
-    // behavior so a future PR adding runtime fallback notices the API change.
+    // Previously (≤ alpha.6) this test documented the OPPOSITE: runtime
+    // errors propagated and never fell back. See runtime-fallback.test.ts
+    // for the full alpha.7 surface (predicate config, NoProvidersAvailable
+    // on full-chain failure, streaming semantics).
     const network503 = new ProviderUnavailableError("fast", new Error("503 Service Unavailable"));
     const registry = createRegistryFromEnv({
       env: {
@@ -144,14 +144,8 @@ describe("Group J: registry + budget gating offline", () => {
     });
     const llm = registry.getPort();
 
-    let caught: unknown;
-    try {
-      await llm.generateText({ taskType: "triage", prompt: "x" });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(ProviderUnavailableError);
-    expect((caught as ProviderUnavailableError).alias).toBe("fast");
+    const result = await llm.generateText({ taskType: "triage", prompt: "x" });
+    expect(result.providerAlias).toBe("backup");
   });
 
   it("malformed env (wrong number of pipe-separated parts) throws ConfigError at construction", () => {
