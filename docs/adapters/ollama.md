@@ -119,6 +119,10 @@ This makes cost gating meaningful for local models. Otherwise leave the defaults
 
 `text`, `image` (base64 only), `tool_use`, `tool_result`. Throws `ContentBlockUnsupportedError` for `audio` and URL-form images.
 
+## Cancellation (limited)
+
+Entry-time abort support shipped in `0.1.0-alpha.6` — if `options.signal.aborted` is already true at entry, the call throws without invoking the daemon. **Mid-flight cancellation is NOT supported** because `ollama-js` v0.5 doesn't expose a per-call signal; its `client.abort()` method cancels ALL in-flight requests on the client, which is too coarse for per-call use. Will land when ollama-js v0.7+ exposes per-call signal. See the [Cancellation guide](/guides/cancellation).
+
 ## Reading next
 
 - [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper

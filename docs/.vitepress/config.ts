@@ -72,6 +72,7 @@ export default defineConfig({
             { text: "Multi-Provider Routing", link: "/guides/multi-provider" },
             { text: "Local-to-Cloud Flip", link: "/guides/local-to-cloud" },
             { text: "Cost Gating in Production", link: "/guides/cost-gating" },
+            { text: "Cancellation with AbortSignal", link: "/guides/cancellation" },
             { text: "Tool-Use Security", link: "/guides/security" },
             { text: "Custom Adapters", link: "/guides/custom-adapters" },
           ],
@@ -96,7 +97,8 @@ export default defineConfig({
           items: [
             { text: "Overview + Feature Matrix", link: "/adapters/" },
             { text: "Anthropic", link: "/adapters/anthropic" },
-            { text: "OpenAI (+10 compat providers)", link: "/adapters/openai" },
+            { text: "OpenAI (+12 compat providers)", link: "/adapters/openai" },
+            { text: "Google Gemini", link: "/adapters/google" },
             { text: "Ollama (local)", link: "/adapters/ollama" },
             { text: "Vercel AI SDK", link: "/adapters/vercel" },
           ],

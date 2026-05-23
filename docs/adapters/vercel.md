@@ -82,6 +82,10 @@ These are also surfaced in the cross-package [v0.1 status page](/v0-1-status) al
 - **No reasoning-model handling.** The Vercel adapter does NOT apply the headroom multiplier the OpenAI adapter does. Calling against `gpt-5-nano`, `o3`, `o3-mini`, Cerebras `gpt-oss-120b`, or other reasoning models with a small `maxOutputTokens` (e.g. 20) reliably starves the model and returns empty text. **Workaround**: set `maxOutputTokens` 5-10× higher than your visible-output budget, or use `@llm-ports/adapter-openai` directly for reasoning models in v0.1. Tracked at [#4](https://github.com/baabakk/llm-ports/issues/4).
 - **`generateStructured` throws `SyntaxError` on empty model responses.** When a reasoning model returns an empty completion (above), the JSON parser throws `SyntaxError: Unexpected end of JSON input`, which currently wraps as a generic `ProviderUnavailableError`. v0.2 ships a more specific `EmptyResponseError` class. Tracked at [#5](https://github.com/baabakk/llm-ports/issues/5).
 
+## Cancellation
+
+Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is passed through to Vercel's `abortSignal` field on `generateText` / `streamText`, so `controller.abort()` cancels the in-flight provider HTTP request (the cancellation propagates from Vercel to the underlying provider SDK). See the [Cancellation guide](/guides/cancellation).
+
 ## Reading next
 
 - [Migration from Vercel AI SDK →](/migration/from-vercel-ai)

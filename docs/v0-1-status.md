@@ -12,19 +12,25 @@ These are load-bearing today, with comprehensive test coverage. Not "experimenta
 
 | Surface | Coverage |
 |---|---|
-| `LLMPort` interface (5 methods) | 211 offline tests + cross-adapter contract suite |
+| `LLMPort` interface (5 methods) | 446 offline tests across 7 packages + cross-adapter contract suite |
 | `EmbeddingsPort` interface | covered by OpenAI + Ollama live tests; mocked-SDK regression tests |
 | `Registry` with task-route walking + `selectModel` budget gating | offline registry tests in core, plus end-to-end via examples |
 | USD cost gating (per-hour / per-day / per-month) | offline + Phase 2 live verification; precision verified at 10 decimals |
+| Session-scoped USD cost gating (`Registry.openCostSession`) | offline `cost-session.test.ts`; alpha.5 |
 | Anthropic adapter (full feature set: prompt caching, vision, tool use) | full live + contract suites |
-| OpenAI adapter (chat + embeddings + 10 compat providers via `baseURL`) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
+| OpenAI adapter (chat + embeddings + 12 compat providers via `baseURL`) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
+| Google Gemini adapter (chat + multimodal + streaming + single-turn agent) | offline content + contract; v0.1 alpha bake in progress |
 | Ollama adapter (chat + embeddings + model management) | offline + Phase 2 live |
+| Vercel AI SDK adapter (migration-friendly) | offline + contract; v0.1: single-turn agent + text-only multimodal |
 | Capability factories (`createClassifier`, `createScorer`, `createDrafter`, `createSummarizer`, `createExtractor`, `createPlanner`, `createAnalyzer`) | offline + Phase 3 live (via Cerebras/Anthropic) |
 | Validation strategies (`throw`, `retry-with-feedback`, `fallback-to-next-provider`, `custom`) | offline tests + Phase 2 live exercise |
+| Two-layer validation hardening (jsonrepair fallback in `extractJSON` + Zod-issue repair pass) | alpha.5; 20 offline tests; each catch saves an LLM retry round-trip |
 | `ContentBlock[]` discriminated union (text, image, audio, tool_use, tool_result) | offline tests across adapters |
+| Image-block boundary validation (`ImageTooLargeError`, `InvalidImageUrlError`) | alpha.5; 17 offline tests; per-adapter limits |
+| `AbortSignal` cancellation on all 5 `*Options` (in-flight HTTP cancel on 4 adapters, entry-only on Ollama) | alpha.6; 21 tests |
 | Latency overhead | mean p50 0.04 ms, max p99 0.47 ms (10× under the 5 ms target) |
 
-The Anthropic + OpenAI + Ollama adapters and the capability factories are the BEPA-extracted core, in production at BEPA for 5+ months across millions of LLM calls.
+The Anthropic + OpenAI + Ollama adapters and the capability factories are the BEPA-extracted core, in production at BEPA for 5+ months across millions of LLM calls. The Google Gemini adapter (alpha.5) and the alpha.6 cancellation work are newer; the contract suite covers them with the same shape as the older adapters.
 
 ---
 
@@ -32,34 +38,43 @@ The Anthropic + OpenAI + Ollama adapters and the capability factories are the BE
 
 These are tracked publicly. Each row links to the GitHub issue with the full reproduction, workaround, and resolution path. Filter on the [`known-limitation` label](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-limitation) for the live list.
 
-### Recently closed in 0.1.0-alpha.1 (2026-05-11)
+### Recently closed (alpha.1 → alpha.6)
 
-These items shipped fixes in the `0.1.0-alpha.1` patch. Listed here for context — they no longer apply on `@llm-ports/*@alpha`.
+Twelve medium-impact issues filed between alpha.0 and alpha.5 have been resolved. Listed here for context — they no longer apply on `@llm-ports/*@alpha`.
 
-| Was | Closed by |
-|---|---|
-| `runAgent` tool input schemas passed as `{}` to the model | [#1](https://github.com/baabakk/llm-ports/issues/1) — both adapters now wire `zod-to-json-schema`. |
-| No `onRetry` observability hook | [#3](https://github.com/baabakk/llm-ports/issues/3) — `OnRetry` / `RetryEvent` exported from `@llm-ports/core`; threaded through all four adapter-openai retry sites plus the Vercel adapter's starvation + validation-feedback retries. |
-| Vercel adapter starved reasoning models | [#4](https://github.com/baabakk/llm-ports/issues/4) — Vercel adapter now retries once with a 4× budget when finish=length, empty text, and tokens were consumed. |
-| Vercel `generateStructured` threw `SyntaxError: Unexpected end of JSON input` on empty responses | [#5](https://github.com/baabakk/llm-ports/issues/5) — adapter now throws typed `EmptyResponseError` carrying `alias` + `modelId`. |
-| Capability factories' default `taskType` values were not documented | [#6](https://github.com/baabakk/llm-ports/issues/6) — getting-started shows the `LLM_TASK_ROUTE_GENERAL` catch-all; the [task-routing concept page](/concepts/task-routing) documents per-capability defaults. |
-| `adapter-anthropic` forwarded `temperature` to models that reject it (Claude 4.5+ reasoning) | [#12](https://github.com/baabakk/llm-ports/issues/12) — adapter now learns the constraint at runtime, strips temperature, retries automatically. Includes static catalog for known rejectors, `onRetry` plumbing (parity with adapter-openai / adapter-vercel), and click-to-file GitHub URL when new constraints are learned. See [`known-quirks.md`](/known-quirks). |
+| Was | Closed by | Shipped |
+|---|---|---|
+| `runAgent` tool input schemas passed as `{}` | [#1](https://github.com/baabakk/llm-ports/issues/1) | alpha.1 |
+| No `onRetry` observability hook | [#3](https://github.com/baabakk/llm-ports/issues/3) | alpha.1 |
+| Vercel adapter starved reasoning models | [#4](https://github.com/baabakk/llm-ports/issues/4) | alpha.1 |
+| Vercel `generateStructured` `SyntaxError` on empty responses | [#5](https://github.com/baabakk/llm-ports/issues/5) | alpha.1 |
+| Capability factory `taskType` defaults undocumented | [#6](https://github.com/baabakk/llm-ports/issues/6) | alpha.1 |
+| `adapter-anthropic` forwarded `temperature` to Claude 4.5+ reasoning | [#12](https://github.com/baabakk/llm-ports/issues/12) | alpha.3 |
+| No native Gemini adapter | [#14](https://github.com/baabakk/llm-ports/issues/14) | alpha.5 (`@llm-ports/adapter-google`) |
+| No session-scoped cost gate | [#16](https://github.com/baabakk/llm-ports/issues/16) | alpha.5 (`Registry.openCostSession`) |
+| Image payload size validation missing at adapter boundary | [#19](https://github.com/baabakk/llm-ports/issues/19) | alpha.5 (`ImageTooLargeError`) |
+| Assistant-response `image_url` parts silently dropped | [#20](https://github.com/baabakk/llm-ports/issues/20) | alpha.5 |
+| URL-form image scheme not validated (`file://`, `data:`, missing) | [#21](https://github.com/baabakk/llm-ports/issues/21) | alpha.5 (`InvalidImageUrlError`) |
+| `signal?: AbortSignal` missing on `*Options`; no mid-flight cancel | [#24](https://github.com/baabakk/llm-ports/issues/24) | alpha.6 |
 
 ### Medium-impact (still open in v0.1)
 
-No medium-impact items are currently open. Five medium-impact issues from `0.1.0-alpha.0` were resolved in `0.1.0-alpha.1` (see the table above). New ones will land here as users report them.
+No medium-impact items are currently open. New ones will land here as users report them.
 
 ### Lower-impact (real but rarely surfaced)
 
 | Limitation | Surface | Notes |
 |---|---|---|
-| Registry walks the chain on **budget gating** but does not retry the next provider on **runtime errors** (network 5xx, 429, etc.) | Registry behavior | The `LLM_TASK_ROUTE_X=fast,backup` chain switches when `fast` is over its USD/request budget. If `fast` returns a 5xx mid-call, the call fails — it doesn't auto-retry on `backup`. Catch `ProviderUnavailableError` in your call site for the v0.1 path. |
-| First call to an unknown reasoning model in a fresh process pays one wasted round-trip | OpenAI adapter | The adapter's per-process cache learns the constraint after the first starved attempt. To skip the discovery round-trip, set `pricingOverrides[modelId].capabilities.reasoningModel = true` for known reasoning models. |
-| Compat-provider live coverage is one-test-deep (basic `generateText` only) | OpenAI adapter via `baseURL` (Cerebras, Groq, Together AI, Fireworks, etc.) | Structured-output / streaming / agent / embeddings are not regression-tested for compat providers in v0.1. A compat-provider regression in `message.reasoning` parsing wouldn't be caught by the current live suite. |
-| Vercel adapter's `runAgent` is single-turn only | Vercel adapter | Multi-step tool use through Vercel's own agent loop ships in v0.2. For multi-turn agents today, prefer the direct OpenAI / Anthropic / Ollama adapters. |
-| Vercel adapter multimodal inputs pass as `[image content]` placeholder strings | Vercel adapter | Image and audio content blocks downgrade to text. Direct adapters support full multimodal. |
-| Vercel adapter has no bundled pricing table | Vercel adapter | Bring your own `pricing` map at `createVercelAdapter({ pricing: { ... } })`. The OpenAI / Anthropic / Ollama adapters ship pricing tables. |
-| Some compat-provider models require a `pricingOverrides` entry | Registry pricing-validation | Cerebras `gpt-oss-120b`, Groq's Llama variants, etc. need an explicit pricing override before the registry will admit them. |
+| Registry walks the chain on **budget gating** but does not retry the next provider on **runtime errors** (network 5xx, 429, etc.) | Registry behavior | The `LLM_TASK_ROUTE_X=fast,backup` chain switches when `fast` is over its USD/request budget. If `fast` returns a 5xx mid-call, the call fails — it doesn't auto-retry on `backup`. Catch `ProviderUnavailableError` in your call site for the v0.1 path. Targeted for v0.2. |
+| First call to an unknown reasoning model pays one wasted round-trip | OpenAI adapter | The adapter's per-process cache learns the constraint after the first starved attempt. alpha.5 added a static `KNOWN_REASONING_MODELS` catalog covering o-series / gpt-5-nano / Cerebras gpt-oss / Clarifai Qwen3.6 / SambaNova MiniMax-M2.7, so the wasted round-trip is skipped for those. For other reasoning models, supply `pricingOverrides[modelId].capabilities.reasoningModel = true`. |
+| Compat-provider live coverage is one-test-deep (basic `generateText` only) | OpenAI adapter via `baseURL` (Cerebras, Groq, Together AI, Fireworks, Clarifai, SambaNova, etc.) | Structured / streaming / agent / embeddings are not regression-tested for compat providers in v0.1. Targeted for v0.2. |
+| `adapter-ollama` honors `AbortSignal` at entry but cannot cancel an in-flight request | Ollama adapter | `ollama-js` v0.5 doesn't expose a per-call signal. Coarse `client.abort()` cancels all in-flight, too blunt. Lands when ollama-js v0.7+ exposes per-call signal. |
+| `adapter-vercel`'s `runAgent` is single-turn only | Vercel adapter | Multi-step tool use through Vercel's own agent loop ships in v0.2. For multi-turn agents today, prefer the direct adapters. |
+| `adapter-vercel` multimodal inputs pass as `[image content]` placeholder strings | Vercel adapter | Image and audio content blocks downgrade to text. Direct adapters support full multimodal. |
+| `adapter-vercel` has no bundled pricing table | Vercel adapter | Bring your own `pricing` map. The OpenAI / Anthropic / Google / Ollama adapters ship pricing tables. |
+| Native Gemini `responseSchema` constrained-decoding not used | Google Gemini adapter | `adapter-google`'s `generateStructured` uses prompted JSON + Zod + alpha.5 repair pass. Native `responseSchema` ships in v0.2. |
+| Gemini embeddings, explicit context caching, code execution tool | Google Gemini adapter | All v0.2 scope. |
+| Some compat-provider models require a `pricingOverrides` entry | Registry pricing-validation | Cerebras `gpt-oss-120b`, Clarifai Qwen3.6, SambaNova MiniMax-M2.7, Groq Llama variants, etc. need an explicit pricing override before the registry will admit them. |
 
 ### Adapter-specific model quirks (observed 2026-05-12 in live alpha bake)
 
@@ -93,10 +108,10 @@ Roadmap target — not promises, but the work queue. Order is approximate; what 
 
 Further out. Subject to change based on v0.1 + v0.2 user signal.
 
-- `@llm-ports/adapter-google` for Gemini (different API shape than OpenAI/Anthropic; handled separately)
-- `@llm-ports/adapter-mistral` if the Mistral API stops fitting under the OpenAI compat shape
-- A portable skill / capability format (Markdown-with-YAML-frontmatter) — being evaluated; not a commitment
-- Native streaming for `runAgent` (currently you can stream tool-use steps via the lower-level adapter, but not from the agent loop)
+- `@llm-ports/adapter-transformers-web` or `@llm-ports/adapter-onnxruntime-web` for browser-native local-model inference (transformers.js / onnxruntime-web). Tracked as [#13](https://github.com/baabakk/llm-ports/issues/13). Use cases: SmolDocling, PaddleOCR-VL, SmolVLM running entirely in the browser. Highest-impact single addition still on the roadmap.
+- `@llm-ports/adapter-mistral` if the Mistral API stops fitting under the OpenAI compat shape.
+- A portable skill / capability format (Markdown-with-YAML-frontmatter) — being evaluated; not a commitment.
+- Native streaming for `runAgent` (currently you can stream tool-use steps via the lower-level adapter, but not from the agent loop).
 
 ---
 

@@ -215,6 +215,10 @@ The adapter also handles two other transient OpenAI quirks transparently:
 
 All three retry kinds (plus `validation-feedback` retries inside `generateStructured`) fire the `onRetry` hook shipped in `0.1.0-alpha.1` — pass an `OnRetry` callback at adapter construction time to observe them. See [`examples/with-onretry/`](https://github.com/baabakk/llm-ports/tree/main/examples/with-onretry) for a worked example wiring the hook to a console logger and a metrics sink.
 
+## Cancellation
+
+Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is threaded as the 2nd-arg request options to `client.chat.completions.create`, so `controller.abort()` cancels the in-flight HTTP request — both for one-shot calls and for streaming. `runAgent` also re-checks the signal between steps. See the [Cancellation guide](/guides/cancellation).
+
 ## Reading next
 
 - [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper

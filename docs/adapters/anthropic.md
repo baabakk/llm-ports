@@ -86,6 +86,10 @@ createAnthropicAdapter({
 
 `text`, `image` (base64 + URL), `tool_use`, `tool_result`. The adapter throws `ContentBlockUnsupportedError` for `audio` blocks.
 
+## Cancellation
+
+Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is threaded into both `client.messages.create` (non-streaming) and `client.messages.stream`, so `controller.abort()` cancels the in-flight HTTP request. `runAgent` also re-checks the signal between steps so cancellation propagates mid-loop. See the [Cancellation guide](/guides/cancellation).
+
 ## Reading next
 
 - [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper
