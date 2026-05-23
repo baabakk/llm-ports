@@ -28,6 +28,7 @@ import {
   extractJSON,
   failValidation,
   stringifyContentBlocks,
+  throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
   wrapProviderError,
@@ -243,6 +244,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       try {
@@ -252,6 +254,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           prompt: stringifyContentBlocks(options.prompt),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+          ...(options.signal ? { abortSignal: options.signal } : {}),
         });
         const usage = parseUsage(result);
         return {
@@ -270,6 +273,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
@@ -293,6 +297,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             prompt: userPrompt,
             temperature: options.temperature ?? 0,
             ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
+            ...(options.signal ? { abortSignal: options.signal } : {}),
           });
           lastUsage = parseUsage(result);
           lastModelId = result.response?.modelId ?? modelId;
@@ -354,6 +359,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
         const stream = streamText({
@@ -362,6 +368,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           prompt: stringifyContentBlocks(options.prompt),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+          ...(options.signal ? { abortSignal: options.signal } : {}),
         });
         for await (const chunk of stream.textStream) {
           yield chunk;
@@ -372,6 +379,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
         const stream = streamText({
@@ -380,6 +388,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           prompt: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           temperature: options.temperature ?? 0,
+          ...(options.signal ? { abortSignal: options.signal } : {}),
         });
         let buffer = "";
         for await (const chunk of stream.textStream) {
@@ -397,6 +406,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       // we use a simpler single-turn approach for shape consistency with
       // other adapters; users wanting multi-step tool use via Vercel can
       // call the underlying SDK directly. This will be enhanced in v0.2.
+      throwIfAborted(options.signal);
       validateMessages(options.messages);
       const start = Date.now();
       try {
@@ -410,6 +420,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           messages,
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
+          ...(options.signal ? { abortSignal: options.signal } : {}),
         });
         const usage = parseUsage(result);
         return {

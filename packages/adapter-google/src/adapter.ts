@@ -29,6 +29,7 @@ import {
   extractJSON,
   failValidation,
   stringifyContentBlocks,
+  throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
   wrapProviderError,
@@ -142,6 +143,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       try {
@@ -157,6 +159,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(options.maxOutputTokens !== undefined
               ? { maxOutputTokens: options.maxOutputTokens }
               : {}),
+            ...(options.signal ? { abortSignal: options.signal } : {}),
           },
         });
         const candidate = response.candidates?.[0];
@@ -178,6 +181,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
@@ -209,6 +213,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                 ? { maxOutputTokens: options.maxOutputTokens }
                 : {}),
               responseMimeType: "application/json",
+              ...(options.signal ? { abortSignal: options.signal } : {}),
             },
           });
           const candidate = response.candidates?.[0];
@@ -253,6 +258,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
         const parts = toGeminiParts2(options.prompt);
@@ -267,6 +273,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(options.maxOutputTokens !== undefined
               ? { maxOutputTokens: options.maxOutputTokens }
               : {}),
+            ...(options.signal ? { abortSignal: options.signal } : {}),
           },
         });
         for await (const chunk of stream) {
@@ -281,6 +288,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
         const stream = await ctx.client.models.generateContentStream({
@@ -304,6 +312,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               ? { maxOutputTokens: options.maxOutputTokens }
               : {}),
             responseMimeType: "application/json",
+            ...(options.signal ? { abortSignal: options.signal } : {}),
           },
         });
         let buffer = "";
@@ -322,6 +331,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      throwIfAborted(options.signal);
       validateMessages(options.messages);
       // v0.1: single-turn agent loop. Gemini's native automatic-function-calling
       // multi-turn runAgent ships in v0.2 (matches adapter-vercel's v0.1 shape).
@@ -336,6 +346,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(options.instructions !== undefined
               ? { systemInstruction: options.instructions }
               : {}),
+            ...(options.signal ? { abortSignal: options.signal } : {}),
           },
         });
         const candidate = response.candidates?.[0];

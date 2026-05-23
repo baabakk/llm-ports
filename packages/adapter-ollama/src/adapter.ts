@@ -18,6 +18,7 @@ import {
   failValidation,
   mergeTokenUsage,
   stringifyContentBlocks,
+  throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
   wrapProviderError,
@@ -219,8 +220,16 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     for (const msg of messages) validateContent(msg.content);
   };
 
+  // Ollama caveat: the ollama-js SDK does NOT accept a per-call AbortSignal.
+  // Its `Ollama.abort()` method cancels ALL in-flight requests on the client,
+  // which is too coarse for per-call cancellation. We honor `options.signal`
+  // at entry (throwIfAborted) but cannot cancel a request once it's flying.
+  // Mid-flight cancellation here lands when ollama-js exposes a per-request
+  // signal — tracked at https://github.com/ollama/ollama-js/issues for v0.7+.
+
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       try {
@@ -262,6 +271,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
@@ -340,6 +350,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
         await ensurePulled(ctx, modelId);
@@ -370,6 +381,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
         await ensurePulled(ctx, modelId);
@@ -406,6 +418,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      throwIfAborted(options.signal);
       validateMessages(options.messages);
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
@@ -420,6 +433,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       try {
         await ensurePulled(ctx, modelId);
         for (let step = 0; step < maxSteps; step++) {
+          throwIfAborted(options.signal);
           stepsTaken = step + 1;
           const messages: OllamaMessage[] = [];
           if (options.instructions) {

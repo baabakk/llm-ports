@@ -146,3 +146,6 @@ export type { ValidateImageOptions } from "./utils/validate-image.js";
 // ─── Cost session ────────────────────────────────────────────────────
 export { CostSession } from "./registry/cost-session.js";
 export type { OpenCostSessionOptions } from "./registry/cost-session.js";
+
+// ─── Abort signal helper ─────────────────────────────────────────────
+export { throwIfAborted } from "./utils/abort.js";

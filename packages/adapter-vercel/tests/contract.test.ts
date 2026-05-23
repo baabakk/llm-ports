@@ -37,6 +37,7 @@ runContractTests("vercel", () => {
     expectedAlias: ALIAS,
     expectedModelId: MODEL_ID,
     imageContentSupport: "none", // v0.1: image blocks degrade to placeholder strings
+    signalSupport: "entry+inflight",
 
     setupGenerateText(response) {
       mockGenerateText.mockResolvedValueOnce(

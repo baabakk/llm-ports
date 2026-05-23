@@ -19,6 +19,7 @@ import {
   failValidation,
   mergeTokenUsage,
   stringifyContentBlocks,
+  throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
   wrapProviderError,
@@ -248,6 +249,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       const userMsg: OpenAIMessage = {
@@ -260,6 +262,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
         stream: false,
       });
       const r = response as {
@@ -282,6 +285,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
@@ -311,6 +315,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           ...(options.maxOutputTokens !== undefined
             ? { maxOutputTokens: options.maxOutputTokens }
             : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
           jsonMode: true,
           stream: false,
         });
@@ -379,6 +384,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const userMsg: OpenAIMessage = {
         role: "user",
@@ -390,6 +396,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
         stream: true,
       });
       for await (const chunk of stream) {
@@ -401,6 +408,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
@@ -413,6 +421,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
         temperature: options.temperature ?? 0,
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
         jsonMode: true,
         stream: true,
       });
@@ -427,6 +436,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      throwIfAborted(options.signal);
       validateMessages(options.messages);
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
@@ -440,6 +450,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
       try {
         for (let step = 0; step < maxSteps; step++) {
+          // Re-check on each loop iteration so cancellation between steps
+          // also propagates; mid-step in-flight cancellation comes from the
+          // signal threaded into the SDK call.
+          throwIfAborted(options.signal);
           stepsTaken = step + 1;
           const turnMessages = toOpenAIMessages(conversation);
           const tools = toOpenAITools(options.tools);
@@ -451,6 +465,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
             ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
             ...(tools.length > 0 ? { tools } : {}),
+            ...(options.signal ? { signal: options.signal } : {}),
             stream: false,
           });
           const r = response as {
@@ -645,6 +660,8 @@ interface LogicalChatRequest {
   stream: boolean;
   /** Tools when this is an agent step. */
   tools?: ReturnType<typeof toOpenAITools>;
+  /** Mid-flight cancellation: threaded as the 2nd arg to client.chat.completions.create. */
+  signal?: AbortSignal;
 }
 
 /** Build the SDK's request object from a logical request and the model's effective capabilities. */
@@ -916,7 +933,10 @@ async function executeChatRequest(
   const attempt = async (): Promise<unknown> => {
     const caps = readCaps(req.modelId, pricing);
     const sdkReq = materializeRequest(req, caps);
-    return await client.chat.completions.create(sdkReq as never);
+    // Thread the AbortSignal as the SDK's 2nd-arg request options; the OpenAI
+    // SDK uses this to cancel the in-flight fetch on abort.
+    const reqOpts = req.signal ? { signal: req.signal } : undefined;
+    return await client.chat.completions.create(sdkReq as never, reqOpts);
   };
 
   let triedCapabilityFallback = false;
@@ -1006,7 +1026,8 @@ async function executeChatStream(
   const attempt = async (): Promise<AsyncIterable<{ choices: Array<{ delta?: { content?: string } }> }>> => {
     const caps = readCaps(streamReq.modelId, pricing);
     const sdkReq = materializeRequest(streamReq, caps);
-    return (await client.chat.completions.create(sdkReq as never)) as never;
+    const reqOpts = streamReq.signal ? { signal: streamReq.signal } : undefined;
+    return (await client.chat.completions.create(sdkReq as never, reqOpts)) as never;
   };
 
   let triedCapabilityFallback = false;

@@ -32,6 +32,7 @@ runContractTests("openai", () => {
     expectedAlias: ALIAS,
     expectedModelId: MODEL_ID,
     imageContentSupport: "base64+url",
+    signalSupport: "entry+inflight",
 
     setupGenerateText(response) {
       mockChatCompletionsCreate.mockResolvedValueOnce(

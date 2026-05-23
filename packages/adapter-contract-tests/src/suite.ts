@@ -88,6 +88,22 @@ export interface ContractTestContext {
    * to text placeholders should leave this unset so the test skips.
    */
   imageContentSupport?: "none" | "base64" | "url" | "base64+url";
+
+  /**
+   * Optional. Declares the adapter's AbortSignal cancellation support.
+   *   - `"entry-only"`: adapter checks signal.aborted at entry but cannot
+   *     cancel an in-flight provider HTTP fetch (Ollama in v0.1: the
+   *     ollama-js SDK only exposes a coarse client.abort(), not per-call).
+   *   - `"entry+inflight"`: full cancellation — entry-time check AND signal
+   *     threaded into the SDK's fetch options. The contract suite runs
+   *     mid-flight cancellation tests against these adapters.
+   *   - `"none"` (or undefined): adapter ignores signal entirely. Tests skip.
+   *
+   * Available since `0.1.0-alpha.6`. Tests are conditional; adapters that
+   * pre-date abort-signal support leave this unset to keep their old test
+   * shapes valid.
+   */
+  signalSupport?: "none" | "entry-only" | "entry+inflight";
 }
 
 /** A factory for the test context. Called fresh for each test. */
@@ -375,6 +391,96 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         expect(result.text).toBe("I see a cat");
         expect(result.providerAlias).toBe(ctx.expectedAlias);
+      });
+    });
+
+    describe("AbortSignal cancellation (conditional)", () => {
+      it("throws at entry when the signal is already aborted (generateText)", async () => {
+        const ctx = await setup();
+        if (
+          ctx.signalSupport === undefined ||
+          ctx.signalSupport === "none"
+        ) {
+          return;
+        }
+        // Set up a response just in case; the test asserts the adapter
+        // throws BEFORE consuming it.
+        ctx.setupGenerateText({
+          text: "should not be returned",
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        });
+
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+          ctx.port.generateText({
+            taskType: "test-signal",
+            prompt: "hi",
+            signal: controller.signal,
+          }),
+        ).rejects.toBeDefined();
+      });
+
+      it("throws at entry when the signal is already aborted (generateStructured)", async () => {
+        const ctx = await setup();
+        if (
+          ctx.signalSupport === undefined ||
+          ctx.signalSupport === "none"
+        ) {
+          return;
+        }
+        ctx.setupGenerateStructured({
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        });
+
+        const Schema = z.object({
+          intent: z.enum(["request", "info"]),
+          urgency: z.enum(["high", "medium", "low"]),
+        });
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+          ctx.port.generateStructured({
+            taskType: "test-signal-structured",
+            prompt: "hi",
+            schema: Schema,
+            schemaName: "TestSchema",
+            signal: controller.signal,
+          }),
+        ).rejects.toBeDefined();
+      });
+
+      it("throws at entry when the signal is already aborted (runAgent)", async () => {
+        const ctx = await setup();
+        if (
+          ctx.signalSupport === undefined ||
+          ctx.signalSupport === "none"
+        ) {
+          return;
+        }
+        ctx.setupRunAgent({
+          text: "should not be returned",
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          stepsTaken: 1,
+          terminationReason: "completed",
+        });
+
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+          ctx.port.runAgent({
+            taskType: "test-signal-agent",
+            instructions: "You are helpful.",
+            messages: [{ role: "user", content: "hi" }],
+            tools: {},
+            maxSteps: 3,
+            signal: controller.signal,
+          }),
+        ).rejects.toBeDefined();
       });
     });
 

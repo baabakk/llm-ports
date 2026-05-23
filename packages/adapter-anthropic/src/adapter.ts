@@ -19,6 +19,7 @@ import {
   failValidation,
   mergeTokenUsage,
   stringifyContentBlocks,
+  throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
   wrapProviderError,
@@ -207,15 +208,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     buildRequest: (capabilities: { temperatureLocked?: boolean }) => Parameters<
       typeof ctx.client.messages.create
     >[0],
+    signal?: AbortSignal,
   ): Promise<R> {
     const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
     let caps = getEffectiveCapabilities(modelId, userCapabilities);
     let attempt = 0;
+    // Anthropic SDK accepts a `signal` in the 2nd-arg request options;
+    // threading it here cancels the in-flight fetch on abort.
+    const reqOpts = signal ? { signal } : undefined;
     // Single capability-fallback retry per call (the user-visible bug fix).
     while (true) {
       const req = buildRequest({ temperatureLocked: caps.temperatureLocked });
       try {
-        return (await ctx.client.messages.create(req)) as R;
+        return (await ctx.client.messages.create(req, reqOpts)) as R;
       } catch (err) {
         // Only retry on temperature rejection if we haven't already learned
         // the constraint (otherwise we would loop).
@@ -270,25 +275,28 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+      throwIfAborted(options.signal);
       const start = Date.now();
       validateContent(options.prompt);
       try {
-        const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
-          applyCapabilityFilter(
-            {
-              model: modelId,
-              max_tokens: options.maxOutputTokens ?? 1024,
-              ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-              ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-              messages: [
-                {
-                  role: "user",
-                  content: toAnthropicContent(options.prompt) as never,
-                },
-              ],
-            },
-            caps,
-          ),
+        const response = await executeMessageCreate<Anthropic.Messages.Message>(
+          (caps) =>
+            applyCapabilityFilter(
+              {
+                model: modelId,
+                max_tokens: options.maxOutputTokens ?? 1024,
+                ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                messages: [
+                  {
+                    role: "user",
+                    content: toAnthropicContent(options.prompt) as never,
+                  },
+                ],
+              },
+              caps,
+            ),
+          options.signal,
         );
         const usage = parseUsage(response);
         const text = extractAssistantText(response.content as never);
@@ -312,6 +320,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       // to the user content. Many production users would use Anthropic's "tool"
       // pattern for structured output; for v0.1 we use the simpler prompted JSON
       // approach plus retry-with-feedback. Tool-mode can be added later.
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
@@ -333,17 +342,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
             : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences. Only the JSON.`;
 
-          const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
-            applyCapabilityFilter(
-              {
-                model: modelId,
-                max_tokens: options.maxOutputTokens ?? 2048,
-                ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-                temperature: options.temperature ?? 0,
-                messages: [{ role: "user", content: userContent }],
-              },
-              caps,
-            ),
+          const response = await executeMessageCreate<Anthropic.Messages.Message>(
+            (caps) =>
+              applyCapabilityFilter(
+                {
+                  model: modelId,
+                  max_tokens: options.maxOutputTokens ?? 2048,
+                  ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                  temperature: options.temperature ?? 0,
+                  messages: [{ role: "user", content: userContent }],
+                },
+                caps,
+              ),
+            options.signal,
           );
           lastUsage = parseUsage(response);
           lastModelId = response.model ?? modelId;
@@ -397,6 +408,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       // Apply learned capabilities up front for the streaming call. Streaming
       // retries on capability rejection are not yet supported (mid-stream
@@ -405,20 +417,23 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
       const caps = getEffectiveCapabilities(modelId, userCapabilities);
       try {
-        const stream = ctx.client.messages.stream({
-          model: modelId,
-          max_tokens: options.maxOutputTokens ?? 1024,
-          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          ...(options.temperature !== undefined && !caps.temperatureLocked
-            ? { temperature: options.temperature }
-            : {}),
-          messages: [
-            {
-              role: "user",
-              content: toAnthropicContent(options.prompt) as never,
-            },
-          ],
-        });
+        const stream = ctx.client.messages.stream(
+          {
+            model: modelId,
+            max_tokens: options.maxOutputTokens ?? 1024,
+            ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+            ...(options.temperature !== undefined && !caps.temperatureLocked
+              ? { temperature: options.temperature }
+              : {}),
+            messages: [
+              {
+                role: "user",
+                content: toAnthropicContent(options.prompt) as never,
+              },
+            ],
+          },
+          options.signal ? { signal: options.signal } : undefined,
+        );
         for await (const event of stream) {
           if (
             event.type === "content_block_delta" &&
@@ -433,26 +448,30 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+      throwIfAborted(options.signal);
       validateContent(options.prompt);
       // Anthropic doesn't stream parsed JSON natively. We accumulate text deltas
       // and best-effort parse a partial JSON object after each chunk.
       const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
       const caps = getEffectiveCapabilities(modelId, userCapabilities);
       try {
-        const stream = ctx.client.messages.stream({
-          model: modelId,
-          max_tokens: options.maxOutputTokens ?? 2048,
-          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          // Omit temperature on models that reject it; otherwise default to 0
-          // for deterministic JSON parsing.
-          ...(caps.temperatureLocked ? {} : { temperature: options.temperature ?? 0 }),
-          messages: [
-            {
-              role: "user",
-              content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
-            },
-          ],
-        });
+        const stream = ctx.client.messages.stream(
+          {
+            model: modelId,
+            max_tokens: options.maxOutputTokens ?? 2048,
+            ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+            // Omit temperature on models that reject it; otherwise default to 0
+            // for deterministic JSON parsing.
+            ...(caps.temperatureLocked ? {} : { temperature: options.temperature ?? 0 }),
+            messages: [
+              {
+                role: "user",
+                content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
+              },
+            ],
+          },
+          options.signal ? { signal: options.signal } : undefined,
+        );
         let buffer = "";
         for await (const event of stream) {
           if (
@@ -470,6 +489,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+      throwIfAborted(options.signal);
       validateMessages(options.messages);
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
@@ -483,20 +503,26 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
       try {
         for (let step = 0; step < maxSteps; step++) {
+          // Re-check between agent steps so cancellation propagates even if
+          // the model just emitted a tool call but the user clicked cancel
+          // before we send the result back.
+          throwIfAborted(options.signal);
           stepsTaken = step + 1;
           const { system, messages } = toAnthropicMessages(conversation);
-          const response = await executeMessageCreate<Anthropic.Messages.Message>((caps) =>
-            applyCapabilityFilter(
-              {
-                model: modelId,
-                max_tokens: options.maxOutputTokens ?? 4096,
-                system: system ?? options.instructions,
-                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-                messages: messages as never,
-                tools: toAnthropicTools(options.tools),
-              },
-              caps,
-            ),
+          const response = await executeMessageCreate<Anthropic.Messages.Message>(
+            (caps) =>
+              applyCapabilityFilter(
+                {
+                  model: modelId,
+                  max_tokens: options.maxOutputTokens ?? 4096,
+                  system: system ?? options.instructions,
+                  ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                  messages: messages as never,
+                  tools: toAnthropicTools(options.tools),
+                },
+                caps,
+              ),
+            options.signal,
           );
           totalUsage = mergeTokenUsage(totalUsage, parseUsage(response));
           lastModelId = response.model ?? modelId;

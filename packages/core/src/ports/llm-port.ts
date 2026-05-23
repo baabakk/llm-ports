@@ -86,6 +86,23 @@ export interface CostUsage {
 
 // ─── Request option types ─────────────────────────────────────────────
 
+/**
+ * `signal?: AbortSignal` is supported on every options interface in
+ * `0.1.0-alpha.6` and later. When supplied:
+ *
+ *   1. The adapter checks `signal.aborted` at entry; if already aborted,
+ *      it throws `signal.reason` (or a generic `AbortError`) without
+ *      invoking the provider SDK.
+ *   2. The adapter threads the signal through to the underlying SDK call
+ *      (OpenAI, Anthropic, Ollama, Vercel, Google), so an in-flight
+ *      provider HTTP request is cancelled on `controller.abort()` instead
+ *      of leaking the cost.
+ *
+ * Cancellation semantics are best-effort and per-adapter; some SDKs return
+ * a typed `AbortError`, others reject with the original `signal.reason`.
+ * Callers should `catch` and inspect the error rather than assume one shape.
+ */
+
 export interface GenerateTextOptions {
   taskType: TaskType;
   priority?: LLMPriority;
@@ -95,6 +112,8 @@ export interface GenerateTextOptions {
   prompt: MessageContent;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Cancellation signal threaded through to the provider's HTTP fetch. */
+  signal?: AbortSignal;
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -107,6 +126,8 @@ export interface GenerateStructuredOptions<T> {
   schemaName?: string;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Cancellation signal threaded through to the provider's HTTP fetch. */
+  signal?: AbortSignal;
 }
 
 export interface StreamTextOptions {
@@ -116,6 +137,8 @@ export interface StreamTextOptions {
   prompt: MessageContent;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Cancellation signal threaded through to the provider's HTTP fetch. */
+  signal?: AbortSignal;
 }
 
 export interface StreamStructuredOptions<T> {
@@ -127,6 +150,8 @@ export interface StreamStructuredOptions<T> {
   schemaName?: string;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Cancellation signal threaded through to the provider's HTTP fetch. */
+  signal?: AbortSignal;
 }
 
 export interface RunAgentOptions {
@@ -138,6 +163,8 @@ export interface RunAgentOptions {
   maxSteps?: number;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Cancellation signal threaded through to the provider's HTTP fetch. */
+  signal?: AbortSignal;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────
