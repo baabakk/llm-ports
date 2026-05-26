@@ -1,5 +1,12 @@
 # @llm-ports/example-email-triage
 
+## 0.1.0-alpha.10
+
+### Patch Changes
+
+- Updated dependencies [a239d8c]
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.10
+
 ## 0.1.0-alpha.9
 
 ### Patch Changes

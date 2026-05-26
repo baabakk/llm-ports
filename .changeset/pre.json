@@ -30,6 +30,7 @@
     "adapter-openai-consume-core-utils",
     "adapter-openai-known-reasoning-models",
     "adapter-vercel-consume-core-utils",
+    "alpha-10-opus-4-7-temperature",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",
