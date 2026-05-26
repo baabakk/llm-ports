@@ -15,10 +15,14 @@ import {
   streamText,
   embed,
   embedMany,
+  tool,
   type LanguageModel,
   type EmbeddingModel,
   type CoreMessage,
+  type StepResult,
 } from "ai";
+import { hasMultimodalContent, toVercelParts } from "./content.js";
+import { VERCEL_PRICING } from "./pricing.js";
 import {
   attemptValidationRepair,
   computeChatCost,
@@ -72,11 +76,16 @@ export interface VercelAdapterOptions {
    */
   embeddingModels?: Record<string, EmbeddingModel<string>>;
   /**
-   * REQUIRED. Pricing per modelId. The Vercel adapter has no built-in pricing
-   * table because models come from any of @ai-sdk/anthropic, @ai-sdk/openai,
-   * etc. — supply the pricing for whatever you wire up.
+   * Override pricing per modelId. Merged on top of the bundled `VERCEL_PRICING`
+   * table (alpha.8+) which covers the OpenAI / Anthropic / Google models
+   * commonly used via `@ai-sdk/*`. For provider/model combinations outside
+   * the bundled table (LMStudio, OpenRouter, perplexity-ai, custom routes),
+   * supply your own entries here.
+   *
+   * Pre-alpha.8 this option was REQUIRED. Now it's optional; users on the
+   * common @ai-sdk/* providers can omit it.
    */
-  pricing: Record<string, ModelPricing>;
+  pricing?: Record<string, ModelPricing>;
   /** Default validation strategy if the registry doesn't override per-call. */
   validationStrategy?: ValidationStrategy;
   /**
@@ -130,10 +139,17 @@ export interface VercelAdapter {
 }
 
 export function createVercelAdapter(opts: VercelAdapterOptions): VercelAdapter {
+  // alpha.8: merge bundled pricing with user overrides. User-supplied
+  // entries win over bundled defaults. Matches the merge pattern in
+  // adapter-openai / adapter-anthropic / adapter-google.
+  const mergedPricing: Record<string, ModelPricing> = {
+    ...VERCEL_PRICING,
+    ...(opts.pricing ?? {}),
+  };
   const ctx: AdapterContext = {
     models: opts.models ?? {},
     embeddingModels: opts.embeddingModels ?? {},
-    pricing: opts.pricing,
+    pricing: mergedPricing,
     validationStrategy: opts.validationStrategy ?? {
       kind: "retry-with-feedback",
       maxAttempts: 2,
@@ -145,7 +161,7 @@ export function createVercelAdapter(opts: VercelAdapterOptions): VercelAdapter {
 
   return {
     name: "vercel",
-    pricing: opts.pricing,
+    pricing: mergedPricing,
     createLLMPort: (modelId, alias) => createPort(ctx, modelId, alias),
     createEmbeddingsPort: (modelId, alias) => createEmbeddings(ctx, modelId, alias),
   };
@@ -248,10 +264,17 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       validateContent(options.prompt);
       const start = Date.now();
       try {
+        // alpha.8: when the prompt has non-text blocks (image / audio), route
+        // through Vercel's `messages` API with structured parts so the
+        // multimodal payload actually reaches the underlying provider. For
+        // text-only prompts, keep the simpler `prompt: string` path.
+        const multimodal = hasMultimodalContent(options.prompt);
         const result = await generateWithStarvationRetry(ctx, alias, modelId, {
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          prompt: stringifyContentBlocks(options.prompt),
+          ...(multimodal
+            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt) as never }] }
+            : { prompt: stringifyContentBlocks(options.prompt) }),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -288,13 +311,32 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       while (attempts < maxAttempts) {
         attempts++;
         try {
-          const userPrompt = correctionPrompt
-            ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
-            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
+          const jsonInstruction = correctionPrompt
+            ? correctionPrompt
+            : "Reply with a single JSON object only. No prose, no code fences.";
+          // alpha.8 multimodal: if the prompt has image/audio blocks, keep
+          // them as structured parts + append the JSON instruction as a
+          // final text part. For text-only, keep the simpler prompt-string
+          // path with the instruction concatenated.
+          const multimodal = hasMultimodalContent(options.prompt);
+          const userPromptString = `${stringifyContentBlocks(options.prompt)}\n\n${jsonInstruction}`;
+          const messagesShape = multimodal
+            ? {
+                messages: [
+                  {
+                    role: "user" as const,
+                    content: [
+                      ...toVercelParts(options.prompt),
+                      { type: "text" as const, text: `\n\n${jsonInstruction}` },
+                    ] as never,
+                  },
+                ],
+              }
+            : { prompt: userPromptString };
           const result = await generateWithStarvationRetry(ctx, alias, modelId, {
             model,
             ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-            prompt: userPrompt,
+            ...messagesShape,
             temperature: options.temperature ?? 0,
             ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
             ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -362,10 +404,13 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
+        const multimodal = hasMultimodalContent(options.prompt);
         const stream = streamText({
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          prompt: stringifyContentBlocks(options.prompt),
+          ...(multimodal
+            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt) as never }] }
+            : { prompt: stringifyContentBlocks(options.prompt) }),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -382,10 +427,25 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       throwIfAborted(options.signal);
       validateContent(options.prompt);
       try {
+        const multimodal = hasMultimodalContent(options.prompt);
+        const jsonHint = "\n\nReply with a single JSON object only. Stream the JSON progressively.";
+        const messagesShape = multimodal
+          ? {
+              messages: [
+                {
+                  role: "user" as const,
+                  content: [
+                    ...toVercelParts(options.prompt),
+                    { type: "text" as const, text: jsonHint },
+                  ] as never,
+                },
+              ],
+            }
+          : { prompt: `${stringifyContentBlocks(options.prompt)}${jsonHint}` };
         const stream = streamText({
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          prompt: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+          ...messagesShape,
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           temperature: options.temperature ?? 0,
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -402,38 +462,113 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     },
 
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
-      // Vercel AI SDK has its own agent loop via tool execution. For v0.1
-      // we use a simpler single-turn approach for shape consistency with
-      // other adapters; users wanting multi-step tool use via Vercel can
-      // call the underlying SDK directly. This will be enhanced in v0.2.
+      // Multi-turn agent loop via Vercel AI SDK's native `tools` + `maxSteps`.
+      // The SDK invokes tool `execute` functions between steps and feeds
+      // results back to the model, looping until either:
+      //   - The model emits text without tool calls (terminationReason="completed")
+      //   - stepsTaken reaches maxSteps (terminationReason="max_steps")
+      // alpha.8 upgraded this from the single-turn shim that v0.1 alpha.5
+      // through alpha.7 shipped.
       throwIfAborted(options.signal);
       validateMessages(options.messages);
       const start = Date.now();
       try {
-        const messages: CoreMessage[] = options.messages.map((m) => ({
-          role: m.role === "tool" ? "user" : (m.role as "system" | "user" | "assistant"),
-          content: typeof m.content === "string" ? m.content : stringifyContentBlocks(m.content),
-        }));
-        const result = await generateWithStarvationRetry(ctx, alias, modelId, {
+        // alpha.8: per-message multimodal handling. Text-only messages keep
+        // the string-content path; messages with image/audio blocks become
+        // structured parts arrays. Tool-role messages still degrade to text
+        // (Vercel surfaces tool results through a separate "tool" role with
+        // tool-result parts; we'd need adapter awareness of toolCallId
+        // threading to wire that fully, which alpha.8 doesn't take on).
+        const messages: CoreMessage[] = options.messages.map((m) => {
+          const role = m.role === "tool" ? "user" : (m.role as "system" | "user" | "assistant");
+          if (typeof m.content === "string") {
+            return { role, content: m.content } as CoreMessage;
+          }
+          if (hasMultimodalContent(m.content)) {
+            return {
+              role,
+              content: toVercelParts(m.content) as never,
+            } as CoreMessage;
+          }
+          // Text-only ContentBlock[] — stringify is fine
+          return { role, content: stringifyContentBlocks(m.content) } as CoreMessage;
+        });
+        const maxSteps = options.maxSteps ?? 10;
+        // Translate llm-ports ToolDefinition[] → Vercel tools record.
+        // Vercel's `tool({ description, parameters, execute })` wraps each
+        // tool; the SDK invokes execute() between agent steps. We use
+        // `Record<string, unknown>` for the tools map because Vercel's
+        // inferred Tool union changes shape based on whether execute is
+        // present; the simpler approach is to type-erase here and cast
+        // when passing to generateText.
+        const tools: Record<string, unknown> = {};
+        for (const [name, def] of Object.entries(options.tools ?? {})) {
+          tools[name] = tool({
+            description: def.description,
+            parameters: def.inputSchema,
+            execute: async (input: unknown) => def.execute(input as never),
+          });
+        }
+        const result = await generateText({
           model,
-          system: options.instructions,
+          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
           messages,
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
+          ...(Object.keys(tools).length > 0 ? { tools: tools as never } : {}),
+          maxSteps,
           ...(options.signal ? { abortSignal: options.signal } : {}),
         });
-        const usage = parseUsage(result);
+        // Aggregate usage across all steps. Vercel's `usage` on the top-level
+        // result is the FINAL step's usage; we want the total. The `steps`
+        // array carries per-step usage we can sum.
+        const totalUsage: TokenUsage = aggregateStepsUsage(result.steps);
+        // Map Vercel finishReason → llm-ports terminationReason. "stop" or
+        // "end_turn" → completed; anything else (length, content-filter) at
+        // maxSteps still means we ran out of budget → "max_steps".
+        const finishReason = result.finishReason;
+        const stepsTaken = result.steps.length;
+        const terminationReason: AgentResult["terminationReason"] =
+          finishReason === "stop" || finishReason === "tool-calls"
+            ? "completed"
+            : stepsTaken >= maxSteps
+              ? "max_steps"
+              : "completed";
+        // Surface each tool call the model emitted across the agent loop.
+        const toolCalls: AgentResult["toolCalls"] = result.steps.flatMap((step) => {
+          // Vercel parameterizes StepResult<TOOLS>; we use `unknown` here
+          // because the public API doesn't carry the user's tool typing
+          // through. The runtime shape of toolCalls / toolResults matches
+          // the documented Vercel SDK contract.
+          const stepToolCalls = (step.toolCalls ?? []) as Array<{
+            toolCallId: string;
+            toolName: string;
+            args: unknown;
+          }>;
+          const stepToolResults = (step.toolResults ?? []) as Array<{
+            toolCallId: string;
+            result: unknown;
+          }>;
+          return stepToolCalls.map((tc) => {
+            const matching = stepToolResults.find((tr) => tr.toolCallId === tc.toolCallId);
+            return {
+              name: tc.toolName,
+              input: (tc.args ?? {}) as Record<string, unknown>,
+              output: matching?.result ?? null,
+            };
+          });
+        });
         return {
           text: result.text,
-          messages: options.messages,
-          toolCalls: [],
-          usage,
-          cost: computeChatCost(usage, pricing),
+          messages: options.messages, // we don't surface the intermediate vercel-shaped messages
+          toolCalls,
+          usage: totalUsage,
+          cost: computeChatCost(totalUsage, pricing),
           modelId: result.response?.modelId ?? modelId,
           providerAlias: alias,
           latencyMs: Date.now() - start,
-          stepsTaken: 1,
-          terminationReason: "completed",
+          stepsTaken,
+          terminationReason,
         };
       } catch (err) {
         throw wrapProviderError(alias, err);
@@ -509,5 +644,23 @@ function parseUsage(result: { usage?: { promptTokens?: number; completionTokens?
     outputTokens,
     totalTokens: result.usage?.totalTokens ?? inputTokens + outputTokens,
   };
+}
+
+/**
+ * Sum per-step token usage across all agent loop iterations. Vercel's
+ * top-level `result.usage` is the FINAL step's usage; for multi-turn agents
+ * we want the cumulative total. Used by `runAgent` (alpha.8+).
+ */
+function aggregateStepsUsage(steps: ReadonlyArray<StepResult<never>>): TokenUsage {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  for (const step of steps) {
+    const u = step.usage ?? {};
+    inputTokens += u.promptTokens ?? 0;
+    outputTokens += u.completionTokens ?? 0;
+    totalTokens += u.totalTokens ?? (u.promptTokens ?? 0) + (u.completionTokens ?? 0);
+  }
+  return { inputTokens, outputTokens, totalTokens };
 }
 

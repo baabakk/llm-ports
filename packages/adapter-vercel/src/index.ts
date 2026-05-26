@@ -40,3 +40,4 @@ export {
   type VercelAdapter,
   type VercelAdapterOptions,
 } from "./adapter.js";
+export { VERCEL_PRICING, lookupVercelPricing } from "./pricing.js";

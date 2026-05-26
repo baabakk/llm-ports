@@ -2,13 +2,13 @@
 
 [OpenAI SDK](https://www.npmjs.com/package/openai) adapter for [llm-ports](https://github.com/baabakk/llm-ports). Implements `LLMPort` and `EmbeddingsPort`. The same adapter serves OpenAI plus 12+ OpenAI-compatible providers via `baseURL`, including Groq, Together AI, Fireworks AI, Cerebras, Clarifai, and SambaNova.
 
-## Installation
+## Install
 
 ```bash
 pnpm add @llm-ports/core @llm-ports/adapter-openai openai zod
 ```
 
-## Usage with OpenAI
+## Configure
 
 ```typescript
 import { createRegistryFromEnv } from "@llm-ports/core";
@@ -26,7 +26,7 @@ const llm = registry.getPort();
 const embed = registry.getEmbeddingsPort();
 ```
 
-## Usage with OpenAI-compatible providers
+### Compat providers
 
 The same adapter works for any provider that exposes an OpenAI-shaped API. Just supply a `baseURL`:
 
@@ -58,19 +58,51 @@ createOpenAIAdapter({
 });
 ```
 
+## Adapter options
+
+```ts
+interface OpenAIAdapterOptions {
+  apiKey: string;
+  baseURL?: string;                            // for OpenAI-compat providers
+  fetch?: typeof fetch;                        // inject custom fetch (tests, proxies)
+  validationStrategy?: ValidationStrategy;
+  pricingOverrides?: Record<string, ModelPricing>;
+  displayName?: string;                        // friendlier alias in error messages
+  imageSizeLimitBytes?: number;                // default 20 MB
+  maxRetries?: number;                         // SDK-level retries (default 2)
+  transientAuthRetries?: number;               // project-key 401 burst retries (default 2)
+  transientAuthBackoffMs?: (attempt: number) => number;
+  onRetry?: OnRetry;                           // observability hook
+}
+```
+
+## Bundled pricing
+
+The bundled `OPENAI_PRICING` table covers GPT-5 family (gpt-5, gpt-5-mini, gpt-5-nano), GPT-4o family, o3 / o3-mini, and the embedding models. Override per model via `pricingOverrides`.
+
+Bundled pricing does NOT cover compat-provider models (Groq, Together AI, Fireworks, Cerebras, Clarifai, SambaNova, LiteLLM proxy, etc.) — supply `pricingOverrides` for those.
+
 ## Supported features
 
 | Feature | Status |
 |---------|--------|
-| `generateText` | Supported |
-| `generateStructured` (Zod schemas) | Supported (uses native `response_format: json_object` + `retry-with-feedback`) |
-| `streamText` | Supported |
-| `streamStructured` (partial JSON) | Supported (best-effort partial parse) |
-| `runAgent` (multi-turn tool use) | Supported |
-| `generateEmbedding` / `generateEmbeddings` | Supported (text-embedding-3-small / -large) |
-| Vision input (`image` blocks) | Supported (base64 → data URI; URL passthrough) |
-| Audio input (`audio` blocks) | Supported (wav, mp3 base64 only; ogg and URL audio not supported) |
-| Prompt caching | Reported in cost via `cachedTokens` from `usage.prompt_tokens_details.cached_tokens` |
+| `generateText` | ✓ |
+| `generateStructured` (Zod schemas) | ✓ (uses native `response_format: json_object` + `retry-with-feedback`) |
+| `streamText` | ✓ |
+| `streamStructured` (partial JSON) | ✓ (best-effort partial parse) |
+| `runAgent` (multi-turn tool use) | ✓ |
+| `generateEmbedding` / `generateEmbeddings` | ✓ (text-embedding-3-small / -large) |
+| Vision input — base64 images | ✓ (data URI) |
+| Vision input — URL images | ✓ |
+| Audio input — base64 wav/mp3 | ✓ |
+| Audio input — base64 ogg | ✗ (OpenAI doesn't support ogg) |
+| Audio input — URL audio | ✗ (OpenAI requires base64) |
+| Prompt caching | ✓ — reported via `cachedTokens` |
+| `AbortSignal` cancellation | ✓ entry + in-flight (alpha.6) |
+
+## Content blocks supported
+
+`text`, `image` (base64 → data URI; URL passthrough), `audio` (base64 wav/mp3 only), `tool_use`, `tool_result`. Throws `ContentBlockUnsupportedError` for unsupported variants.
 
 ## Known reasoning models (auto-handled)
 
@@ -101,12 +133,13 @@ const clarifai = createOpenAIAdapter({
 });
 ```
 
-## Pricing
+## Cancellation
 
-The bundled `pricing.ts` table covers GPT-5 family (gpt-5, gpt-5-mini, gpt-5-nano), GPT-4o family, o3 / o3-mini, and the embedding models. Override per model via the registry's `pricingOverrides` option.
+Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is threaded as the 2nd-arg request options to `client.chat.completions.create`, so `controller.abort()` cancels the in-flight HTTP request — both for one-shot calls and for streaming. `runAgent` also re-checks the signal between steps. See the [Cancellation guide](https://baabakk.github.io/llm-ports/guides/cancellation).
 
-Bundled pricing does NOT cover compat-provider models (Groq, Together AI, Fireworks, Cerebras, Clarifai, SambaNova, LiteLLM proxy, etc.) — supply `pricingOverrides` for those.
+## Reading next
 
-## License
-
-MIT
+- [OpenAI adapter docs](https://baabakk.github.io/llm-ports/adapters/openai) — full feature deep-dive
+- [Compat providers](https://baabakk.github.io/llm-ports/adapters/openai#compat-providers) — Clarifai, SambaNova, Groq, Cerebras worked examples
+- [Known reasoning models](https://baabakk.github.io/llm-ports/known-quirks) — static catalog + runtime learning
+- [Multi-provider routing](https://baabakk.github.io/llm-ports/guides/multi-provider) — chain OpenAI with Anthropic / Gemini fallbacks

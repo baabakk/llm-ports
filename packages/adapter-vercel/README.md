@@ -6,15 +6,15 @@
 
 If you've already wired your project around `@ai-sdk/anthropic`, `@ai-sdk/openai`, etc., you can adopt llm-ports without rewriting that integration. This adapter takes your pre-configured Vercel `LanguageModel` instances and routes `LLMPort` calls through Vercel's `generateText`, `streamText`, `embed`, and `embedMany` helpers. You get cost gating, fallback chains, and capability factories on top of the stack you already have.
 
-For new projects, prefer the direct adapters (`@llm-ports/adapter-anthropic`, `@llm-ports/adapter-openai`) — fewer layers, more control.
+For new projects, prefer the direct adapters (`@llm-ports/adapter-anthropic`, `@llm-ports/adapter-openai`, `@llm-ports/adapter-google`) — fewer layers, more control.
 
-## Installation
+## Install
 
 ```bash
 pnpm add @llm-ports/core @llm-ports/adapter-vercel ai @ai-sdk/anthropic
 ```
 
-## Usage
+## Configure
 
 ```typescript
 import { anthropic } from "@ai-sdk/anthropic";
@@ -32,11 +32,8 @@ const registry = createRegistryFromEnv({
       embeddingModels: {
         "text-embedding-3-small": openai.textEmbeddingModel("text-embedding-3-small"),
       },
-      pricing: {
-        "claude-sonnet-4-6": { inputPer1M: 3, outputPer1M: 15 },
-        "gpt-5": { inputPer1M: 2.5, outputPer1M: 10 },
-        "text-embedding-3-small": { inputPer1M: 0, outputPer1M: 0, embeddingPer1M: 0.02 },
-      },
+      // pricing is optional in alpha.8+ — bundled VERCEL_PRICING covers common
+      // @ai-sdk/* models. Supply pricingOverrides only for missing entries.
     }),
   },
 });
@@ -52,24 +49,58 @@ LLM_PROVIDER_GPT=vercel|gpt-5|cost:100/day
 LLM_TASK_ROUTE_TRIAGE=fast,gpt
 ```
 
+## Adapter options
+
+```ts
+interface VercelAdapterOptions {
+  models?: Record<string, LanguageModel>;             // pre-configured @ai-sdk/* instances
+  embeddingModels?: Record<string, EmbeddingModel<string>>;
+  pricing?: Record<string, ModelPricing>;             // optional; merges over VERCEL_PRICING
+  validationStrategy?: ValidationStrategy;
+  imageSizeLimitBytes?: number;                       // default 20 MB
+  onRetry?: OnRetry;                                  // observability hook
+}
+```
+
+## Bundled pricing
+
+`VERCEL_PRICING` (alpha.8+) covers the common OpenAI / Anthropic / Google models used via `@ai-sdk/*`. Values mirror the direct adapters' bundled tables. For uncommon `@ai-sdk/*` providers (LMStudio, OpenRouter, perplexity-ai, custom routes), supply `pricing` entries yourself.
+
 ## Supported features
 
 | Feature | Status |
 |---------|--------|
-| `generateText` | Supported |
-| `generateStructured` (Zod schemas) | Supported (prompted JSON + retry-with-feedback) |
-| `streamText` | Supported |
-| `streamStructured` (partial JSON) | Supported (best-effort partial parse) |
-| `runAgent` | **Limited in v0.1**: single-turn only; multi-turn tool use via Vercel's own agent loop comes in v0.2 |
-| `generateEmbedding` / `generateEmbeddings` | Supported |
-| Multimodal content blocks | Limited (string conversion in v0.1) |
+| `generateText` | ✓ |
+| `generateStructured` (Zod schemas) | ✓ (prompted JSON + retry-with-feedback + alpha.5 repair pass) |
+| `streamText` | ✓ |
+| `streamStructured` (partial JSON) | ✓ (best-effort partial parse) |
+| `runAgent` (multi-turn) | ✓ (alpha.8+; via Vercel's native `tools` + `maxSteps` loop) |
+| `generateEmbedding` / `generateEmbeddings` | ✓ |
+| Multimodal content blocks | ✓ (alpha.8+; via Vercel `MessagePart[]` shape) |
+| `AbortSignal` cancellation | ✓ entry + in-flight (alpha.6) |
+
+## Content blocks supported
+
+`text`, `image` (base64 → data URI; URL → passthrough), `audio` (base64 → Vercel `file` part), `tool_use`, `tool_result`. Throws for URL-form audio (Vercel routes audio via file-data; pass base64 + mediaType instead).
+
+## Cancellation
+
+Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is passed through to Vercel's `abortSignal` field on `generateText` / `streamText`, so `controller.abort()` cancels the in-flight provider HTTP request (the cancellation propagates from Vercel to the underlying provider SDK). See the [Cancellation guide](https://baabakk.github.io/llm-ports/guides/cancellation).
+
+## Known limitations
+
+- **No reasoning-model headroom-multiplier.** Unlike `adapter-openai`, the Vercel adapter doesn't apply a 10× headroom for OpenAI o-series / gpt-5-nano / Cerebras gpt-oss when called with small `maxOutputTokens`. The Vercel adapter does retry on `finishReason: "length"` with empty text + reasoning signal (alpha.1 fix #4), but it doesn't pre-seed the multiplier. **Workaround**: set `maxOutputTokens` 5-10× higher than your visible-output budget, or use `@llm-ports/adapter-openai` directly for reasoning models in v0.1.
 
 ## When to use this vs the direct adapters
 
-| You're already on `@ai-sdk/*` and want to add llm-ports | Use this adapter |
-| You're building a new project | Use `adapter-anthropic`, `adapter-openai`, etc. directly |
-| You need full multimodal + advanced agent features | Use the direct adapters |
+| Scenario | Choose |
+|---|---|
+| Already on `@ai-sdk/*` and want to add llm-ports | This adapter |
+| New project | `adapter-anthropic` / `adapter-openai` / `adapter-google` directly |
+| Need full multimodal richness (Anthropic prompt-caching, Gemini context-caching, etc.) | Direct adapters expose those; Vercel abstracts them away |
 
-## License
+## Reading next
 
-MIT
+- [Vercel adapter docs](https://baabakk.github.io/llm-ports/adapters/vercel) — full feature deep-dive
+- [Migration from Vercel AI SDK guide](https://baabakk.github.io/llm-ports/migration/from-vercel-ai) — two migration paths (wrap vs. replace)
+- [Adapter feature matrix](https://baabakk.github.io/llm-ports/adapters/) — direct adapter comparison

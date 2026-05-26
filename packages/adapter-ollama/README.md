@@ -12,13 +12,13 @@ Ollama exposes an OpenAI-compatible endpoint, so technically `@llm-ports/adapter
 - Ollama-specific sampling (`num_predict`, `num_ctx`, etc., via the SDK)
 - No-cost defaults (every Ollama model is priced $0/1M; budget gating defaults to `unlimited`)
 
-## Installation
+## Install
 
 ```bash
 pnpm add @llm-ports/core @llm-ports/adapter-ollama ollama
 ```
 
-## Usage
+## Configure
 
 ```typescript
 import { createRegistryFromEnv } from "@llm-ports/core";
@@ -47,6 +47,23 @@ LLM_PROVIDER_LOCAL=ollama|llama3.3|unlimited
 LLM_TASK_ROUTE_DRAFT=local
 ```
 
+## Adapter options
+
+```ts
+interface OllamaAdapterOptions {
+  baseURL?: string;                    // default "http://localhost:11434"
+  autoPull?: boolean;                  // default false
+  keepAlive?: string;                  // default "5m" (VRAM retention)
+  validationStrategy?: ValidationStrategy;
+  pricingOverrides?: Record<string, ModelPricing>;
+  imageSizeLimitBytes?: number;        // unset by default (model-dependent)
+}
+```
+
+## Bundled pricing
+
+`OLLAMA_PRICING` defaults every model to `$0/1M` (local inference is free at the API layer; you pay in hardware + electricity). Override via `pricingOverrides` if you want to attribute internal cost (electricity, GPU-hour amortization) — useful for cost-tracking dashboards.
+
 ## The local-to-cloud flip
 
 Develop on Ollama, ship to a cloud provider, change one line:
@@ -63,17 +80,22 @@ Application code never changes. `llm.generateText({ taskType: "draft", ... })` r
 
 | Feature | Status |
 |---------|--------|
-| `generateText` | Supported |
-| `generateStructured` (Zod schemas) | Supported (uses Ollama's `format: "json"` + `retry-with-feedback`) |
-| `streamText` | Supported |
-| `streamStructured` (partial JSON) | Supported (best-effort partial parse) |
-| `runAgent` (multi-turn tool use) | Supported (model-dependent; tools require capable models like Llama 3.3+) |
-| `generateEmbedding` / `generateEmbeddings` | Supported (nomic-embed-text, mxbai-embed-large) |
-| Vision input (base64 images) | Supported (model-dependent; needs vision-capable model like LLaVA) |
-| Vision input (URL images) | **Not supported** — Ollama does not fetch URLs; pre-fetch and pass base64 |
-| Audio input | **Not supported** by Ollama chat |
-| Model management | `listModels`, `pullModel(onProgress)`, `deleteModel`, `checkHealth` |
-| Auto-pull on first use | Optional, controlled by `autoPull` flag |
+| `generateText` | ✓ |
+| `generateStructured` (Zod schemas) | ✓ (uses Ollama's `format: "json"` + `retry-with-feedback`) |
+| `streamText` | ✓ |
+| `streamStructured` (partial JSON) | ✓ (best-effort partial parse) |
+| `runAgent` (multi-turn tool use) | ✓ (model-dependent; tools need capable models like Llama 3.3+) |
+| `generateEmbedding` / `generateEmbeddings` | ✓ (nomic-embed-text, mxbai-embed-large) |
+| Vision input — base64 images | ✓ (model-dependent; needs vision model like LLaVA) |
+| Vision input — URL images | ✗ — Ollama doesn't fetch URLs; pre-fetch + pass base64 |
+| Audio input | ✗ — Ollama chat doesn't support audio |
+| Model management | ✓ `listModels`, `pullModel(onProgress)`, `deleteModel`, `checkHealth` |
+| Auto-pull on first use | ✓ (opt-in via `autoPull` flag) |
+| `AbortSignal` cancellation | partial — entry-time check only (ollama-js limitation) |
+
+## Content blocks supported
+
+`text`, `image` (base64 only), `tool_use`, `tool_result`. Throws `ContentBlockUnsupportedError` for `audio` and URL-form images.
 
 ## Model management example
 
@@ -92,6 +114,13 @@ const health = await adapter.checkHealth();
 if (!health.ok) throw new Error("Ollama daemon unreachable");
 ```
 
-## License
+## Cancellation (limited)
 
-MIT
+Entry-time abort support shipped in `0.1.0-alpha.6` — if `options.signal.aborted` is already true at entry, the call throws without invoking the daemon. **Mid-flight cancellation is NOT supported** because `ollama-js` v0.5 doesn't expose a per-call signal; its `client.abort()` method cancels ALL in-flight requests on the client, which is too coarse for per-call use. Will land when ollama-js v0.7+ exposes per-call signal. See the [Cancellation guide](https://baabakk.github.io/llm-ports/guides/cancellation).
+
+## Reading next
+
+- [Ollama adapter docs](https://baabakk.github.io/llm-ports/adapters/ollama) — full feature deep-dive
+- [Local-to-cloud flip guide](https://baabakk.github.io/llm-ports/guides/local-to-cloud) — develop on Ollama, ship to cloud
+- [Tool-use security guide](https://baabakk.github.io/llm-ports/guides/security) — `runAgent` safety patterns
+- [Ollama documentation](https://github.com/ollama/ollama) — daemon setup, model catalog

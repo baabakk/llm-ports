@@ -36,7 +36,7 @@ runContractTests("vercel", () => {
     port,
     expectedAlias: ALIAS,
     expectedModelId: MODEL_ID,
-    imageContentSupport: "none", // v0.1: image blocks degrade to placeholder strings
+    imageContentSupport: "base64+url", // alpha.8: full multimodal via Vercel parts
     signalSupport: "entry+inflight",
 
     setupGenerateText(response) {

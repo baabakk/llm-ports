@@ -32,16 +32,29 @@ export function buildVercelGenerateTextResult(spec: MockedGenerateText): {
   finishReason: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
   response: { modelId: string };
+  steps: Array<{
+    text: string;
+    finishReason: string;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+    toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
+    toolResults?: Array<{ toolCallId: string; result: unknown }>;
+  }>;
 } {
+  const usage = {
+    promptTokens: spec.promptTokens,
+    completionTokens: spec.completionTokens,
+    totalTokens: spec.promptTokens + spec.completionTokens,
+  };
+  const finishReason = spec.finishReason ?? "stop";
   return {
     text: spec.text,
-    finishReason: spec.finishReason ?? "stop",
-    usage: {
-      promptTokens: spec.promptTokens,
-      completionTokens: spec.completionTokens,
-      totalTokens: spec.promptTokens + spec.completionTokens,
-    },
+    finishReason,
+    usage,
     response: { modelId: spec.modelId ?? "fake-model" },
+    // alpha.8: runAgent multi-turn uses result.steps[]. For single-step
+    // generation, mimic Vercel's behavior: a 1-element steps array carrying
+    // the same text + usage + finishReason as the top-level result.
+    steps: [{ text: spec.text, finishReason, usage }],
   };
 }
 

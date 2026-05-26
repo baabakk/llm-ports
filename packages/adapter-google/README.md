@@ -8,7 +8,7 @@ Native Google Gemini adapter for [`llm-ports`](https://github.com/baabakk/llm-po
 pnpm add @llm-ports/core @llm-ports/adapter-google @google/genai zod
 ```
 
-## Usage
+## Configure
 
 ```ts
 import { createRegistryFromEnv } from "@llm-ports/core";
@@ -62,6 +62,17 @@ Gemini exposes an OpenAI-compatible surface at `https://generativelanguage.googl
 | Explicit context caching | ✗ — v0.2 |
 | Code execution tool | ✗ — v0.2 |
 
+## Adapter options
+
+```ts
+interface GoogleAdapterOptions {
+  apiKey: string;
+  pricingOverrides?: Record<string, ModelPricing>;
+  validationStrategy?: ValidationStrategy;
+  imageSizeLimitBytes?: number; // default 20 MB
+}
+```
+
 ## Bundled pricing
 
 | Model | Input/1M | Output/1M | Cached input/1M |
@@ -74,17 +85,17 @@ Gemini exposes an OpenAI-compatible surface at `https://generativelanguage.googl
 
 Pricing source: <https://ai.google.dev/gemini-api/docs/pricing> (verified 2026-05). Bundled values are the under-200k-token tier. For long-context workloads, supply `pricingOverrides` with the over-200k rates.
 
-## Adapter options
+## Content blocks supported
 
-```ts
-interface GoogleAdapterOptions {
-  apiKey: string;
-  pricingOverrides?: Record<string, ModelPricing>;
-  validationStrategy?: ValidationStrategy;
-  imageSizeLimitBytes?: number; // default 20 MB
-}
-```
+`text`, `image` (base64 → inlineData; URL → fileData), `audio` (base64 only — Gemini accepts inlineData for audio), `tool_use`, `tool_result`. Throws `ContentBlockUnsupportedError` for URL-form audio.
 
-## License
+## Cancellation
 
-MIT
+Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is threaded into the `config` arg of `client.models.generateContent`, so `controller.abort()` cancels the in-flight HTTP request. `runAgent` also re-checks the signal between steps. See the [Cancellation guide](https://baabakk.github.io/llm-ports/guides/cancellation).
+
+## Reading next
+
+- [Google adapter docs](https://baabakk.github.io/llm-ports/adapters/google) — full feature deep-dive
+- [OpenAI adapter](https://baabakk.github.io/llm-ports/adapters/openai) — comparison when choosing between native Gemini and OpenAI-compat path
+- [Multi-provider routing](https://baabakk.github.io/llm-ports/guides/multi-provider) — chain Gemini with Anthropic / OpenAI fallbacks
+- [@google/genai SDK docs](https://github.com/googleapis/js-genai) — underlying SDK reference
