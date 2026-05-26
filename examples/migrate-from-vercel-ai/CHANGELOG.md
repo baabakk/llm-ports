@@ -1,5 +1,14 @@
 # @llm-ports/example-migrate-from-vercel-ai
 
+## 0.1.0-alpha.11
+
+### Patch Changes
+
+- Updated dependencies [c4e1825]
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.11
+  - @llm-ports/adapter-openai@0.1.0-alpha.11
+  - @llm-ports/adapter-vercel@0.1.0-alpha.11
+
 ## 0.1.0-alpha.10
 
 ### Patch Changes

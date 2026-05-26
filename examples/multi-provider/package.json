@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-multi-provider",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-alpha.11",
   "private": true,
   "description": "Multi-provider llm-ports example: fallback chain across Anthropic + OpenAI, USD cost gating, reusable classifier capability factory.",
   "type": "module",

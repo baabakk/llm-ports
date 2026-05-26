@@ -1,5 +1,12 @@
 # @llm-ports/example-with-onretry
 
+## 0.1.0-alpha.11
+
+### Patch Changes
+
+- Updated dependencies [c4e1825]
+  - @llm-ports/adapter-openai@0.1.0-alpha.11
+
 ## 0.1.0-alpha.9
 
 ### Patch Changes
