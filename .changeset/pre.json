@@ -32,6 +32,7 @@
     "adapter-vercel-consume-core-utils",
     "capability-task-types-docs",
     "core-shared-utilities",
+    "docs-readme-harmonization-env-examples",
     "image-boundary-validation",
     "image-contract-test",
     "image-detail-field",
@@ -42,6 +43,7 @@
     "session-cost-gate",
     "tool-schema-conversion",
     "validation-hardening",
+    "vercel-parity-compat-tests-doc-polish",
     "vercel-reasoning-and-empty"
   ]
 }

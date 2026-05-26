@@ -1,5 +1,51 @@
 # @llm-ports/adapter-vercel
 
+## 0.1.0-alpha.8
+
+### Minor Changes
+
+- 6b6f139: Vercel adapter parity with the direct adapters. Closes three v0.1-status gaps that previously had the adapter shipping visibly degraded relative to `adapter-anthropic` / `adapter-openai` / `adapter-google`.
+
+  **Multi-turn `runAgent`.** Previously single-turn — `maxSteps > 1` was ignored. Now wires Vercel AI SDK's native `tools` + `maxSteps` agent loop: the SDK invokes tool `execute` functions between steps and feeds results back to the model, looping until either the model emits text without tool calls (`terminationReason: "completed"`) or `stepsTaken >= maxSteps` (`terminationReason: "max_steps"`). Per-step usage is aggregated across the agent loop.
+
+  **Full multimodal.** Previously image / audio content blocks downgraded to `[image content]` placeholder strings. Now translates to Vercel's `MessagePart[]` shape:
+  - base64 images → `{ type: "image", image: "data:<mt>;base64,<data>" }`
+  - URL images → `{ type: "image", image: <URL> }`
+  - base64 audio → `{ type: "file", data, mimeType }`
+
+  The adapter switches between the simpler `prompt: string` path (text-only) and the `messages` path (multimodal) automatically based on content shape. The `imageContentSupport` flag on the contract test suite flips from `"none"` to `"base64+url"`; image conformance tests now actually exercise the wire format instead of skipping.
+
+  **Bundled pricing.** New `VERCEL_PRICING` table covering OpenAI / Anthropic / Google models via `@ai-sdk/*`. The `pricing` adapter option is now OPTIONAL; user-supplied entries merge on top of the bundled defaults. The bundle table mirrors the direct adapters' tables (same per-model rates, since underlying providers charge identically regardless of SDK layering). For uncommon `@ai-sdk/*` providers (LMStudio, OpenRouter, perplexity-ai, custom routes), users still supply their own entries.
+
+  **New exports**: `VERCEL_PRICING`, `lookupVercelPricing`.
+
+  Public API is additive — existing call sites with `pricing` supplied still work.
+
+### Patch Changes
+
+- 6b6f139: Docs polish across all 5 adapter READMEs (closes [#7](https://github.com/baabakk/llm-ports/issues/7)). Every adapter README now follows the canonical section template:
+
+  ```
+  # @llm-ports/adapter-<name>
+  <tagline>
+
+  ## Install
+  ## Configure
+  ## Adapter options
+  ## Bundled pricing
+  ## Supported features
+  ## Content blocks supported
+  ## Cancellation
+  <adapter-specific sections>
+  ## Reading next
+  ```
+
+  Adapter-specific sections (Anthropic's temperature handling, OpenAI's compat-providers + known reasoning models, Ollama's local-to-cloud flip + model management, Google's "why over OpenAI-compat baseURL", Vercel's "when to use vs direct") sit between Cancellation and Reading next. Public-facing behavior unchanged.
+
+  Per-example `.env.example` files added to all 10 examples (closes [#8](https://github.com/baabakk/llm-ports/issues/8)) so new users can `cp .env.example .env` then fill in their keys without grepping the source for `process.env.*`.
+
+  No code changes; package version bumps via this changeset because the README is published to npm as the package landing page.
+
 ## 0.1.0-alpha.7
 
 ### Patch Changes

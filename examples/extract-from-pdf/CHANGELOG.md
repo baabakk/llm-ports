@@ -1,5 +1,12 @@
 # @llm-ports/example-extract-from-pdf
 
+## 0.1.0-alpha.8
+
+### Patch Changes
+
+- Updated dependencies [6b6f139]
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.8
+
 ## 0.1.0-alpha.7
 
 ### Patch Changes
