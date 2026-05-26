@@ -19,6 +19,7 @@ export type {
   LLMPort,
   LLMPriority,
   MessageRole,
+  ProviderModelInfo,
   RunAgentOptions,
   StreamStructuredOptions,
   StreamTextOptions,
@@ -61,6 +62,8 @@ export {
   Registry,
   type AdapterRegistration,
   type ModelSelection,
+  type PricingFreshnessAdapterReport,
+  type PricingFreshnessReport,
   type RegistryOptions,
 } from "./registry/registry.js";
 

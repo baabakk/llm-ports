@@ -38,6 +38,7 @@ import {
   type LLMPort,
   type ModelPricing,
   type OnRetry,
+  type ProviderModelInfo,
   type RetryEvent,
   type RunAgentOptions,
   type StreamStructuredOptions,
@@ -123,6 +124,38 @@ export interface OpenAIAdapterOptions {
    */
   imageSizeLimitBytes?: number;
   /**
+   * Set to `true` to allow the OpenAI SDK to run in a browser environment.
+   * The SDK refuses by default to prevent accidental exposure of API keys.
+   *
+   * Only enable this when you understand the risk and have a mitigation in
+   * place: a server-side proxy that strips keys from the request before
+   * forwarding, a "bring your own API key" UI where users supply their own
+   * key, or an internal tool exposed only to trusted users. Forwarded to
+   * `new OpenAI({ dangerouslyAllowBrowser })` verbatim.
+   *
+   * Available since `0.1.0-alpha.9`.
+   */
+  dangerouslyAllowBrowser?: boolean;
+  /**
+   * Use OpenAI-style strict `response_format: { type: "json_schema", strict: true }`
+   * for `generateStructured` instead of classic `response_format: { type: "json_object" }`.
+   * With strict mode the provider constrains decoding to the exact schema
+   * before tokens are produced, so invalid JSON or missing fields are
+   * impossible (modulo provider bugs). The Zod schema is converted to
+   * JSON Schema via `zod-to-json-schema`, then post-processed to add
+   * `additionalProperties: false` on every object (a hard requirement of
+   * OpenAI / Cerebras strict mode).
+   *
+   * Defaults to auto-detect: enabled when `baseURL` contains
+   * `api.cerebras.ai` (Cerebras's gpt-oss / Qwen3.6 endpoints require strict
+   * mode for reliable structured output) AND the model isn't a known
+   * reasoning model (those reject `response_format` entirely). Set
+   * explicitly to override the auto-detect.
+   *
+   * Available since `0.1.0-alpha.9`.
+   */
+  useStrictResponseFormat?: boolean;
+  /**
    * Observability hook fired whenever the adapter retries an in-flight
    * request for a known transient reason. Sync or async; called
    * fire-and-forget. Throwing from the hook does NOT cancel the retry.
@@ -151,6 +184,8 @@ interface AdapterContext {
   transientAuthBackoffMs: (attempt: number) => number;
   /** 0 means "no size check"; positive number is the per-image byte limit. */
   imageSizeLimitBytes: number;
+  /** Whether generateStructured should emit `response_format: { type: "json_schema", strict: true }`. */
+  useStrictResponseFormat: boolean;
   /** Observability hook for transient retries. Optional; no-op when unset. */
   onRetry?: OnRetry;
 }
@@ -167,6 +202,7 @@ function makeClient(opts: OpenAIAdapterOptions): OpenAI {
     ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
     ...(opts.fetch ? { fetch: opts.fetch as OpenAI["fetch"] } : {}),
     ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+    ...(opts.dangerouslyAllowBrowser ? { dangerouslyAllowBrowser: true } : {}),
   });
 }
 
@@ -213,6 +249,13 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     transientAuthBackoffMs:
       opts.transientAuthBackoffMs ?? ((attempt) => 500 * Math.pow(3, attempt)),
     imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
+    useStrictResponseFormat:
+      opts.useStrictResponseFormat ??
+      // Auto-detect: Cerebras-hosted gpt-oss / Qwen3.6 / etc. need strict
+      // JSON schema for reliable structured output; the classic
+      // `response_format: { type: "json_object" }` is silently ignored on
+      // some Cerebras tiers and yields the model's freeform best-effort.
+      (opts.baseURL?.includes("api.cerebras.ai") ?? false),
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
@@ -304,6 +347,16 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
           : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
 
+        // When Cerebras / OpenAI strict mode is enabled, build the JSON
+        // Schema for the call. The schema is reused across retry-with-
+        // feedback rounds so we only build it once.
+        const strictResponseSchema = ctx.useStrictResponseFormat
+          ? {
+              name: options.schemaName ?? "structured_output",
+              schema: buildStrictJsonSchema(options.schema),
+            }
+          : undefined;
+
         // executeChatRequest handles error wrapping and capability fallback.
         // Don't double-wrap here — let ProviderUnavailableError propagate, and
         // let failValidation throw ValidationError directly.
@@ -316,7 +369,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ? { maxOutputTokens: options.maxOutputTokens }
             : {}),
           ...(options.signal ? { signal: options.signal } : {}),
-          jsonMode: true,
+          ...(strictResponseSchema ? { strictResponseSchema } : { jsonMode: true }),
           stream: false,
         });
         const r = response as {
@@ -564,6 +617,24 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         terminationReason,
       };
     },
+
+    async listModels(): Promise<ProviderModelInfo[]> {
+      try {
+        const out: ProviderModelInfo[] = [];
+        const page = await ctx.client.models.list();
+        // The OpenAI SDK returns a paginator; iterate to flatten.
+        for await (const m of page) {
+          const model = m as { id: string; owned_by?: string; created?: number };
+          out.push({
+            id: model.id,
+            ...(model.owned_by ? { metadata: { owned_by: model.owned_by, created: model.created } } : {}),
+          });
+        }
+        return out;
+      } catch (err) {
+        throw wrapProviderError(alias, err);
+      }
+    },
   };
 }
 
@@ -656,6 +727,14 @@ interface LogicalChatRequest {
   maxOutputTokens?: number;
   /** Set true to request native JSON mode. Falls back to plain text on rejection. */
   jsonMode?: boolean;
+  /**
+   * When set, generateStructured uses `response_format: { type: "json_schema",
+   * strict: true }` with this JSON Schema instead of classic
+   * `response_format: { type: "json_object" }`. The schema must already have
+   * `additionalProperties: false` on every nested object and `required: [...]`
+   * on every property — those are caller-enforced via `buildStrictJsonSchema`.
+   */
+  strictResponseSchema?: { name: string; schema: Record<string, unknown> };
   /** Stream the response or not. */
   stream: boolean;
   /** Tools when this is an agent step. */
@@ -723,7 +802,19 @@ function materializeRequest(
       ? req.maxOutputTokens * caps.reasoningHeadroomMultiplier
       : req.maxOutputTokens;
   }
-  if (req.jsonMode && !caps.jsonModeUnsupported) {
+  if (req.strictResponseSchema && !caps.jsonModeUnsupported) {
+    // OpenAI / Cerebras strict JSON Schema mode: provider constrains
+    // decoding to the schema before tokens are produced. Overrides plain
+    // json_object when present.
+    out["response_format"] = {
+      type: "json_schema",
+      json_schema: {
+        name: req.strictResponseSchema.name,
+        schema: req.strictResponseSchema.schema,
+        strict: true,
+      },
+    };
+  } else if (req.jsonMode && !caps.jsonModeUnsupported) {
     out["response_format"] = { type: "json_object" };
   }
   if (req.tools && req.tools.length > 0) {
@@ -1152,4 +1243,63 @@ function zodToParameters(schema: unknown): {
     // fall through to the safe default
   }
   return { type: "object", properties: {} };
+}
+
+/**
+ * Build the JSON Schema for OpenAI / Cerebras strict response_format mode
+ * from a Zod schema. Strict mode requires:
+ *   - Every object: `additionalProperties: false`
+ *   - Every object: ALL declared properties listed in `required` (no optionals)
+ *   - No unsupported JSON Schema features (oneOf is supported as anyOf,
+ *     allOf must be flattened, $ref must be inlined)
+ *
+ * We use `$refStrategy: "none"` to inline refs, then post-process to add
+ * the `additionalProperties: false` invariant on every nested object. The
+ * `required` field is left as-is — Zod-emitted JSON Schema marks every
+ * required field correctly. Optional Zod fields stay optional; callers
+ * who hit Cerebras's "all-fields-required" enforcement should either
+ * mark fields required in Zod or use `.default()`.
+ */
+function buildStrictJsonSchema(schema: unknown): Record<string, unknown> {
+  let json: Record<string, unknown>;
+  try {
+    json = zodToJsonSchema(schema as never, {
+      target: "openAi",
+      $refStrategy: "none",
+    }) as Record<string, unknown>;
+  } catch {
+    return { type: "object", properties: {}, additionalProperties: false };
+  }
+  return enforceStrictDialect(json);
+}
+
+function enforceStrictDialect(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { type: "object", properties: {}, additionalProperties: false };
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (key === "$schema") continue;
+    if (key === "properties" && value && typeof value === "object") {
+      const props: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        props[k] = enforceStrictDialect(v);
+      }
+      out[key] = props;
+      continue;
+    }
+    if (key === "items" && value && typeof value === "object" && !Array.isArray(value)) {
+      out[key] = enforceStrictDialect(value);
+      continue;
+    }
+    if (key === "anyOf" && Array.isArray(value)) {
+      out[key] = value.map((v) => enforceStrictDialect(v));
+      continue;
+    }
+    out[key] = value;
+  }
+  if (out["type"] === "object" && out["additionalProperties"] === undefined) {
+    out["additionalProperties"] = false;
+  }
+  return out;
 }

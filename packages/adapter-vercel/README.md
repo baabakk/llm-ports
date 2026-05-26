@@ -62,6 +62,25 @@ interface VercelAdapterOptions {
 }
 ```
 
+### Browser execution
+
+This adapter does NOT expose its own `dangerouslyAllowBrowser` option, because the underlying provider client is constructed by you when you build the `LanguageModel` instance. For browser execution, pass the SDK's flag at LanguageModel construction time:
+
+```ts
+import { createOpenAI } from "@ai-sdk/openai";
+
+const openai = createOpenAI({
+  apiKey: ephemeralUserKey,
+  dangerouslyAllowBrowser: true,        // ← set this on the @ai-sdk/* client
+});
+
+const adapter = createVercelAdapter({
+  models: { default: openai("gpt-5") },
+});
+```
+
+The same pattern applies to `@ai-sdk/anthropic` (and any other browser-restricted SDK). The `adapter-openai` and `adapter-anthropic` packages expose the flag directly because they construct the SDK client internally.
+
 ## Bundled pricing
 
 `VERCEL_PRICING` (alpha.8+) covers the common OpenAI / Anthropic / Google models used via `@ai-sdk/*`. Values mirror the direct adapters' bundled tables. For uncommon `@ai-sdk/*` providers (LMStudio, OpenRouter, perplexity-ai, custom routes), supply `pricing` entries yourself.

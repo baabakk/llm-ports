@@ -69,11 +69,23 @@ interface OpenAIAdapterOptions {
   pricingOverrides?: Record<string, ModelPricing>;
   displayName?: string;                        // friendlier alias in error messages
   imageSizeLimitBytes?: number;                // default 20 MB
+  dangerouslyAllowBrowser?: boolean;           // opt in to browser execution (alpha.9)
   maxRetries?: number;                         // SDK-level retries (default 2)
   transientAuthRetries?: number;               // project-key 401 burst retries (default 2)
   transientAuthBackoffMs?: (attempt: number) => number;
   onRetry?: OnRetry;                           // observability hook
 }
+```
+
+### `dangerouslyAllowBrowser` (alpha.9+)
+
+The OpenAI SDK refuses to construct in a browser environment unless `dangerouslyAllowBrowser: true` is passed explicitly. Set this option only when the API key is NOT a long-lived secret: short-lived proxy tokens, BYO-key UIs where the end user supplies their own key, or trusted internal tools running behind auth. For server-side proxy patterns where the secret stays on the server, leave it unset.
+
+```ts
+const adapter = createOpenAIAdapter({
+  apiKey: ephemeralUserKey,
+  dangerouslyAllowBrowser: true,
+});
 ```
 
 ## Bundled pricing

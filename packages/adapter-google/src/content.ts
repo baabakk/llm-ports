@@ -19,11 +19,13 @@
  *   - Tool results are mapped to `functionResponse` parts.
  */
 
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   ContentBlockUnsupportedError,
   type ContentBlock,
   type LLMMessage,
   type MessageContent,
+  type ToolDefinition,
 } from "@llm-ports/core";
 
 const ADAPTER_NAME = "google";
@@ -209,9 +211,12 @@ export function fromGeminiCandidate(candidate: GeminiResponseCandidate): Content
     if ("text" in part && part.text.length > 0) {
       out.push({ type: "text", text: part.text });
     } else if ("functionCall" in part) {
+      // Gemini's API doesn't return a tool-call ID. We synthesize one as
+      // the function name so the tool_result round-trip (which maps
+      // toolUseId → Gemini functionResponse.name) emits the correct name.
       out.push({
         type: "tool_use",
-        id: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: part.functionCall.name,
         name: part.functionCall.name,
         input: part.functionCall.args,
       });
@@ -235,4 +240,123 @@ export function fromGeminiCandidate(candidate: GeminiResponseCandidate): Content
     // fileData / functionResponse in assistant responses: not currently observed.
   }
   return out;
+}
+
+// ─── Tools: ToolDefinition[] → Gemini Tool[] ─────────────────────────
+
+export interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface GeminiTool {
+  functionDeclarations: GeminiFunctionDeclaration[];
+}
+
+/**
+ * Translate llm-ports tool definitions to Gemini's Tool[] shape.
+ *
+ * Gemini's FunctionDeclaration.parameters accepts an OpenAPI 3.0 subset of
+ * JSON Schema. zodToJsonSchema with target "openApi3" emits the closest
+ * dialect; we then strip $schema and definitions so the parameters object
+ * is what Gemini expects.
+ */
+export function toGeminiTools(tools: Record<string, ToolDefinition>): GeminiTool[] {
+  const declarations: GeminiFunctionDeclaration[] = Object.entries(tools).map(
+    ([name, def]) => ({
+      name,
+      description: def.description,
+      parameters: zodToGeminiSchema(def.inputSchema),
+    }),
+  );
+  return [{ functionDeclarations: declarations }];
+}
+
+/**
+ * Convert a Zod schema to a JSON Schema shape Gemini accepts (OpenAPI 3.0
+ * subset). Strips fields Gemini rejects (`$schema`, `definitions`, `$defs`).
+ *
+ * Falls back to `{ type: "object", properties: {} }` if conversion fails so
+ * a malformed tool definition doesn't crash the agent loop.
+ */
+export function zodToGeminiSchema(schema: unknown): Record<string, unknown> {
+  try {
+    const json = zodToJsonSchema(schema as never, {
+      target: "openApi3",
+      $refStrategy: "none",
+    }) as Record<string, unknown>;
+    return sanitizeGeminiSchema(json);
+  } catch {
+    return { type: "object", properties: {} };
+  }
+}
+
+/**
+ * Strip JSON Schema fields Gemini rejects. Applied recursively across
+ * nested `properties` and `items`. Public so generateStructured can reuse
+ * it for native responseSchema (alpha.9 §2.1).
+ */
+export function sanitizeGeminiSchema(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { type: "object", properties: {} };
+  }
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (key === "$schema" || key === "definitions" || key === "$defs" || key === "$ref") {
+      continue;
+    }
+    if (key === "properties" && value && typeof value === "object") {
+      const props: Record<string, unknown> = {};
+      for (const [propName, propSchema] of Object.entries(value as Record<string, unknown>)) {
+        props[propName] = sanitizeGeminiSchema(propSchema);
+      }
+      cleaned[key] = props;
+      continue;
+    }
+    if (key === "items" && value && typeof value === "object" && !Array.isArray(value)) {
+      cleaned[key] = sanitizeGeminiSchema(value);
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+/**
+ * Detect JSON Schema features Gemini's responseSchema constrained-decoding
+ * does not support. Returns the first unsupported feature found, or null
+ * if the schema is clean. Used by generateStructured to decide between
+ * native responseSchema and the prompted-JSON fallback.
+ *
+ * Unsupported (Gemini accepts OpenAPI 3.0 subset):
+ *   - `oneOf` (use anyOf instead; or fall back to prompted JSON)
+ *   - `allOf` (limited support; safer to fall back)
+ *   - `not`
+ *   - `$ref` (we strip these via sanitize, but their presence indicates
+ *     a recursive schema we shouldn't pass through)
+ */
+export function detectUnsupportedSchemaFeature(input: unknown): string | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const obj = input as Record<string, unknown>;
+  for (const key of ["oneOf", "allOf", "not", "$ref"]) {
+    if (key in obj) return key;
+  }
+  if (obj["properties"] && typeof obj["properties"] === "object") {
+    for (const propSchema of Object.values(obj["properties"] as Record<string, unknown>)) {
+      const nested = detectUnsupportedSchemaFeature(propSchema);
+      if (nested) return nested;
+    }
+  }
+  if (obj["items"] && typeof obj["items"] === "object" && !Array.isArray(obj["items"])) {
+    const nested = detectUnsupportedSchemaFeature(obj["items"]);
+    if (nested) return nested;
+  }
+  if (Array.isArray(obj["anyOf"])) {
+    for (const sub of obj["anyOf"]) {
+      const nested = detectUnsupportedSchemaFeature(sub);
+      if (nested) return nested;
+    }
+  }
+  return null;
 }

@@ -2,7 +2,7 @@
  * Anthropic Claude model pricing (USD per 1M tokens).
  *
  * Source: https://docs.anthropic.com/en/docs/about-claude/pricing
- * Last verified: 2026-04-10 by @baabakk
+ * Last verified: 2026-05-26 by @baabakk
  *
  * Update process: edit this file, bump the "Last verified" date, open a PR
  * with the source URL referenced. Changeset patch bump on adapter-anthropic.
@@ -14,6 +14,12 @@ import type { ModelPricing } from "@llm-ports/core";
 
 export const ANTHROPIC_PRICING: Record<string, ModelPricing> = {
   // Claude Opus 4.x family
+  "claude-opus-4-7": {
+    inputPer1M: 15.0,
+    outputPer1M: 75.0,
+    cacheReadPer1M: 1.5,
+    cacheWritePer1M: 18.75,
+  },
   "claude-opus-4": {
     inputPer1M: 15.0,
     outputPer1M: 75.0,

@@ -28,7 +28,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@llm-ports/core": "workspace:*"
+    "@llm-ports/core": "workspace:*",
+    "zod-to-json-schema": "^3.23.5"
   },
   "peerDependencies": {
     "@google/genai": "^2.0.0",

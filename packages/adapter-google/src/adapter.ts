@@ -28,6 +28,7 @@ import {
   computeChatCost,
   extractJSON,
   failValidation,
+  mergeTokenUsage,
   stringifyContentBlocks,
   throwIfAborted,
   tryParsePartialJSON,
@@ -39,9 +40,11 @@ import {
   type GenerateStructuredResult,
   type GenerateTextOptions,
   type GenerateTextResult,
+  type LLMMessage,
   type LLMPort,
   type MessageContent,
   type ModelPricing,
+  type ProviderModelInfo,
   type RunAgentOptions,
   type StreamStructuredOptions,
   type StreamTextOptions,
@@ -49,9 +52,14 @@ import {
   type ValidationStrategy,
 } from "@llm-ports/core";
 import {
+  detectUnsupportedSchemaFeature,
   extractGeminiText,
+  fromGeminiCandidate,
+  sanitizeGeminiSchema,
   toGeminiParts2,
   toGeminiRequest,
+  toGeminiTools,
+  zodToGeminiSchema,
   type GeminiPart,
 } from "./content.js";
 import { GEMINI_PRICING } from "./pricing.js";
@@ -190,15 +198,38 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           ? ctx.validationStrategy.maxAttempts
           : 1;
 
+      // Native responseSchema path: convert schema to JSON Schema; if no
+      // Gemini-unsupported features (oneOf, $ref, etc.) emit it as
+      // `config.responseSchema` so Gemini constrains decoding to the schema
+      // before tokens are produced. We still validate with Zod (Gemini's
+      // schema enforcement is best-effort) and still run the repair pass.
+      // If the schema uses unsupported features, fall back to the prompted-
+      // JSON path (existing behavior).
+      const jsonSchema = zodToGeminiSchema(options.schema);
+      const unsupportedFeature = detectUnsupportedSchemaFeature(jsonSchema);
+      const useNativeResponseSchema = unsupportedFeature === null;
+      if (!useNativeResponseSchema) {
+        warnSchemaFallback(modelId, unsupportedFeature);
+      }
+      const sanitizedSchema = useNativeResponseSchema
+        ? sanitizeGeminiSchema(jsonSchema)
+        : null;
+
       let correctionPrompt: string | null = null;
       let lastUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let lastModelId = modelId;
 
       while (attempts < maxAttempts) {
         attempts++;
+        // With native responseSchema, Gemini constrains the decoding — we
+        // skip the "Reply with a single JSON object only" suffix on the
+        // first attempt. Correction prompts still apply on retry-with-
+        // feedback rounds.
         const userText = correctionPrompt
           ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
-          : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
+          : useNativeResponseSchema
+            ? stringifyContentBlocks(options.prompt)
+            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
 
         try {
           const response = await ctx.client.models.generateContent({
@@ -213,6 +244,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                 ? { maxOutputTokens: options.maxOutputTokens }
                 : {}),
               responseMimeType: "application/json",
+              ...(sanitizedSchema ? { responseSchema: sanitizedSchema } : {}),
               ...(options.signal ? { abortSignal: options.signal } : {}),
             },
           });
@@ -333,42 +365,171 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
       throwIfAborted(options.signal);
       validateMessages(options.messages);
-      // v0.1: single-turn agent loop. Gemini's native automatic-function-calling
-      // multi-turn runAgent ships in v0.2 (matches adapter-vercel's v0.1 shape).
       const start = Date.now();
+      const maxSteps = options.maxSteps ?? 10;
+      const conversation: LLMMessage[] = [...options.messages];
+      const toolCalls: AgentResult["toolCalls"] = [];
+      let stepsTaken = 0;
+      let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      let finalText = "";
+      let lastModelId = modelId;
+      let terminationReason: AgentResult["terminationReason"] = "max_steps";
+
+      const toolsRegistered = Object.keys(options.tools).length > 0;
+      const geminiTools = toolsRegistered ? toGeminiTools(options.tools) : undefined;
+
       try {
-        const { systemInstruction, contents } = toGeminiRequest(options.messages);
-        const response = await ctx.client.models.generateContent({
-          model: modelId,
-          contents,
-          config: {
-            ...(systemInstruction !== undefined ? { systemInstruction } : {}),
-            ...(options.instructions !== undefined
-              ? { systemInstruction: options.instructions }
+        for (let step = 0; step < maxSteps; step++) {
+          // Re-check between steps so cancellation propagates even if the
+          // model just emitted a function call but the user clicked cancel
+          // before we send the result back.
+          throwIfAborted(options.signal);
+          stepsTaken = step + 1;
+
+          const { systemInstruction, contents } = toGeminiRequest(conversation);
+          const response = await ctx.client.models.generateContent({
+            model: modelId,
+            contents,
+            config: {
+              // options.instructions takes precedence over a system message
+              // baked into the messages array, matching the per-method pattern
+              // used elsewhere in the adapter.
+              ...(options.instructions !== undefined
+                ? { systemInstruction: options.instructions }
+                : systemInstruction !== undefined
+                  ? { systemInstruction }
+                  : {}),
+              ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+              ...(options.maxOutputTokens !== undefined
+                ? { maxOutputTokens: options.maxOutputTokens }
+                : {}),
+              ...(geminiTools ? { tools: geminiTools } : {}),
+              ...(options.signal ? { abortSignal: options.signal } : {}),
+            },
+          });
+
+          totalUsage = mergeTokenUsage(totalUsage, parseUsage(response));
+          lastModelId = response.modelVersion ?? modelId;
+
+          const candidate = response.candidates?.[0];
+          const responseParts = (candidate?.content?.parts ?? []) as GeminiPart[];
+          const blocks = fromGeminiCandidate({
+            content: { parts: responseParts },
+          });
+
+          // Push the assistant's response (text + tool_use blocks) into the
+          // canonical conversation so the next round sees it.
+          conversation.push({
+            role: "assistant",
+            content: blocks.length > 0
+              ? blocks
+              : [{ type: "text", text: extractGeminiText(responseParts) }],
+          });
+
+          finalText = blocks
+            .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+            .map((b) => b.text)
+            .join("");
+
+          const toolUses = blocks.filter(
+            (b): b is Extract<ContentBlock, { type: "tool_use" }> => b.type === "tool_use",
+          );
+          if (toolUses.length === 0) {
+            terminationReason = "completed";
+            break;
+          }
+
+          // Execute every tool call the model emitted this turn. Gemini may
+          // emit multiple functionCalls in a single response and expects all
+          // responses before continuing.
+          const toolResults: ContentBlock[] = [];
+          for (const tu of toolUses) {
+            const def = options.tools[tu.name];
+            if (!def) {
+              toolResults.push({
+                type: "tool_result",
+                toolUseId: tu.id,
+                content: `Tool "${tu.name}" not found.`,
+                isError: true,
+              });
+              continue;
+            }
+            try {
+              const output = await def.execute(tu.input as never);
+              toolCalls.push({
+                name: tu.name,
+                input: tu.input as Record<string, unknown>,
+                output,
+              });
+              const text = typeof output === "string" ? output : JSON.stringify(output);
+              const truncated =
+                def.maxOutputBytes !== undefined && text.length > def.maxOutputBytes
+                  ? `${text.slice(0, def.maxOutputBytes)}\n[truncated]`
+                  : text;
+              toolResults.push({
+                type: "tool_result",
+                toolUseId: tu.id,
+                content: truncated,
+              });
+            } catch (toolErr) {
+              toolResults.push({
+                type: "tool_result",
+                toolUseId: tu.id,
+                content: toolErr instanceof Error ? toolErr.message : String(toolErr),
+                isError: true,
+              });
+            }
+          }
+          conversation.push({ role: "tool", content: toolResults });
+        }
+      } catch (err) {
+        throw wrapProviderError(alias, err);
+      }
+
+      return {
+        text: finalText,
+        messages: conversation,
+        toolCalls,
+        usage: totalUsage,
+        cost: computeChatCost(totalUsage, pricing),
+        modelId: lastModelId,
+        providerAlias: alias,
+        latencyMs: Date.now() - start,
+        stepsTaken,
+        terminationReason,
+      };
+    },
+
+    async listModels(): Promise<ProviderModelInfo[]> {
+      try {
+        const out: ProviderModelInfo[] = [];
+        // The @google/genai SDK paginates; iterate once. Pricing is NOT
+        // included in the response — Gemini exposes catalog metadata but
+        // not USD rates. checkPricingFreshness() will detect added/removed
+        // models but cannot detect rate-only drift for Gemini.
+        const pager = await ctx.client.models.list();
+        for await (const m of pager) {
+          const model = m as {
+            name?: string;
+            displayName?: string;
+            inputTokenLimit?: number;
+            outputTokenLimit?: number;
+          };
+          if (!model.name) continue;
+          // `name` comes back as e.g. "models/gemini-2.5-flash". Strip prefix.
+          const id = model.name.startsWith("models/")
+            ? model.name.slice("models/".length)
+            : model.name;
+          out.push({
+            id,
+            ...(model.displayName ? { displayName: model.displayName } : {}),
+            ...(model.inputTokenLimit ? { contextWindow: model.inputTokenLimit } : {}),
+            ...(model.outputTokenLimit
+              ? { metadata: { outputTokenLimit: model.outputTokenLimit } }
               : {}),
-            ...(options.signal ? { abortSignal: options.signal } : {}),
-          },
-        });
-        const candidate = response.candidates?.[0];
-        const text = extractGeminiText(candidate?.content?.parts as GeminiPart[] | undefined);
-        const usage = parseUsage(response);
-        const toolCalls: AgentResult["toolCalls"] = [];
-        // v0.1 stub: we surface no tool calls. Real tool-use is v0.2 scope.
-        return {
-          text,
-          messages: [
-            ...options.messages,
-            { role: "assistant" as const, content: text },
-          ],
-          usage,
-          cost: computeChatCost(usage, pricing),
-          modelId: response.modelVersion ?? modelId,
-          providerAlias: alias,
-          latencyMs: Date.now() - start,
-          toolCalls,
-          stepsTaken: 1,
-          terminationReason: "completed",
-        };
+          });
+        }
+        return out;
       } catch (err) {
         throw wrapProviderError(alias, err);
       }
@@ -399,6 +560,36 @@ function parseUsage(response: GeminiResponseShape): TokenUsage {
     usage.cacheReadTokens = m.cachedContentTokenCount;
   }
   return usage;
+}
+
+// ─── Schema-fallback warning ─────────────────────────────────────────
+
+const warnedSchemaFallback = new Set<string>();
+
+/**
+ * Emit a one-time `console.warn` per model+feature when generateStructured
+ * falls back from native responseSchema to prompted JSON because the Zod
+ * schema contains a feature Gemini's constrained-decoding doesn't accept.
+ *
+ * Not a runtime-learned constraint (we know pre-call from inspecting the
+ * schema), so no click-to-file URL — just a developer-facing hint that
+ * simplifying the schema would unlock native responseSchema enforcement.
+ */
+function warnSchemaFallback(modelId: string, feature: string): void {
+  const key = `${modelId}::${feature}`;
+  if (warnedSchemaFallback.has(key)) return;
+  warnedSchemaFallback.add(key);
+  console.warn(
+    `[@llm-ports/adapter-google] generateStructured: model "${modelId}" schema ` +
+      `contains "${feature}" which Gemini's responseSchema does not support. ` +
+      `Falling back to prompted-JSON + Zod validation (still correct; just ` +
+      `slightly weaker constrained-decoding guarantee).`,
+  );
+}
+
+/** Test-only: reset the per-process fallback warning state. */
+export function _resetSchemaFallbackWarnings(): void {
+  warnedSchemaFallback.clear();
 }
 
 // Re-export ContentBlock for the rare adapter user that wants to type-check

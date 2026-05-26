@@ -18,16 +18,19 @@
  *     compat's image_url with a base64 data URI.
  *
  * Roadmap for the v0.1 → v0.2 cycle:
- *   - Native Gemini responseSchema in generateStructured (v0.1 uses prompted
- *     JSON + Zod + alpha.5 repair pass, which works but skips Gemini's
- *     constrained-decoding feature).
- *   - Multi-turn runAgent through Gemini's automatic-function-calling.
  *   - Embeddings via gemini-embedding-001.
  *   - Explicit context caching (Gemini's `cachedContent` feature).
  *   - Code execution tool (Gemini's built-in code interpreter).
+ *
+ * Shipped in alpha.9:
+ *   - Native Gemini responseSchema in generateStructured (constrained
+ *     decoding; falls back to prompted JSON when the schema contains
+ *     features Gemini does not accept).
+ *   - Multi-turn runAgent through Gemini's function-calling loop.
  */
 
 export {
+  _resetSchemaFallbackWarnings,
   createGoogleAdapter,
   type GoogleAdapter,
   type GoogleAdapterOptions,

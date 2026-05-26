@@ -36,6 +36,7 @@ import {
   type GenerateTextResult,
   type LLMPort,
   type ModelPricing,
+  type ProviderModelInfo,
   type RunAgentOptions,
   type StreamStructuredOptions,
   type StreamTextOptions,
@@ -532,6 +533,26 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         stepsTaken,
         terminationReason,
       };
+    },
+
+    async listModels(): Promise<ProviderModelInfo[]> {
+      try {
+        const result = await ctx.client.list();
+        // Ollama is local-only and doesn't have a "pricing" concept — every
+        // model is free (modulo electricity). We still report id + size so
+        // checkPricingFreshness can detect "model is in bundled table but
+        // no longer present locally".
+        return result.models.map((m) => ({
+          id: m.name,
+          metadata: {
+            size: m.size,
+            modified_at: m.modified_at,
+            ...("digest" in m ? { digest: (m as { digest: string }).digest } : {}),
+          },
+        }));
+      } catch (err) {
+        throw wrapProviderError(alias, err);
+      }
     },
   };
 }
