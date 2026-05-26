@@ -225,6 +225,33 @@ export interface AgentResult {
   terminationReason: "completed" | "max_steps" | "stopped_by_user";
 }
 
+// ─── Model discovery (alpha.9+) ───────────────────────────────────────
+
+/**
+ * Information about a single model the provider exposes. Returned by
+ * {@link LLMPort.listModels} when supported. Each adapter populates the
+ * fields the provider's API exposes; absent fields signal "the provider
+ * doesn't tell us this", not "the model lacks the property".
+ *
+ * Used by {@link Registry.checkPricingFreshness} to compare bundled
+ * pricing tables against the provider's current model catalog and warn
+ * about drift.
+ */
+export interface ProviderModelInfo {
+  /** Provider-side model id, e.g. `gpt-5`, `claude-opus-4-7`, `gemini-2.5-flash`. */
+  id: string;
+  /** Friendly name when the API exposes it. */
+  displayName?: string;
+  /** USD per 1M input tokens, when the API exposes pricing. */
+  inputPer1M?: number;
+  /** USD per 1M output tokens, when the API exposes pricing. */
+  outputPer1M?: number;
+  /** Context-window size in tokens, when the API exposes it. */
+  contextWindow?: number;
+  /** Free-form metadata bag for provider-specific fields (e.g. modality, family). */
+  metadata?: Record<string, unknown>;
+}
+
 // ─── The port interface ───────────────────────────────────────────────
 
 /**
@@ -254,4 +281,17 @@ export interface LLMPort {
 
   /** Multi-turn tool-use loop. The agent primitive. */
   runAgent(options: RunAgentOptions): Promise<AgentResult>;
+
+  /**
+   * Runtime model discovery (alpha.9+). Returns the models the provider
+   * currently exposes, with bundled metadata when the provider's API
+   * exposes it (pricing, context window, family). Optional: adapters
+   * implement it where the provider has a `/models` endpoint; bridges
+   * (adapter-vercel) skip it.
+   *
+   * Used by `Registry.checkPricingFreshness()` to flag bundled-pricing
+   * drift. Users can also call it directly for "show me the available
+   * models" UIs.
+   */
+  listModels?(): Promise<ProviderModelInfo[]>;
 }

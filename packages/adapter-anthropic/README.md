@@ -48,8 +48,20 @@ interface AnthropicAdapterOptions {
   validationStrategy?: ValidationStrategy;
   pricingOverrides?: Record<string, ModelPricing>;
   imageSizeLimitBytes?: number;                // default 5 MB (Anthropic's per-image limit)
+  dangerouslyAllowBrowser?: boolean;           // opt in to browser execution (alpha.9)
   onRetry?: OnRetry;                           // observability hook for retries
 }
+```
+
+### `dangerouslyAllowBrowser` (alpha.9+)
+
+The Anthropic SDK refuses to construct in a browser environment unless `dangerouslyAllowBrowser: true` is passed explicitly. When enabled, the SDK auto-adds the `anthropic-dangerous-direct-browser-access` header on every request. Set this option only when the API key is NOT a long-lived secret: short-lived proxy tokens, BYO-key UIs where the end user supplies their own key, or trusted internal tools running behind auth. For server-side proxy patterns where the secret stays on the server, leave it unset.
+
+```ts
+const adapter = createAnthropicAdapter({
+  apiKey: ephemeralUserKey,
+  dangerouslyAllowBrowser: true,
+});
 ```
 
 ## Bundled pricing

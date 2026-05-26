@@ -375,6 +375,137 @@ export class Registry {
   listTasks(): Array<{ task: string; chain: string[] }> {
     return Object.entries(this.config.taskRoutes).map(([task, chain]) => ({ task, chain }));
   }
+
+  /**
+   * Compare bundled per-adapter pricing tables against each provider's live
+   * model catalog (via `LLMPort.listModels()`). Reports drift: models bundled
+   * but not exposed by the provider (deprecated), models exposed but not
+   * bundled (newly launched), and per-model rate divergence when the provider
+   * exposes pricing.
+   *
+   * Use as a CI / scheduled job to get a warning when a provider quietly
+   * changes its catalog. The bundled pricing tables remain the source of
+   * truth for cost computation; this method does NOT auto-update them.
+   *
+   * Adapters that don't implement `listModels()` (e.g. `adapter-vercel`)
+   * are skipped and reported under `skipped`.
+   *
+   * Added in `0.1.0-alpha.9`.
+   */
+  async checkPricingFreshness(): Promise<PricingFreshnessReport> {
+    const checked: PricingFreshnessAdapterReport[] = [];
+    const skipped: Array<{ adapter: string; reason: string }> = [];
+
+    // Group providers by adapter; only need to call listModels once per adapter.
+    const adapterToProviders = new Map<string, Array<{ alias: string; modelId: string }>>();
+    for (const [alias, entry] of Object.entries(this.config.providers)) {
+      const list = adapterToProviders.get(entry.adapter) ?? [];
+      list.push({ alias, modelId: entry.modelId });
+      adapterToProviders.set(entry.adapter, list);
+    }
+
+    for (const [adapterName, providers] of adapterToProviders) {
+      const adapter = this.adapters[adapterName];
+      if (!adapter) {
+        skipped.push({ adapter: adapterName, reason: "adapter not registered" });
+        continue;
+      }
+      const first = providers[0]!;
+      const port = adapter.createLLMPort?.(first.modelId, first.alias);
+      if (!port?.listModels) {
+        skipped.push({ adapter: adapterName, reason: "adapter does not implement listModels()" });
+        continue;
+      }
+      try {
+        const live = await port.listModels();
+        const liveIds = new Set(live.map((m) => m.id));
+        const bundledIds = new Set(Object.keys(adapter.pricing));
+
+        const removed = [...bundledIds].filter((id) => !liveIds.has(id));
+        const added = [...liveIds].filter((id) => !bundledIds.has(id));
+        const drift: Array<{
+          modelId: string;
+          bundledInputPer1M: number;
+          bundledOutputPer1M: number;
+          liveInputPer1M: number;
+          liveOutputPer1M: number;
+        }> = [];
+        for (const liveModel of live) {
+          if (liveModel.inputPer1M === undefined && liveModel.outputPer1M === undefined) continue;
+          const bundled = adapter.pricing[liveModel.id];
+          if (!bundled) continue;
+          if (
+            liveModel.inputPer1M !== undefined &&
+            liveModel.inputPer1M !== bundled.inputPer1M
+          ) {
+            drift.push({
+              modelId: liveModel.id,
+              bundledInputPer1M: bundled.inputPer1M,
+              bundledOutputPer1M: bundled.outputPer1M,
+              liveInputPer1M: liveModel.inputPer1M,
+              liveOutputPer1M: liveModel.outputPer1M ?? bundled.outputPer1M,
+            });
+          } else if (
+            liveModel.outputPer1M !== undefined &&
+            liveModel.outputPer1M !== bundled.outputPer1M
+          ) {
+            drift.push({
+              modelId: liveModel.id,
+              bundledInputPer1M: bundled.inputPer1M,
+              bundledOutputPer1M: bundled.outputPer1M,
+              liveInputPer1M: liveModel.inputPer1M ?? bundled.inputPer1M,
+              liveOutputPer1M: liveModel.outputPer1M,
+            });
+          }
+        }
+        checked.push({
+          adapter: adapterName,
+          liveModelCount: live.length,
+          bundledModelCount: bundledIds.size,
+          addedModels: added,
+          removedModels: removed,
+          priceDrift: drift,
+        });
+      } catch (err) {
+        skipped.push({
+          adapter: adapterName,
+          reason: `listModels failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
+    return { checked, skipped };
+  }
+}
+
+/**
+ * Output of {@link Registry.checkPricingFreshness}.
+ *
+ * `checked` has one entry per adapter that successfully reported its live
+ * model catalog; `skipped` lists adapters that don't implement listModels()
+ * or whose call failed.
+ */
+export interface PricingFreshnessReport {
+  checked: PricingFreshnessAdapterReport[];
+  skipped: Array<{ adapter: string; reason: string }>;
+}
+
+export interface PricingFreshnessAdapterReport {
+  adapter: string;
+  liveModelCount: number;
+  bundledModelCount: number;
+  /** Models exposed by the provider but not in the bundled pricing table. */
+  addedModels: string[];
+  /** Models in the bundled pricing table but no longer exposed by the provider. */
+  removedModels: string[];
+  /** Models where bundled USD/1M differs from live USD/1M (when the API exposes pricing). */
+  priceDrift: Array<{
+    modelId: string;
+    bundledInputPer1M: number;
+    bundledOutputPer1M: number;
+    liveInputPer1M: number;
+    liveOutputPer1M: number;
+  }>;
 }
 
 /**

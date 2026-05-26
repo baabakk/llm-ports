@@ -33,6 +33,7 @@ import {
   type LLMPort,
   type ModelPricing,
   type OnRetry,
+  type ProviderModelInfo,
   type RunAgentOptions,
   type StreamStructuredOptions,
   type StreamTextOptions,
@@ -89,6 +90,20 @@ export interface AnthropicAdapterOptions {
    */
   imageSizeLimitBytes?: number;
   /**
+   * Set to `true` to allow the Anthropic SDK to run in a browser environment.
+   * The SDK refuses by default to prevent accidental exposure of API keys.
+   * When enabled, the client automatically includes the
+   * `anthropic-dangerous-direct-browser-access: true` header.
+   *
+   * Only enable this when you understand the risk and have a mitigation in
+   * place: a server-side proxy that strips keys from the request before
+   * forwarding, a "bring your own API key" UI where users supply their own
+   * key, or an internal tool exposed only to trusted users.
+   *
+   * Available since `0.1.0-alpha.9`.
+   */
+  dangerouslyAllowBrowser?: boolean;
+  /**
    * Observability hook fired when the adapter retries an in-flight request.
    * Fired for `capability-fallback` reasons (currently only `temperatureLocked`).
    * Called fire-and-forget; hook errors do NOT cancel the retry.
@@ -100,6 +115,10 @@ export interface AnthropicAdapterOptions {
 
 interface AdapterContext {
   client: Anthropic;
+  /** Retained for listModels() which hits /v1/models directly (SDK <0.39 lacks client.models). */
+  apiKey: string;
+  baseURL?: string;
+  fetch?: typeof fetch;
   validationStrategy: ValidationStrategy;
   pricingOverrides: Record<string, ModelPricing>;
   /** 0 means "no size check"; positive number is the per-image byte limit. */
@@ -112,6 +131,7 @@ function makeClient(opts: AnthropicAdapterOptions): Anthropic {
     apiKey: opts.apiKey,
     ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
     ...(opts.fetch ? { fetch: opts.fetch as Anthropic["fetch"] } : {}),
+    ...(opts.dangerouslyAllowBrowser ? { dangerouslyAllowBrowser: true } : {}),
   });
 }
 
@@ -149,6 +169,9 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
 
   const ctx: AdapterContext = {
     client: makeClient(opts),
+    apiKey: opts.apiKey,
+    ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
     validationStrategy: opts.validationStrategy ?? {
       kind: "retry-with-feedback",
       maxAttempts: 2,
@@ -606,6 +629,39 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         stepsTaken,
         terminationReason,
       };
+    },
+
+    async listModels(): Promise<ProviderModelInfo[]> {
+      try {
+        // Direct fetch to /v1/models. The Anthropic SDK <0.39 didn't expose
+        // `client.models.list()`; we hit the REST endpoint to keep peer-dep
+        // compatibility with the alpha-era SDK floor.
+        const fetchFn = ctx.fetch ?? globalThis.fetch;
+        if (!fetchFn) {
+          throw new Error("No fetch implementation available for listModels()");
+        }
+        const baseURL = ctx.baseURL ?? "https://api.anthropic.com";
+        const resp = await fetchFn(`${baseURL.replace(/\/+$/, "")}/v1/models?limit=1000`, {
+          headers: {
+            "x-api-key": ctx.apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+        });
+        if (!resp.ok) {
+          throw new Error(`Anthropic /v1/models returned ${resp.status} ${resp.statusText}`);
+        }
+        const body = (await resp.json()) as {
+          data?: Array<{ id: string; display_name?: string; created_at?: string }>;
+        };
+        return (body.data ?? []).map((m) => ({
+          id: m.id,
+          ...(m.display_name ? { displayName: m.display_name } : {}),
+          ...(m.created_at ? { metadata: { created_at: m.created_at } } : {}),
+        }));
+      } catch (err) {
+        throw wrapProviderError(alias, err);
+      }
     },
   };
 }
