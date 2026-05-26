@@ -304,7 +304,7 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-`llm-ports` is in alpha. All packages are now at `v0.1.0-alpha.7`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
+`llm-ports` is in alpha. 5 adapter packages are at `v0.1.0-alpha.8`; `core` + `capabilities` remain at `v0.1.0-alpha.7` (no changes needed for alpha.8). Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
 npm install @llm-ports/core
