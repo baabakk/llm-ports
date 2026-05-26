@@ -113,8 +113,55 @@ interface OpenAIAdapterOptions {
   fetch?: typeof fetch;
   validationStrategy?: ValidationStrategy;
   pricingOverrides?: Record<string, ModelPricing>;
-  displayName?: string;       // for error messages when pointed at a non-OpenAI baseURL
+  displayName?: string;             // for error messages when pointed at a non-OpenAI baseURL
+  imageSizeLimitBytes?: number;     // default 20 MB
+  maxRetries?: number;              // SDK-level retries (default 2)
+  transientAuthRetries?: number;    // project-key 401 burst-protection retries (default 2)
+  transientAuthBackoffMs?: (attempt: number) => number;
+  dangerouslyAllowBrowser?: boolean; // alpha.9; opt in to browser execution
+  useStrictResponseFormat?: boolean; // alpha.9; auto-detects on api.cerebras.ai
+  onRetry?: OnRetry;                // observability hook
 }
+```
+
+### `useStrictResponseFormat` (alpha.9)
+
+`generateStructured` can emit OpenAI / Cerebras strict JSON Schema mode:
+
+```json
+{
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": { "name": "<schemaName>", "schema": { ... }, "strict": true }
+  }
+}
+```
+
+…instead of the classic `{ type: "json_object" }`. With strict mode the provider constrains decoding to the exact schema before tokens are produced — invalid JSON and missing required fields are impossible (modulo provider bugs).
+
+```ts
+const adapter = createOpenAIAdapter({
+  apiKey: process.env.CEREBRAS_API_KEY!,
+  baseURL: "https://api.cerebras.ai/v1",
+  // useStrictResponseFormat omitted — auto-enabled because baseURL contains api.cerebras.ai
+});
+```
+
+**Auto-detection.** Cerebras's gpt-oss / Qwen3.6 tiers silently ignore the classic `json_object` mode (the request succeeds but the model returns freeform best-effort). Strict mode is the only way to get reliable structured output on Cerebras. The adapter auto-enables `useStrictResponseFormat` when `baseURL` contains `api.cerebras.ai`. Set the option to `false` explicitly to opt out.
+
+**Schema conversion.** Zod schemas are converted via `zod-to-json-schema` (`target: "openAi"`, `$refStrategy: "none"`), then post-processed to add `additionalProperties: false` on every nested object — a hard requirement of strict mode the SDK does not auto-inject.
+
+**When NOT to use it.** Strict mode is rejected by older models (anything that doesn't speak the OpenAI `json_schema` shape, e.g. some Azure deployments) and by reasoning models that disable `response_format` entirely. The runtime-learning capability path catches the latter — if `useStrictResponseFormat: true` is set on an o3 / gpt-5-nano model, the first 400 teaches the adapter `jsonModeUnsupported: true` and subsequent calls fall back to prompted JSON.
+
+### `dangerouslyAllowBrowser` (alpha.9)
+
+The OpenAI SDK refuses to construct in a browser environment unless `dangerouslyAllowBrowser: true` is passed explicitly. Set this option only when the API key is NOT a long-lived secret: short-lived proxy tokens, BYO-key UIs where the end user supplies their own key, or trusted internal tools running behind auth. For server-side proxy patterns where the secret stays on the server, leave it unset.
+
+```ts
+const adapter = createOpenAIAdapter({
+  apiKey: ephemeralUserKey,
+  dangerouslyAllowBrowser: true,
+});
 ```
 
 ## Bundled pricing
@@ -138,7 +185,7 @@ Source: openai.com/pricing. Verified 2026-04-10.
 | Feature | Status |
 |---------|--------|
 | `generateText` | ✓ |
-| `generateStructured` (Zod schemas) | ✓ (native `response_format: json_object` + retry-with-feedback) |
+| `generateStructured` (Zod schemas) | ✓ (native `response_format: json_object`; or strict `json_schema` mode when `useStrictResponseFormat` is set; + retry-with-feedback safety net) |
 | `streamText` | ✓ |
 | `streamStructured` | ✓ |
 | `runAgent` (multi-turn tool use) | ✓ |
@@ -149,6 +196,10 @@ Source: openai.com/pricing. Verified 2026-04-10.
 | Audio input — base64 ogg | ✗ (OpenAI doesn't support ogg) |
 | Audio input — URL audio | ✗ (OpenAI requires base64) |
 | Prompt caching | partial (`cached_tokens` reported in usage) |
+| `AbortSignal` cancellation | ✓ entry + in-flight (alpha.6) |
+| `listModels()` | ✓ (alpha.9; via `client.models.list()`) |
+| `dangerouslyAllowBrowser` opt-in | ✓ (alpha.9) |
+| Strict JSON schema mode (`useStrictResponseFormat`) | ✓ (alpha.9; auto-detects on `api.cerebras.ai`) |
 
 ## Content blocks supported
 

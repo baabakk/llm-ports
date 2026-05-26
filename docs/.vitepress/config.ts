@@ -73,6 +73,7 @@ export default defineConfig({
             { text: "Local-to-Cloud Flip", link: "/guides/local-to-cloud" },
             { text: "Cost Gating in Production", link: "/guides/cost-gating" },
             { text: "Cancellation with AbortSignal", link: "/guides/cancellation" },
+            { text: "Runtime Model Discovery", link: "/guides/model-discovery" },
             { text: "Tool-Use Security", link: "/guides/security" },
             { text: "Custom Adapters", link: "/guides/custom-adapters" },
           ],

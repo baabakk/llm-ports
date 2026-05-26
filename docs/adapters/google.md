@@ -57,7 +57,7 @@ Gemini exposes an OpenAI-compatible surface at `https://generativelanguage.googl
 | Multimodal richness | image_url with base64 data URI (lossy) | inlineData with explicit mediaType |
 | Bundled pricing | None — bring your own | Gemini 2.5 + 2.0 family bundled |
 | Image-block boundary validation | Inherits from adapter-openai | First-class, with `imageSizeLimitBytes` option |
-| Native `responseSchema` | Not exposed | v0.2 (currently prompted-JSON + Zod) |
+| Native `responseSchema` | Not exposed | ✓ (alpha.9; falls back to prompted-JSON when the schema contains `oneOf`/`allOf`/`$ref`) |
 
 ## Bundled pricing
 
@@ -78,18 +78,84 @@ Source: <https://ai.google.dev/gemini-api/docs/pricing> (verified 2026-05).
 | Feature | Status |
 |---------|--------|
 | `generateText` | ✓ |
-| `generateStructured` (Zod schemas) | ✓ (prompted JSON + alpha.5 repair pass; native `responseSchema` in v0.2) |
+| `generateStructured` (Zod schemas) | ✓ (alpha.9: native `responseSchema` constrained-decoding when the schema converts cleanly; falls back to prompted JSON + alpha.5 repair pass for unsupported schema features) |
 | `streamText` | ✓ |
 | `streamStructured` | ✓ (best-effort partial parse) |
-| `runAgent` | single-turn shim (multi-turn native function-calling in v0.2; matches adapter-vercel's v0.1 shape) |
+| `runAgent` (multi-turn tool use) | ✓ (alpha.9: full function-calling loop with parallel-call support, aggregated usage, populated `toolCalls`) |
 | Vision input — base64 images | ✓ (inlineData) |
 | Vision input — URL images | ✓ (fileData) |
 | Audio input — base64 | ✓ (inlineData) |
 | Image-block size + URL validation at boundary | ✓ (alpha.5) |
 | `AbortSignal` cancellation | ✓ entry + in-flight (alpha.6) |
+| `listModels()` | ✓ (alpha.9; via `@google/genai client.models.list()`) |
 | Embeddings (`gemini-embedding-001`) | ✗ — v0.2 |
 | Explicit context caching | ✗ — v0.2 |
 | Code execution tool | ✗ — v0.2 |
+
+### Native `responseSchema` (alpha.9)
+
+`generateStructured` emits Gemini's native `config.responseSchema` + `config.responseMimeType: "application/json"` when the Zod schema converts cleanly. Gemini constrains decoding to the schema *before* tokens are produced — invalid JSON and missing required fields are impossible (modulo provider bugs). Zod validation + the alpha.5 repair pass + `retry-with-feedback` remain the safety net.
+
+```ts
+const result = await llm.generateStructured({
+  taskType: "extract",
+  prompt: "Extract the person: 'Babak is 42'",
+  schema: z.object({ name: z.string(), age: z.number() }),
+});
+// Adapter sends config.responseSchema; Gemini constrains decoding.
+// validationAttempts will typically be 1 (constrained decoding rarely fails Zod).
+```
+
+**Fallback path.** Gemini's `responseSchema` accepts the OpenAPI 3.0 subset of JSON Schema. The adapter detects unsupported features and falls back to the prompted-JSON path:
+
+| Zod construct | JSON Schema output | Native path? |
+|---|---|---|
+| `z.object(...)` | `{ type: "object", properties: ... }` | ✓ |
+| `z.array(z.string())` | `{ type: "array", items: ... }` | ✓ |
+| `z.discriminatedUnion(...)` | `{ anyOf: [...] }` | ✓ (Gemini accepts `anyOf`) |
+| `z.enum(...)` | `{ enum: [...] }` | ✓ |
+| `z.intersection(a, b)` | `{ allOf: [...] }` | ✗ — falls back to prompted JSON |
+| `z.lazy(...)` (recursive) | `{ $ref: "#" }` | ✗ — falls back |
+| Hand-rolled `oneOf` / `not` | as-is | ✗ — falls back |
+
+When a fallback fires, the adapter emits a one-time `console.warn` per `(model, feature)` pair naming the unsupported construct. The output is still correct in either case — only the constrained-decoding guarantee differs.
+
+### Multi-turn `runAgent` (alpha.9)
+
+`runAgent` translates `options.tools` to Gemini's `Tool[]` shape (function declarations with JSON Schema, OpenAPI 3.0 subset, via `zod-to-json-schema`), then loops the chat / function-call / function-response cycle until the model returns text only (`terminationReason: "completed"`) or `maxSteps` is reached (`terminationReason: "max_steps"`).
+
+Gemini emits parallel function calls (multiple `functionCall` parts in a single response) and expects all `functionResponse` parts back together — the adapter executes them in order and groups the responses. `toolCalls` in the result is fully populated; `usage` aggregates across steps.
+
+```ts
+const result = await llm.runAgent({
+  taskType: "research",
+  instructions: "Answer the user's question using tools as needed.",
+  messages: [{ role: "user", content: "What's the weather in Paris?" }],
+  tools: {
+    getWeather: {
+      name: "getWeather",
+      description: "Fetch current weather for a city.",
+      inputSchema: z.object({ city: z.string() }),
+      execute: async ({ city }) => ({ tempC: 22, condition: "sunny", city }),
+    },
+  },
+  maxSteps: 4,
+});
+console.log(result.text);              // "It's 22°C and sunny in Paris."
+console.log(result.toolCalls);         // [{ name: "getWeather", input: {city: "Paris"}, output: {...} }]
+console.log(result.stepsTaken);        // 2
+console.log(result.terminationReason); // "completed"
+console.log(result.usage.inputTokens); // aggregated across both steps
+```
+
+### `listModels()` (alpha.9)
+
+```ts
+const models = await port.listModels();
+// [{ id: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", contextWindow: 1048576, ... }, ...]
+```
+
+Pricing is not surfaced (Gemini's `/models` endpoint exposes catalog metadata but not USD rates). `Registry.checkPricingFreshness()` uses this to detect added/removed models.
 
 ## Content blocks supported
 

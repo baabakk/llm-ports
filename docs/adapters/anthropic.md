@@ -38,23 +38,47 @@ LLM_TASK_ROUTE_TRIAGE=fast,premium
 ```ts
 interface AnthropicAdapterOptions {
   apiKey: string;
-  baseURL?: string;          // typically only useful for testing
-  fetch?: typeof fetch;       // inject a custom fetch (tests, proxies)
+  baseURL?: string;                 // typically only useful for testing
+  fetch?: typeof fetch;             // inject a custom fetch (tests, proxies)
   validationStrategy?: ValidationStrategy;
   pricingOverrides?: Record<string, ModelPricing>;
+  imageSizeLimitBytes?: number;     // default 5 MB (Anthropic's per-image limit)
+  dangerouslyAllowBrowser?: boolean; // alpha.9; opt in to browser execution
+  onRetry?: OnRetry;                // observability hook for retries
 }
 ```
+
+### `dangerouslyAllowBrowser` (alpha.9)
+
+The Anthropic SDK refuses to construct in a browser environment unless `dangerouslyAllowBrowser: true` is passed explicitly. When enabled, the SDK auto-adds the `anthropic-dangerous-direct-browser-access` header on every request. Set this option only when the API key is NOT a long-lived secret: short-lived proxy tokens, BYO-key UIs where the end user supplies their own key, or trusted internal tools running behind auth. For server-side proxy patterns where the secret stays on the server, leave it unset.
+
+```ts
+const adapter = createAnthropicAdapter({
+  apiKey: ephemeralUserKey,
+  dangerouslyAllowBrowser: true,
+});
+```
+
+### Claude 4.5+ temperature deprecation (alpha.10)
+
+Anthropic deprecated the `temperature` parameter on the Claude 4 Opus + Sonnet reasoning family. The static catalog seeds `temperatureLocked: true` BEFORE the first call against any `claude-opus-4-N` or `claude-sonnet-4-N` model (N >= 5), so:
+
+- Non-streaming methods skip the wasted "send temperature, get 400, retry without" round-trip.
+- Streaming methods (`streamText`, `streamStructured`) work at all — they can't mid-stream retry, so the catalog hit is the ONLY thing that prevents a hard 400.
+
+Bare `claude-opus-4` (the original 4.0 release) and the Claude Haiku 4-5 family still accept `temperature` and are passed through unchanged. The Anthropic adapter's `applyCapabilityFilter` strips `temperature` from the request body when the model is catalog-marked or has been learned at runtime.
 
 ## Bundled pricing
 
 | Model | Input/1M | Output/1M | Cache read | Cache write |
 |-------|---------:|----------:|-----------:|------------:|
+| `claude-opus-4-7` | $15.00 | $75.00 | $1.50 | $18.75 |
 | `claude-opus-4` | $15.00 | $75.00 | $1.50 | $18.75 |
 | `claude-sonnet-4-6-20250514` | $3.00 | $15.00 | $0.30 | $3.75 |
 | `claude-sonnet-4-5` | $3.00 | $15.00 | $0.30 | $3.75 |
 | `claude-haiku-4-5` | $0.80 | $4.00 | $0.08 | $1.00 |
 
-Source: anthropic.com/pricing. Verified 2026-04-10.
+Source: anthropic.com/pricing. Verified 2026-05-26.
 
 Override per model via `pricingOverrides` if prices change between releases:
 
@@ -80,6 +104,10 @@ createAnthropicAdapter({
 | Vision input — URL images | ✓ |
 | Audio input | ✗ (Anthropic chat doesn't support audio) |
 | Prompt caching | ✓ native; cost reflects `cacheReadPer1M` rate |
+| `AbortSignal` cancellation | ✓ entry + in-flight (alpha.6) |
+| `listModels()` | ✓ (alpha.9; via direct fetch to `/v1/models`) |
+| `dangerouslyAllowBrowser` opt-in | ✓ (alpha.9) |
+| Claude 4.5+ temperature auto-strip | ✓ catalog + runtime learning (alpha.3, expanded alpha.10) |
 | Embeddings | ✗ (Anthropic ships no embedding models) |
 
 ## Content blocks supported
