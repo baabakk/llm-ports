@@ -379,7 +379,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               ),
             options.signal,
           );
-          lastUsage = parseUsage(response);
+          // Accumulate usage across retry-with-feedback rounds so cost
+          // reporting reflects every SDK call, not just the final one.
+          // Matches runAgent's mergeTokenUsage pattern.
+          lastUsage = mergeTokenUsage(lastUsage, parseUsage(response));
           lastModelId = response.model ?? modelId;
           const raw = extractAssistantText(response.content as never);
           const decoded = extractJSON(raw);

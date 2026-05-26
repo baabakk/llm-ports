@@ -377,7 +377,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           choices: Array<{ message: { content: string | null } }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
         };
-        lastUsage = parseUsage(r);
+        // Accumulate usage across retry-with-feedback rounds so cost
+        // reporting reflects every SDK call, not just the final one.
+        // Matches runAgent's mergeTokenUsage pattern.
+        lastUsage = mergeTokenUsage(lastUsage, parseUsage(r));
         lastModelId = r.model ?? modelId;
         const raw = r.choices[0]?.message.content ?? "";
         // If the response is empty after the executeChatRequest starvation

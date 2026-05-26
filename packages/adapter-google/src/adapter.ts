@@ -250,7 +250,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           });
           const candidate = response.candidates?.[0];
           const raw = extractGeminiText(candidate?.content?.parts as GeminiPart[] | undefined);
-          lastUsage = parseUsage(response);
+          // Accumulate usage across retry-with-feedback rounds so cost
+          // reporting reflects every SDK call, not just the final one.
+          // Matches runAgent's mergeTokenUsage pattern.
+          lastUsage = mergeTokenUsage(lastUsage, parseUsage(response));
           lastModelId = response.modelVersion ?? modelId;
 
           const decoded = extractJSON(raw);

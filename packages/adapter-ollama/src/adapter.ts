@@ -309,7 +309,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               ...(options.maxOutputTokens !== undefined ? { num_predict: options.maxOutputTokens } : {}),
             },
           });
-          lastUsage = parseUsage(response);
+          // Accumulate usage across retry-with-feedback rounds so cost
+          // reporting reflects every SDK call, not just the final one.
+          // Matches runAgent's mergeTokenUsage pattern.
+          lastUsage = mergeTokenUsage(lastUsage, parseUsage(response));
           lastModelId = response.model ?? modelId;
           const raw = response.message?.content ?? "";
           const decoded = extractJSON(raw);

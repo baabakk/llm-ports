@@ -31,6 +31,7 @@ import {
   EmptyResponseError,
   extractJSON,
   failValidation,
+  mergeTokenUsage,
   stringifyContentBlocks,
   throwIfAborted,
   tryParsePartialJSON,
@@ -341,7 +342,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
             ...(options.signal ? { abortSignal: options.signal } : {}),
           });
-          lastUsage = parseUsage(result);
+          // Accumulate usage across retry-with-feedback rounds so cost
+          // reporting reflects every SDK call, not just the final one.
+          // Matches runAgent's mergeTokenUsage pattern.
+          lastUsage = mergeTokenUsage(lastUsage, parseUsage(result));
           lastModelId = result.response?.modelId ?? modelId;
           // If the response is still empty (after the starvation retry), the
           // model genuinely produced no JSON to parse. Throw a typed
