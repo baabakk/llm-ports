@@ -75,13 +75,31 @@ export function _resetLearnedConstraints(): void {
  * Models we already know reject `temperature`. Pre-seeds the learner so
  * the first call against these models skips the discovery round-trip.
  *
- * Extend this list as Anthropic deprecates `temperature` on more models.
- * Runtime learning catches new rejectors anyway; this catalog only saves
- * the wasted first-call round-trip.
+ * Anthropic deprecated `temperature` on the entire Claude 4 Opus + Sonnet
+ * reasoning family (4, 4-5, 4-6, 4-7, and presumably 4-8/4-9 going
+ * forward). Haiku 4-5 still accepts `temperature` and is not listed here.
+ *
+ * **Why this matters more than for non-streaming calls.** `executeMessageCreate`
+ * runs a one-shot capability-fallback retry on a temperature 400 for
+ * `generateText` / `generateStructured` / `runAgent`. The streaming
+ * methods (`streamText` / `streamStructured`) call `client.messages.stream`
+ * directly and cannot mid-stream retry — the catalog hit is the ONLY
+ * mechanism that prevents a hard failure on streaming. Keep this list
+ * comprehensive for streaming-friendly behavior.
+ *
+ * Runtime learning still catches new rejectors anyway for non-streaming
+ * calls; this catalog saves the wasted first-call round-trip there too.
  */
 export const KNOWN_TEMPERATURE_REJECTORS: readonly KnownModelConstraint[] = [
-  { pattern: /^claude-opus-4-5/, constraints: { temperatureLocked: true } },
-  { pattern: /^claude-sonnet-4-5/, constraints: { temperatureLocked: true } },
+  // Match 4.5+ point releases. Anchored on `claude-(opus|sonnet)-4-<digit>`
+  // so that:
+  //   matches: claude-opus-4-5, claude-opus-4-6, claude-opus-4-7,
+  //            claude-opus-4-7-20251220, claude-opus-4-10 (forward-compat)
+  //   skips:   claude-opus-4 (the original 4.0 — predates the deprecation)
+  // Same shape for sonnet-4-N. Haiku-4 / 4-5 currently accepts temperature
+  // and is not listed.
+  { pattern: /^claude-opus-4-\d/, constraints: { temperatureLocked: true } },
+  { pattern: /^claude-sonnet-4-\d/, constraints: { temperatureLocked: true } },
 ];
 
 /** Seed the learner with this adapter's known-rejector catalog for a model. */

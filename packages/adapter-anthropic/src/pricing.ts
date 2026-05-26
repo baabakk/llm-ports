@@ -13,12 +13,15 @@
 import type { ModelPricing } from "@llm-ports/core";
 
 export const ANTHROPIC_PRICING: Record<string, ModelPricing> = {
-  // Claude Opus 4.x family
+  // Claude Opus 4.x family. Every 4-N point release rejects `temperature`
+  // (deprecation effective alongside the reasoning roll-out). The bare
+  // "claude-opus-4" predates the deprecation and still accepts it.
   "claude-opus-4-7": {
     inputPer1M: 15.0,
     outputPer1M: 75.0,
     cacheReadPer1M: 1.5,
     cacheWritePer1M: 18.75,
+    capabilities: { temperatureLocked: true },
   },
   "claude-opus-4": {
     inputPer1M: 15.0,
@@ -27,18 +30,20 @@ export const ANTHROPIC_PRICING: Record<string, ModelPricing> = {
     cacheWritePer1M: 18.75,
   },
 
-  // Claude Sonnet 4.x family
+  // Claude Sonnet 4.x family. Same temperature deprecation as opus-4-N.
   "claude-sonnet-4-6-20250514": {
     inputPer1M: 3.0,
     outputPer1M: 15.0,
     cacheReadPer1M: 0.3,
     cacheWritePer1M: 3.75,
+    capabilities: { temperatureLocked: true },
   },
   "claude-sonnet-4-5": {
     inputPer1M: 3.0,
     outputPer1M: 15.0,
     cacheReadPer1M: 0.3,
     cacheWritePer1M: 3.75,
+    capabilities: { temperatureLocked: true },
   },
 
   // Claude Haiku 4.x family
