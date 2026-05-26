@@ -1,5 +1,83 @@
 # @llm-ports/adapter-openai
 
+## 0.1.0-alpha.9
+
+### Minor Changes
+
+- 286f132: Runtime model discovery: `LLMPort.listModels()` + `Registry.checkPricingFreshness()` (closes [#9](https://github.com/baabakk/llm-ports/issues/9)).
+
+  **`LLMPort.listModels?(): Promise<ProviderModelInfo[]>`.** New optional method on every LLMPort. Returns the models the provider currently exposes via its catalog API. Implemented in:
+
+  | Adapter             | Source                                                         | Pricing exposed?                                   |
+  | ------------------- | -------------------------------------------------------------- | -------------------------------------------------- |
+  | `adapter-openai`    | `client.models.list()`                                         | No (just IDs + `owned_by`)                         |
+  | `adapter-anthropic` | direct fetch to `/v1/models` (SDK <0.39 lacks `client.models`) | No                                                 |
+  | `adapter-google`    | `client.models.list()` from `@google/genai`                    | No (Gemini surfaces context window, not USD rates) |
+  | `adapter-ollama`    | `client.list()` (locally running models)                       | No (local; free)                                   |
+
+  `adapter-vercel` does NOT implement it: the underlying `LanguageModel` is opaque per-provider and there's no uniform discovery surface.
+
+  **`Registry.checkPricingFreshness()`.** Compares each adapter's bundled `*_PRICING` table against the provider's live catalog and reports:
+  - `addedModels`: live IDs not in the bundled table (newly launched models you can opt into via `pricingOverrides`)
+  - `removedModels`: bundled IDs the provider no longer exposes (likely deprecated)
+  - `priceDrift`: per-model rate differences when the API surfaces pricing (today: none; future-proofs the report)
+  - `skipped`: adapters without `listModels()` or whose call failed (with reason)
+
+  Use in CI or a scheduled job to get a heads-up when a provider quietly changes its catalog. The bundled tables remain the source of truth for cost computation; this method does NOT auto-update them.
+
+  ```ts
+  const report = await registry.checkPricingFreshness();
+  for (const a of report.checked) {
+    if (a.addedModels.length > 0) {
+      console.warn(`[${a.adapter}] new models available: ${a.addedModels.join(", ")}`);
+    }
+    if (a.removedModels.length > 0) {
+      console.warn(
+        `[${a.adapter}] bundled models no longer exposed: ${a.removedModels.join(", ")}`,
+      );
+    }
+  }
+  ```
+
+  **New core exports:** `ProviderModelInfo`, `PricingFreshnessReport`, `PricingFreshnessAdapterReport`.
+
+  4 new core tests for `checkPricingFreshness`.
+
+- 286f132: Add `useStrictResponseFormat` option for OpenAI / Cerebras strict JSON Schema mode.
+
+  `generateStructured` can now emit `response_format: { type: "json_schema", json_schema: { name, schema, strict: true } }` instead of classic `response_format: { type: "json_object" }`. With strict mode the provider constrains decoding to the exact schema before tokens are produced, so invalid JSON or missing fields are impossible (modulo provider bugs).
+
+  ```ts
+  const adapter = createOpenAIAdapter({
+    apiKey: process.env.CEREBRAS_API_KEY!,
+    baseURL: "https://api.cerebras.ai/v1",
+    useStrictResponseFormat: true,
+  });
+  ```
+
+  **Auto-detection.** When `baseURL` contains `api.cerebras.ai` the flag enables itself, because Cerebras's gpt-oss / Qwen3.6 tiers silently ignore the classic `json_object` mode and require strict JSON Schema for reliable structured output. Set `useStrictResponseFormat: false` explicitly to override.
+
+  **Schema conversion.** Zod schemas are translated via `zod-to-json-schema` (`target: "openAi"`, `$refStrategy: "none"`), then post-processed to add `additionalProperties: false` on every nested object — a hard requirement of strict mode that the SDK does not auto-inject.
+
+  **Compatibility.** When omitted (and `baseURL` is not Cerebras), behavior is identical to alpha.8 — classic `json_object` mode. Models that don't support strict mode (and report it via the runtime-learning `jsonModeUnsupported` capability) still see the same fallback path.
+
+  5 new unit tests.
+
+### Patch Changes
+
+- 286f132: Add `dangerouslyAllowBrowser?: boolean` option to `adapter-openai` and `adapter-anthropic` (closes [#32](https://github.com/baabakk/llm-ports/issues/32)).
+
+  Both SDKs refuse to construct in a browser environment unless the flag is explicitly passed; the adapters now forward the option, unblocking BYO-key / proxy-token / trusted-internal-tool use cases. When the option is omitted (or `false`), the SDK constructor receives no `dangerouslyAllowBrowser` field — same as alpha.8 behavior, so server-side users see no change.
+
+  `adapter-vercel` gets a README note pointing users at the `@ai-sdk/*` LanguageModel construction site, where the equivalent flag lives in that adapter's architecture.
+
+  `adapter-google` and `adapter-ollama` are not affected: `@google/genai` runs in browsers by design; `adapter-ollama` is local-daemon and the browser concern is CORS at the daemon, not an SDK flag.
+
+  5 new unit tests (3 for adapter-openai, 2 for adapter-anthropic).
+
+- Updated dependencies [286f132]
+  - @llm-ports/core@0.1.0-alpha.9
+
 ## 0.1.0-alpha.8
 
 ### Patch Changes

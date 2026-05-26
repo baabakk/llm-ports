@@ -1,5 +1,68 @@
 # @llm-ports/adapter-google
 
+## 0.1.0-alpha.9
+
+### Minor Changes
+
+- 286f132: Gemini parity: multi-turn `runAgent` + native `responseSchema`.
+
+  **`runAgent` is now multi-turn.** alpha.5–alpha.8 shipped a single-turn shim that ignored `maxSteps > 1` and surfaced no `toolCalls`. The adapter now translates `options.tools` to Gemini's `Tool[]` shape (function declarations with JSON Schema, OpenAPI 3.0 subset, via `zod-to-json-schema`), loops the chat / function-call / function-response cycle until the model returns text only (`terminationReason: "completed"`) or `maxSteps` is reached (`terminationReason: "max_steps"`), and reports the full `toolCalls` array + aggregated usage across steps. Parallel function calls (Gemini emits multiple in a single turn) are executed and their responses are returned together, matching Gemini's required protocol.
+
+  **`generateStructured` now uses native `responseSchema`** for constrained-decoding when the Zod schema converts cleanly to Gemini's accepted JSON Schema dialect. The adapter passes `config.responseSchema` + `config.responseMimeType: "application/json"` so Gemini constrains decoding to the schema before tokens are produced. Zod validation, the alpha.5 repair pass, and `retry-with-feedback` remain the safety net (Gemini's schema enforcement is best-effort).
+
+  When the schema contains features Gemini's responseSchema does not accept (`oneOf`, `allOf`, `not`, `$ref` — note: `anyOf` IS accepted; `z.discriminatedUnion` produces `anyOf` and stays on the native path), the adapter falls back to the prompted-JSON path with a one-time `console.warn` per (model, feature) pair. Output is still correct in either case — only the constrained-decoding guarantee differs.
+
+  **New dependency:** `zod-to-json-schema ^3.23.5` (already a transitive dep via adapter-openai / adapter-anthropic).
+
+  **New exported helpers** (mostly used internally; exported for advanced testing):
+  - `_resetSchemaFallbackWarnings()` — test-only Set reset.
+
+  Closes the two v0.2-commitments listed in alpha.5's release notes for `adapter-google`. 13 new tests (7 multi-turn + 6 native responseSchema).
+
+- 286f132: Runtime model discovery: `LLMPort.listModels()` + `Registry.checkPricingFreshness()` (closes [#9](https://github.com/baabakk/llm-ports/issues/9)).
+
+  **`LLMPort.listModels?(): Promise<ProviderModelInfo[]>`.** New optional method on every LLMPort. Returns the models the provider currently exposes via its catalog API. Implemented in:
+
+  | Adapter             | Source                                                         | Pricing exposed?                                   |
+  | ------------------- | -------------------------------------------------------------- | -------------------------------------------------- |
+  | `adapter-openai`    | `client.models.list()`                                         | No (just IDs + `owned_by`)                         |
+  | `adapter-anthropic` | direct fetch to `/v1/models` (SDK <0.39 lacks `client.models`) | No                                                 |
+  | `adapter-google`    | `client.models.list()` from `@google/genai`                    | No (Gemini surfaces context window, not USD rates) |
+  | `adapter-ollama`    | `client.list()` (locally running models)                       | No (local; free)                                   |
+
+  `adapter-vercel` does NOT implement it: the underlying `LanguageModel` is opaque per-provider and there's no uniform discovery surface.
+
+  **`Registry.checkPricingFreshness()`.** Compares each adapter's bundled `*_PRICING` table against the provider's live catalog and reports:
+  - `addedModels`: live IDs not in the bundled table (newly launched models you can opt into via `pricingOverrides`)
+  - `removedModels`: bundled IDs the provider no longer exposes (likely deprecated)
+  - `priceDrift`: per-model rate differences when the API surfaces pricing (today: none; future-proofs the report)
+  - `skipped`: adapters without `listModels()` or whose call failed (with reason)
+
+  Use in CI or a scheduled job to get a heads-up when a provider quietly changes its catalog. The bundled tables remain the source of truth for cost computation; this method does NOT auto-update them.
+
+  ```ts
+  const report = await registry.checkPricingFreshness();
+  for (const a of report.checked) {
+    if (a.addedModels.length > 0) {
+      console.warn(`[${a.adapter}] new models available: ${a.addedModels.join(", ")}`);
+    }
+    if (a.removedModels.length > 0) {
+      console.warn(
+        `[${a.adapter}] bundled models no longer exposed: ${a.removedModels.join(", ")}`,
+      );
+    }
+  }
+  ```
+
+  **New core exports:** `ProviderModelInfo`, `PricingFreshnessReport`, `PricingFreshnessAdapterReport`.
+
+  4 new core tests for `checkPricingFreshness`.
+
+### Patch Changes
+
+- Updated dependencies [286f132]
+  - @llm-ports/core@0.1.0-alpha.9
+
 ## 0.1.0-alpha.8
 
 ### Patch Changes

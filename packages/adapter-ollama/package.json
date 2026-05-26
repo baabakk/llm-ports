@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-ollama",
-  "version": "0.1.0-alpha.8",
+  "version": "0.1.0-alpha.9",
   "description": "Ollama native adapter for llm-ports. Local LLMs via the Ollama daemon. Implements LLMPort, EmbeddingsPort, and ModelManagement (list/pull/delete/health).",
   "license": "MIT",
   "author": "Babak Abbaschian",
