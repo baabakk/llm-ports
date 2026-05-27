@@ -306,6 +306,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
         stream: false,
       });
       const r = response as {
@@ -369,6 +370,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ? { maxOutputTokens: options.maxOutputTokens }
             : {}),
           ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
           ...(strictResponseSchema ? { strictResponseSchema } : { jsonMode: true }),
           stream: false,
         });
@@ -453,6 +455,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
         stream: true,
       });
       for await (const chunk of stream) {
@@ -478,6 +481,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         temperature: options.temperature ?? 0,
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
         jsonMode: true,
         stream: true,
       });
@@ -522,6 +526,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
             ...(tools.length > 0 ? { tools } : {}),
             ...(options.signal ? { signal: options.signal } : {}),
+            ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
             stream: false,
           });
           const r = response as {
@@ -744,6 +749,14 @@ interface LogicalChatRequest {
   tools?: ReturnType<typeof toOpenAITools>;
   /** Mid-flight cancellation: threaded as the 2nd arg to client.chat.completions.create. */
   signal?: AbortSignal;
+  /**
+   * Reasoning effort. Forwarded as `reasoning_effort` on the SDK call when
+   * the model is a known reasoning model (o-series, gpt-5-nano, etc.) OR
+   * the user explicitly opts in via this field. Non-reasoning models on
+   * OpenAI native ignore the parameter; some compat providers (notably
+   * Groq's `openai/gpt-oss-120b`) honor it.
+   */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 /** Build the SDK's request object from a logical request and the model's effective capabilities. */
@@ -819,6 +832,13 @@ function materializeRequest(
     };
   } else if (req.jsonMode && !caps.jsonModeUnsupported) {
     out["response_format"] = { type: "json_object" };
+  }
+  if (req.reasoningEffort !== undefined) {
+    // OpenAI o-series + gpt-5-nano + Groq `openai/gpt-oss-120b` accept
+    // `reasoning_effort: "low" | "medium" | "high"`. Compat providers
+    // that don't honor it generally just ignore the field. We pass it
+    // through verbatim; no per-model gating in v0.1.
+    out["reasoning_effort"] = req.reasoningEffort;
   }
   if (req.tools && req.tools.length > 0) {
     out["tools"] = req.tools;

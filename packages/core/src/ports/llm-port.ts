@@ -110,6 +110,15 @@ export interface CostUsage {
  * error propagates. Useful for UIs where the operator picks a specific
  * provider, or for one-off "use the expensive model for this single call"
  * patterns.
+ *
+ * `reasoningEffort?: "low" | "medium" | "high"` (alpha.12+) controls how many
+ * tokens reasoning models spend on hidden chain-of-thought before producing
+ * visible output. Forwarded as the `reasoning_effort` field on OpenAI-shape
+ * requests — applies to OpenAI's `o3`/`o4-mini`/`gpt-5-nano`/`gpt-5` family
+ * and to OpenAI-compat providers that honor the parameter (notably Groq's
+ * `openai/gpt-oss-120b`). Silently ignored by adapters whose providers don't
+ * have an equivalent (anthropic, ollama, google, vercel) — the call still
+ * succeeds, just with the provider's default effort level.
  */
 
 export interface GenerateTextOptions {
@@ -125,6 +134,8 @@ export interface GenerateTextOptions {
   signal?: AbortSignal;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
+  /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -141,6 +152,8 @@ export interface GenerateStructuredOptions<T> {
   signal?: AbortSignal;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
+  /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface StreamTextOptions {
@@ -154,6 +167,8 @@ export interface StreamTextOptions {
   signal?: AbortSignal;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
+  /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface StreamStructuredOptions<T> {
@@ -169,6 +184,8 @@ export interface StreamStructuredOptions<T> {
   signal?: AbortSignal;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
+  /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface RunAgentOptions {
@@ -184,6 +201,8 @@ export interface RunAgentOptions {
   signal?: AbortSignal;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
+  /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 // ─── Result types ─────────────────────────────────────────────────────
