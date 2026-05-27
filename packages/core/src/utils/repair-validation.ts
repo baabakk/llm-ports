@@ -6,17 +6,26 @@
  * against the LLM. Each repair pattern represents a known LLM quirk that an
  * LLM round-trip is overkill to fix.
  *
- * The 6 patterns this catches (each one avoids ~1 LLM retry):
+ * The 8 patterns this catches (each one avoids ~1 LLM retry):
  *
  *   1. `null` where a non-null type is expected → delete key
  *      (lets `.optional()` schemas accept the absence)
  *   2. string `"9"` where `number` is expected → `Number("9")` → `9`
  *   3. string `"true"` / `"false"` where `boolean` is expected → real booleans
  *   4. number `9` where `string` is expected → `String(9)` → `"9"`
- *   5. enum value with case/whitespace drift (`"HIGH"` vs `"high"`) →
- *      `.toLowerCase().trim()`
+ *   5. enum value with case / whitespace / markdown drift
+ *      (`"HIGH"`, `"**low**"`, `'"medium"'`, "Low ") →
+ *      strip wrappers + `.toLowerCase().trim()`
  *   6. `null` inside an optional union (`z.string().nullable().optional()`) →
  *      delete key
+ *   7. (alpha.13+) stringified JSON where object/array expected:
+ *      `'{"a":1}'` → `JSON.parse(...)` → `{a: 1}` when the string starts/ends
+ *      with `{}` or `[]`. Catches the "model double-encodes nested objects"
+ *      quirk seen on some compat providers (e.g. MiniMax returns
+ *      `reasoning: "{\"experience\": ...}"` for an object-typed field).
+ *   8. (alpha.13+) array where object expected with a single-element array
+ *      containing an object: `[{...}]` → `{...}`. Catches "model wrapped a
+ *      singular field as an array" misreads of the schema.
  *
  * Strategy:
  *
@@ -100,14 +109,67 @@ function applyFix(root: Record<string, unknown>, issue: ZodIssue): void {
         obj[key] = String(current);
         break;
       }
+      // Pattern 7 (alpha.13): stringified JSON where object/array expected.
+      // Some compat providers double-encode nested fields; if the string
+      // looks like JSON (`{...}` or `[...]`), try parsing once. Only
+      // assign back if parse succeeds AND the parsed shape matches the
+      // expected category — otherwise we'd risk replacing a legitimate
+      // string with parsed junk.
+      if (
+        (expected === "object" || expected === "array") &&
+        typeof current === "string"
+      ) {
+        const trimmed = current.trim();
+        const looksLikeObject =
+          expected === "object" && trimmed.startsWith("{") && trimmed.endsWith("}");
+        const looksLikeArray =
+          expected === "array" && trimmed.startsWith("[") && trimmed.endsWith("]");
+        if (looksLikeObject || looksLikeArray) {
+          try {
+            const parsed = JSON.parse(trimmed) as unknown;
+            const matchesShape =
+              (expected === "object" &&
+                parsed !== null &&
+                typeof parsed === "object" &&
+                !Array.isArray(parsed)) ||
+              (expected === "array" && Array.isArray(parsed));
+            if (matchesShape) {
+              obj[key] = parsed;
+            }
+          } catch {
+            // Not valid JSON; leave as-is so retry-with-feedback can ask
+            // the model to fix it.
+          }
+        }
+        break;
+      }
+      // Pattern 8 (alpha.13): array-with-single-object where object expected.
+      // Common when the model misreads the schema for a singular field and
+      // wraps the answer in an array.
+      if (
+        expected === "object" &&
+        Array.isArray(current) &&
+        current.length === 1 &&
+        current[0] !== null &&
+        typeof current[0] === "object" &&
+        !Array.isArray(current[0])
+      ) {
+        obj[key] = current[0];
+        break;
+      }
       break;
     }
 
     case "invalid_enum_value":
     case "invalid_value":
-      // Case + whitespace normalization for enum / literal mismatches.
+      // Case + whitespace + markdown / quote-wrapper normalization for enum
+      // / literal mismatches. Catches:
+      //   "HIGH" / "Low " → "high" / "low"
+      //   "**low**"       → "low"  (markdown wrap)
+      //   '"medium"'      → "medium"  (model quoted the value)
+      //   "`low`"         → "low"  (model code-fenced it)
       if (typeof current === "string") {
-        obj[key] = current.toLowerCase().trim();
+        obj[key] = stripEnumDecorators(current);
       }
       break;
 
@@ -119,6 +181,46 @@ function applyFix(root: Record<string, unknown>, issue: ZodIssue): void {
       }
       break;
   }
+}
+
+/**
+ * Strip common LLM-output decorators from a candidate enum value before
+ * normalizing. Loops the strip pipeline until no further changes, then
+ * lowercases. Handles compound cases like `'**LOW**.'` (trailing punct
+ * outside the markdown wrap) and `'"**low**"'` (quoted-then-bolded).
+ */
+function stripEnumDecorators(s: string): string {
+  let v = s.trim();
+  for (let i = 0; i < 4; i++) {
+    const before = v;
+    // Strip trailing punctuation first so it doesn't block a wrapper match.
+    v = v.replace(/[.,;!?]+$/, "").trim();
+    // Strip surrounding markdown bold / italic
+    if (v.startsWith("**") && v.endsWith("**") && v.length >= 4) {
+      v = v.slice(2, -2);
+    } else if (v.startsWith("__") && v.endsWith("__") && v.length >= 4) {
+      v = v.slice(2, -2);
+    } else if (
+      (v.startsWith("*") && v.endsWith("*") && v.length >= 2) ||
+      (v.startsWith("_") && v.endsWith("_") && v.length >= 2)
+    ) {
+      v = v.slice(1, -1);
+    }
+    // Strip surrounding code-fence backticks
+    if (v.startsWith("`") && v.endsWith("`") && v.length >= 2) {
+      v = v.slice(1, -1);
+    }
+    // Strip surrounding quotes
+    if (
+      (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+      (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+    ) {
+      v = v.slice(1, -1);
+    }
+    v = v.trim();
+    if (v === before) break;
+  }
+  return v.toLowerCase();
 }
 
 function resolvePath(obj: unknown, path: ReadonlyArray<string | number>): unknown {

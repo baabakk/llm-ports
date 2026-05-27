@@ -21,6 +21,10 @@ export interface ClassifyInput {
   content: MessageContent;
   /** Per-call context override; appended to systemContext. */
   contextOverride?: string;
+  /** Cancellation signal for this specific call. Threaded to the port. (alpha.13+) */
+  signal?: AbortSignal;
+  /** Override task routing for this call only. (alpha.13+) */
+  forceProviderAlias?: string;
 }
 
 export interface CreateClassifierConfig<TSchema extends z.ZodTypeAny> {
@@ -44,6 +48,11 @@ export interface CreateClassifierConfig<TSchema extends z.ZodTypeAny> {
   /** Default 0 (deterministic). */
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b.
+   * Applies to every call from this classifier. (alpha.13+)
+   */
+  reasoningEffort?: "low" | "medium" | "high";
 
   /** Hooks. Errors in hooks are caught and logged, never re-thrown. */
   onBeforeCall?: (input: ClassifyInput) => void | Promise<void>;
@@ -104,6 +113,9 @@ export function createClassifier<TSchema extends z.ZodTypeAny>(
         schemaName: config.schemaName,
         temperature: config.temperature ?? 0,
         ...(config.maxOutputTokens !== undefined ? { maxOutputTokens: config.maxOutputTokens } : {}),
+        ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
       });
 
       await safelyInvoke(config.onResult, {

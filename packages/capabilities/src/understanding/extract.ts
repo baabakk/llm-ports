@@ -19,6 +19,10 @@ import {
 export interface ExtractInput {
   content: MessageContent;
   contextOverride?: string;
+  /** Cancellation signal for this specific call. Threaded to the port. (alpha.13+) */
+  signal?: AbortSignal;
+  /** Override task routing for this call only. (alpha.13+) */
+  forceProviderAlias?: string;
 }
 
 export interface CreateExtractorConfig<TSchema extends z.ZodTypeAny> {
@@ -35,6 +39,11 @@ export interface CreateExtractorConfig<TSchema extends z.ZodTypeAny> {
   /** Default 0 (deterministic). */
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b.
+   * Applies to every call from this extractor. (alpha.13+)
+   */
+  reasoningEffort?: "low" | "medium" | "high";
   onBeforeCall?: (input: ExtractInput) => void | Promise<void>;
   onResult?: (event: CapabilityEvent<z.infer<TSchema>>) => void | Promise<void>;
   onError?: (error: Error, input: ExtractInput) => void | Promise<void>;
@@ -73,6 +82,9 @@ export function createExtractor<TSchema extends z.ZodTypeAny>(
         schemaName: config.schemaName,
         temperature: config.temperature ?? 0,
         ...(config.maxOutputTokens !== undefined ? { maxOutputTokens: config.maxOutputTokens } : {}),
+        ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "extract",

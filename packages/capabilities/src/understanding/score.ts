@@ -17,6 +17,10 @@ import {
 export interface ScoreInput {
   content: MessageContent;
   contextOverride?: string;
+  /** Cancellation signal for this specific call. Threaded to the port. (alpha.13+) */
+  signal?: AbortSignal;
+  /** Override task routing for this call only. (alpha.13+) */
+  forceProviderAlias?: string;
 }
 
 export interface CreateScorerConfig<TSchema extends z.ZodTypeAny> {
@@ -33,6 +37,11 @@ export interface CreateScorerConfig<TSchema extends z.ZodTypeAny> {
   /** Default 0.1 — slight randomness helps surface borderline cases consistently. */
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b.
+   * Applies to every call from this scorer. (alpha.13+)
+   */
+  reasoningEffort?: "low" | "medium" | "high";
   onBeforeCall?: (input: ScoreInput) => void | Promise<void>;
   onResult?: (event: CapabilityEvent<z.infer<TSchema>>) => void | Promise<void>;
   onError?: (error: Error, input: ScoreInput) => void | Promise<void>;
@@ -71,6 +80,9 @@ export function createScorer<TSchema extends z.ZodTypeAny>(
         schemaName: config.schemaName,
         temperature: config.temperature ?? 0.1,
         ...(config.maxOutputTokens !== undefined ? { maxOutputTokens: config.maxOutputTokens } : {}),
+        ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "score",

@@ -23,6 +23,10 @@ export interface DraftInput {
   /** Optional recipient context (e.g. CRM data, prior interactions). */
   recipientContext?: string;
   contextOverride?: string;
+  /** Cancellation signal for this specific call. Threaded to the port. (alpha.13+) */
+  signal?: AbortSignal;
+  /** Override task routing for this call only. (alpha.13+) */
+  forceProviderAlias?: string;
 }
 
 export interface CreateDrafterConfig {
@@ -45,6 +49,11 @@ export interface CreateDrafterConfig {
   /** Hard character cap; truncates output if exceeded. */
   maxLength?: number;
   maxOutputTokens?: number;
+  /**
+   * Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b.
+   * Applies to every call from this drafter. (alpha.13+)
+   */
+  reasoningEffort?: "low" | "medium" | "high";
   onBeforeCall?: (input: DraftInput) => void | Promise<void>;
   onResult?: (event: CapabilityEvent<string>) => void | Promise<void>;
   onError?: (error: Error, input: DraftInput) => void | Promise<void>;
@@ -104,6 +113,9 @@ export function createDrafter(
           : config.maxLength !== undefined
             ? { maxOutputTokens: Math.ceil(config.maxLength / 3) }
             : { maxOutputTokens: 800 }),
+        ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
       });
 
       let text = result.text;

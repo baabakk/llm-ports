@@ -163,4 +163,85 @@ describe("attemptValidationRepair", () => {
     expect(attemptValidationRepair("abc", result.error)).toBe("abc");
     expect(attemptValidationRepair(null, result.error)).toBe(null);
   });
+
+  // ─── Pattern 7 (alpha.13): stringified JSON → parsed object/array ────
+
+  it("parses a stringified JSON object when the schema expects an object", () => {
+    const schema = z.object({
+      profile: z.object({ name: z.string(), age: z.number() }),
+    });
+    const raw = { profile: '{"name":"Babak","age":42}' };
+    expect(schema.safeParse(runRepair(schema, raw)).success).toBe(true);
+  });
+
+  it("parses a stringified JSON array when the schema expects an array", () => {
+    const schema = z.object({
+      tags: z.array(z.string()),
+    });
+    const raw = { tags: '["a","b","c"]' };
+    expect(schema.safeParse(runRepair(schema, raw)).success).toBe(true);
+  });
+
+  it("does NOT replace non-JSON-shaped strings (no risk of garbage substitution)", () => {
+    const schema = z.object({
+      profile: z.object({ name: z.string() }),
+    });
+    // Plain prose, no JSON delimiters — repair should leave it alone, retry-
+    // with-feedback can ask the model to fix it.
+    const raw = { profile: "Babak is 42 years old." };
+    const repaired = runRepair(schema, raw);
+    expect((repaired as { profile: unknown }).profile).toBe("Babak is 42 years old.");
+  });
+
+  it("does NOT replace strings that LOOK like JSON but aren't parseable", () => {
+    const schema = z.object({
+      profile: z.object({ name: z.string() }),
+    });
+    const raw = { profile: '{name: Babak}' }; // unquoted key, invalid JSON
+    const repaired = runRepair(schema, raw);
+    expect((repaired as { profile: unknown }).profile).toBe("{name: Babak}");
+  });
+
+  // ─── Pattern 8 (alpha.13): array-with-single-object → object ─────────
+
+  it("unwraps a single-element-array-of-object when the schema expects an object", () => {
+    const schema = z.object({
+      person: z.object({ name: z.string(), age: z.number() }),
+    });
+    const raw = { person: [{ name: "Babak", age: 42 }] };
+    expect(schema.safeParse(runRepair(schema, raw)).success).toBe(true);
+  });
+
+  it("does NOT unwrap multi-element arrays (ambiguous which to pick)", () => {
+    const schema = z.object({
+      person: z.object({ name: z.string() }),
+    });
+    const raw = { person: [{ name: "Babak" }, { name: "Other" }] };
+    const repaired = runRepair(schema, raw);
+    expect(Array.isArray((repaired as { person: unknown }).person)).toBe(true);
+  });
+
+  // ─── Pattern 5 expanded (alpha.13): markdown/quote/punct decorators ──
+
+  it.each([
+    ['"low"', "low"],
+    ["'medium'", "medium"],
+    ["**high**", "high"],
+    ["__low__", "low"],
+    ["*medium*", "medium"],
+    ["_high_", "high"],
+    ["`low`", "low"],
+    ["Low.", "low"],
+    ["HIGH!", "high"],
+    ["medium,", "medium"],
+    ["**LOW**.", "low"],
+  ])("enum decorator strip: %s → %s", (input, expected) => {
+    const schema = z.object({
+      priority: z.enum(["low", "medium", "high"]),
+    });
+    const raw = { priority: input };
+    const result = schema.safeParse(runRepair(schema, raw));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.priority).toBe(expected);
+  });
 });

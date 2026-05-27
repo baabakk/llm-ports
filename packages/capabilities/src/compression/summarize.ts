@@ -18,6 +18,10 @@ import {
 export interface SummarizeInput {
   content: MessageContent;
   contextOverride?: string;
+  /** Cancellation signal for this specific call. Threaded to the port. (alpha.13+) */
+  signal?: AbortSignal;
+  /** Override task routing for this call only. (alpha.13+) */
+  forceProviderAlias?: string;
 }
 
 export interface CreateSummarizerConfig {
@@ -36,6 +40,11 @@ export interface CreateSummarizerConfig {
   /** Default 0.2. */
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b.
+   * Applies to every call from this summarizer. (alpha.13+)
+   */
+  reasoningEffort?: "low" | "medium" | "high";
   onBeforeCall?: (input: SummarizeInput) => void | Promise<void>;
   onResult?: (event: CapabilityEvent<string>) => void | Promise<void>;
   onError?: (error: Error, input: SummarizeInput) => void | Promise<void>;
@@ -80,6 +89,9 @@ export function createSummarizer(
           : config.targetWords !== undefined
             ? { maxOutputTokens: Math.ceil(config.targetWords * 1.5) }
             : {}),
+        ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "summarize",
