@@ -1,5 +1,12 @@
 # @llm-ports/example-live-integration-tests
 
+## 0.1.0-alpha.14
+
+### Patch Changes
+
+- Updated dependencies [da17ec8]
+  - @llm-ports/adapter-openai@0.1.0-alpha.14
+
 ## 0.1.0-alpha.13
 
 ### Patch Changes
