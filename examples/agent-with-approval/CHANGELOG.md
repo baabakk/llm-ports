@@ -1,5 +1,13 @@
 # @llm-ports/example-agent-with-approval
 
+## 0.1.0-alpha.13
+
+### Patch Changes
+
+- Updated dependencies [7c27b2d]
+  - @llm-ports/core@0.1.0-alpha.13
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.13
+
 ## 0.1.0-alpha.12
 
 ### Patch Changes
