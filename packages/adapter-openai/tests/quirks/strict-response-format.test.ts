@@ -157,7 +157,7 @@ describe("useStrictResponseFormat", () => {
     expect(callArgs.response_format?.type).toBe("json_schema");
   });
 
-  it("stays opt-in (json_object default) for unverified compat providers like SambaNova", async () => {
+  it("auto-enables when baseURL is the SambaNova endpoint (alpha.15+)", async () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({
         text: '{"x":1}',
@@ -175,6 +175,40 @@ describe("useStrictResponseFormat", () => {
       },
     });
     const port = adapter.createLLMPort("MiniMax-M2.7", "sambanova");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    expect(callArgs.response_format?.type).toBe("json_schema");
+  });
+
+  it("stays opt-in (json_object default) for unverified compat providers like Together AI", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      baseURL: "https://api.together.xyz/v1",
+      displayName: "together",
+      pricingOverrides: {
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": { inputPer1M: 0.88, outputPer1M: 0.88 },
+      },
+    });
+    const port = adapter.createLLMPort(
+      "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "together",
+    );
 
     await port.generateStructured({
       taskType: "test",
@@ -300,7 +334,7 @@ describe("autoDetectStrictResponseFormat", () => {
     ["https://api.openai.com/v1", true],                          // explicit OpenAI host — contains nothing we exclude
     ["https://api.cerebras.ai/v1", true],                         // Cerebras (alpha.9)
     ["https://api.groq.com/openai/v1", true],                     // Groq (alpha.14+)
-    ["https://api.sambanova.ai/v1", false],                       // SambaNova — unverified
+    ["https://api.sambanova.ai/v1", true],                        // SambaNova (alpha.15+) — empirically verified
     ["https://api.together.xyz/v1", false],                       // Together — unverified
     ["https://api.fireworks.ai/inference/v1", false],             // Fireworks — unverified
     ["https://api.clarifai.com/v2/ext/openai/v1", false],         // Clarifai — unverified

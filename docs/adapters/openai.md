@@ -178,8 +178,9 @@ const groq = createOpenAIAdapter({
 | `baseURL` is unset OR contains `api.openai.com` | OpenAI native — strict `json_schema` has been GA on gpt-4o / gpt-5 / o-series since August 2024 |
 | `baseURL` contains `api.cerebras.ai` | Cerebras silently ignores classic `json_object` mode on gpt-oss / Qwen3.6 tiers — strict mode is the only reliable path |
 | `baseURL` contains `api.groq.com` | Groq verified to support strict `response_format: json_schema` with constrained decoding (per Groq docs, May 2026) |
+| `baseURL` contains `api.sambanova.ai` (alpha.15+) | Empirically verified 2026-05-27 — MiniMax-M2.7 with strict mode forced on jumped from 0/10 → 10/10 schema-valid on a nested production scoring schema |
 
-For other compat providers (SambaNova, Together AI, Fireworks AI, Clarifai, LiteLLM proxy), the option **stays opt-in** — set `useStrictResponseFormat: true` explicitly once you've verified the provider's strict-mode support.
+For other compat providers (Together AI, Fireworks AI, Clarifai, LiteLLM proxy), the option **stays opt-in** — set `useStrictResponseFormat: true` explicitly once you've verified the provider's strict-mode support.
 
 **Schema conversion.** Zod schemas are converted via `zod-to-json-schema` (`target: "openAi"`, `$refStrategy: "none"`), then post-processed to add `additionalProperties: false` on every nested object — a hard requirement of strict mode the SDK does not auto-inject.
 

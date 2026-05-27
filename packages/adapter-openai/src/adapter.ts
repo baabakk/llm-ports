@@ -154,11 +154,13 @@ export interface OpenAIAdapterOptions {
    *     is required for reliable structured output)
    *   - `baseURL` contains `api.groq.com` (verified to support strict
    *     `response_format: json_schema` with constrained decoding)
+   *   - `baseURL` contains `api.sambanova.ai` (added alpha.15+;
+   *     empirically verified — MiniMax-M2.7 jumped from 0/10 → 10/10 on
+   *     nested schemas with strict mode forced on)
    *
    * Stays OPT-IN (default `false`) for unverified compat providers like
-   * SambaNova, Together AI, Fireworks AI, Clarifai. Set
-   * `useStrictResponseFormat: true` explicitly once you've verified the
-   * provider's strict-mode support.
+   * Together AI, Fireworks AI, Clarifai. Set `useStrictResponseFormat: true`
+   * explicitly once you've verified the provider's strict-mode support.
    *
    * Opt-out: set `useStrictResponseFormat: false` explicitly if your Zod
    * schemas use open shapes that can't accept `additionalProperties: false`
@@ -167,7 +169,7 @@ export interface OpenAIAdapterOptions {
    * to reject the request.
    *
    * Available since `0.1.0-alpha.9`; default expanded to OpenAI native +
-   * Groq in `0.1.0-alpha.14`.
+   * Groq in `0.1.0-alpha.14`; SambaNova added `0.1.0-alpha.15`.
    */
   useStrictResponseFormat?: boolean;
   /**
@@ -224,6 +226,11 @@ export function autoDetectStrictResponseFormat(baseURL: string | undefined): boo
   // Groq: verified to support strict `response_format: json_schema` with
   // constrained decoding (per Groq docs, May 2026).
   if (baseURL.includes("api.groq.com")) return true;
+  // SambaNova: empirically verified 2026-05-27 — MiniMax-M2.7 with explicit
+  // `useStrictResponseFormat: true` jumped from 0/10 → 10/10 schema-valid
+  // on a nested production scoring schema (BEPA A/B harness). Docs were
+  // ambiguous; the probe is the source of truth.
+  if (baseURL.includes("api.sambanova.ai")) return true;
   // Unknown compat provider — stay opt-in.
   return false;
 }
