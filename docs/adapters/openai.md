@@ -122,7 +122,26 @@ interface OpenAIAdapterOptions {
   useStrictResponseFormat?: boolean; // alpha.9; auto-detects on api.cerebras.ai
   onRetry?: OnRetry;                // observability hook
 }
+// Per-call option (on every *Options interface, since alpha.12):
+//   reasoningEffort?: "low" | "medium" | "high"
+//   — Forwarded as `reasoning_effort` on the SDK call.
 ```
+
+### `reasoningEffort` per-call (alpha.12)
+
+OpenAI's `o3` / `o4-mini` / `gpt-5-nano` / `gpt-5` family and OpenAI-compat providers like Groq's `openai/gpt-oss-120b` accept a `reasoning_effort: "low" | "medium" | "high"` parameter that controls how many tokens the model spends on hidden chain-of-thought. Set it via the per-call option:
+
+```ts
+const result = await port.generateText({
+  taskType: "complex-reasoning",
+  prompt: "...",
+  reasoningEffort: "high",  // adapter forwards as reasoning_effort
+});
+```
+
+Groq's `openai/gpt-oss-120b` is the immediate case where this matters most — the model is exposed as a single model ID with no separate "low/medium/high" variants, so this knob is the only way to escalate quality. OpenAI's own reasoning models default to `"medium"`; setting `"high"` notably increases reasoning token spend (and quality on hard problems).
+
+Forwarded verbatim with no per-model gating in v0.1. If you set `reasoningEffort` on a model that rejects the field, the SDK throws. Runtime capability learning for this case (parallel to `jsonModeUnsupported`) is v0.2 scope.
 
 ### `useStrictResponseFormat` (alpha.9)
 
@@ -200,6 +219,7 @@ Source: openai.com/pricing. Verified 2026-04-10.
 | `listModels()` | ✓ (alpha.9; via `client.models.list()`) |
 | `dangerouslyAllowBrowser` opt-in | ✓ (alpha.9) |
 | Strict JSON schema mode (`useStrictResponseFormat`) | ✓ (alpha.9; auto-detects on `api.cerebras.ai`) |
+| `reasoningEffort` per-call passthrough | ✓ (alpha.12; threaded through every call shape) |
 
 ## Content blocks supported
 

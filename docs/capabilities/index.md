@@ -47,6 +47,7 @@ const fn = createX({
   priority: 2,
   temperature: 0.2,
   maxOutputTokens: 1024,
+  reasoningEffort: "high",        // alpha.13+: per-factory, applies to every call
 
   // Hooks (errors caught and logged but never re-thrown)
   onBeforeCall: async (input) => { /* ... */ },
@@ -58,8 +59,46 @@ const fn = createX({
 Then call with input:
 
 ```ts
-const result = await fn({ content: "...", contextOverride: "per-call extra context" });
+const result = await fn({
+  content: "...",
+  contextOverride: "per-call extra context",
+  signal: controller.signal,             // alpha.13+: per-call cancellation
+  forceProviderAlias: "expensive",        // alpha.13+: per-call routing override
+});
 ```
+
+### `reasoningEffort` (per-factory, alpha.13+)
+
+Set once at factory creation; forwarded to every call's underlying `port.generateStructured` / `port.generateText`. Use for capabilities that target a reasoning model (OpenAI `o3` / `o4-mini` / `gpt-5-nano` / `gpt-5`, Groq's `openai/gpt-oss-120b`) where you want to escalate to `"high"` effort for quality, or drop to `"low"` for speed:
+
+```ts
+const score = createScorer({
+  port: llm,
+  schema: LeadScoreSchema,
+  schemaName: "lead-score",
+  rubric,
+  reasoningEffort: "high",   // ← every score(...) call burns more CoT tokens
+});
+```
+
+Silently ignored by adapters whose providers don't honor the parameter (`adapter-anthropic`, `adapter-google`, `adapter-ollama`, `adapter-vercel`); the call still succeeds at the provider's default effort level.
+
+### `signal` and `forceProviderAlias` (per-call, alpha.13+)
+
+Set per-invocation in the input arg. `signal` cancels the in-flight provider HTTP fetch (entry-only on Ollama; in-flight on the other 4 adapters). `forceProviderAlias` routes this single call directly to the named provider, bypassing the task-routing chain — useful for UIs where the operator picks a specific model:
+
+```ts
+const controller = new AbortController();
+button.addEventListener("click", () => controller.abort());
+
+const draft = await draftReply({
+  instructions: "...",
+  signal: controller.signal,
+  forceProviderAlias: "claude-opus",  // bypass the cheap-fast chain for this one call
+});
+```
+
+Per-provider budget gates still apply on `forceProviderAlias` (so it can't be used to escape a hard cap); runtime fallback also does NOT engage — if the forced provider fails, the error propagates.
 
 ## Hooks and the CapabilityEvent
 

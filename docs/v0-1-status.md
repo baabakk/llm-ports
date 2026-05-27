@@ -12,28 +12,29 @@ These are load-bearing today, with comprehensive test coverage. Not "experimenta
 
 | Surface | Coverage |
 |---|---|
-| `LLMPort` interface (5 methods + optional `listModels`) | 486 offline tests across 7 packages + cross-adapter contract suite |
+| `LLMPort` interface (5 methods + optional `listModels`) | 537 offline tests across 7 packages + cross-adapter contract suite |
 | `EmbeddingsPort` interface | covered by OpenAI + Ollama live tests; mocked-SDK regression tests |
 | `Registry` with task-route walking + `selectModel` budget gating | offline registry tests in core, plus end-to-end via examples |
 | Registry runtime fallback (`runtimeFallback: "default" \| "none" \| { shouldFallback }`) | alpha.7; offline + contract |
 | `forceProviderAlias` per-call routing override | alpha.7; offline |
+| `reasoningEffort` parameter (o-series / gpt-5-nano / Groq gpt-oss-120b) | alpha.12; 5 unit + 13 capability passthrough tests |
 | Runtime model discovery (`LLMPort.listModels()` + `Registry.checkPricingFreshness()`) | alpha.9; 4 of 5 adapters + 4 registry tests |
 | USD cost gating (per-hour / per-day / per-month) | offline + Phase 2 live verification; precision verified at 10 decimals |
 | Session-scoped USD cost gating (`Registry.openCostSession`) | offline `cost-session.test.ts`; alpha.5 |
 | Anthropic adapter (full feature set: prompt caching, vision, tool use, `dangerouslyAllowBrowser`) | full live + contract suites |
-| OpenAI adapter (chat + embeddings + 12 compat providers via `baseURL`, `useStrictResponseFormat`, `dangerouslyAllowBrowser`) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
+| OpenAI adapter (chat + embeddings + 12 compat providers via `baseURL`, `useStrictResponseFormat`, `dangerouslyAllowBrowser`, `reasoning_effort` passthrough) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
 | Google Gemini adapter (chat + multimodal + streaming + multi-turn agent + native `responseSchema`) | alpha.9; offline content + contract + quirks |
 | Ollama adapter (chat + embeddings + model management + `listModels`) | offline + Phase 2 live |
 | Vercel AI SDK adapter (migration-friendly) | offline + contract; v0.1: single-turn agent + text-only multimodal |
-| Capability factories (`createClassifier`, `createScorer`, `createDrafter`, `createSummarizer`, `createExtractor`, `createPlanner`, `createAnalyzer`) | offline + Phase 3 live (via Cerebras/Anthropic) |
+| Capability factories (`createClassifier`, `createScorer`, `createDrafter`, `createSummarizer`, `createExtractor`, `createPlanner`, `createAnalyzer`) — carry full port surface (`reasoningEffort` + `signal` + `forceProviderAlias`) since alpha.13 | offline + 13 passthrough tests + Phase 3 live (via Cerebras/Anthropic) |
 | Validation strategies (`throw`, `retry-with-feedback`, `fallback-to-next-provider`, `custom`) | offline tests + Phase 2 live exercise |
-| Two-layer validation hardening (jsonrepair fallback in `extractJSON` + Zod-issue repair pass) | alpha.5; 20 offline tests; each catch saves an LLM retry round-trip |
+| Two-layer validation hardening (jsonrepair fallback in `extractJSON` + Zod-issue repair pass with 8 patterns including markdown decorator strip, stringified-JSON-as-object, single-element-array-unwrap) | alpha.5 base + alpha.13 extensions; 29 offline tests; each catch saves an LLM retry round-trip |
 | `ContentBlock[]` discriminated union (text, image, audio, tool_use, tool_result) | offline tests across adapters |
 | Image-block boundary validation (`ImageTooLargeError`, `InvalidImageUrlError`) | alpha.5; 17 offline tests; per-adapter limits |
-| `AbortSignal` cancellation on all 5 `*Options` (in-flight HTTP cancel on 4 adapters, entry-only on Ollama) | alpha.6; 21 tests |
+| `AbortSignal` cancellation on all 5 `*Options` (in-flight HTTP cancel on 4 adapters, entry-only on Ollama) — propagated through capability factories | alpha.6 + alpha.13; 21 tests |
 | Latency overhead | mean p50 0.04 ms, max p99 0.47 ms (10× under the 5 ms target) |
 
-The Anthropic + OpenAI + Ollama adapters and the capability factories are the BEPA-extracted core, in production at BEPA for 6+ months across millions of LLM calls. The Google Gemini adapter (alpha.5 multimodal + chat, alpha.9 multi-turn + responseSchema) and the cross-cutting model-discovery API (alpha.9) are newer; the contract suite covers them with the same shape as the older adapters.
+The Anthropic + OpenAI + Ollama adapters and the capability factories are the BEPA-extracted core, in production at BEPA for 6+ months across millions of LLM calls. The Google Gemini adapter (alpha.5 multimodal + chat, alpha.9 multi-turn + responseSchema) and the cross-cutting model-discovery API (alpha.9), `reasoningEffort` passthrough (alpha.12), and the capability-factory port-surface alignment (alpha.13) are newer; the contract suite covers them with the same shape as the older adapters.
 
 ---
 
@@ -41,9 +42,9 @@ The Anthropic + OpenAI + Ollama adapters and the capability factories are the BE
 
 These are tracked publicly. Each row links to the GitHub issue with the full reproduction, workaround, and resolution path. Filter on the [`known-limitation` label](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Aknown-limitation) for the live list.
 
-### Recently closed (alpha.1 → alpha.9)
+### Recently closed (alpha.1 → alpha.13)
 
-Fourteen medium-impact issues filed between alpha.0 and alpha.9 have been resolved. Listed here for context — they no longer apply on `@llm-ports/*@alpha`.
+Fourteen medium-impact issues filed between alpha.0 and alpha.9 have been resolved, plus four follow-up BEPA-internal TD entries closed by alpha.10 → alpha.13 (Claude 4.5+ `temperature` catalog expansion, `generateStructured` usage accumulation, `reasoning_effort` passthrough, capability-factory port-surface alignment). Listed here for context — they no longer apply on `@llm-ports/*@alpha`.
 
 | Was | Closed by | Shipped |
 |---|---|---|
@@ -62,6 +63,10 @@ Fourteen medium-impact issues filed between alpha.0 and alpha.9 have been resolv
 | `signal?: AbortSignal` missing on `*Options`; no mid-flight cancel | [#24](https://github.com/baabakk/llm-ports/issues/24) | alpha.6 |
 | Adapters don't expose `dangerouslyAllowBrowser` — blocks browser usage | [#32](https://github.com/baabakk/llm-ports/issues/32) | alpha.9 (openai + anthropic) |
 | Gemini `generateStructured` uses prompted JSON, not native `responseSchema`; `runAgent` is single-turn | (rolled-up from alpha.5 release notes) | alpha.9 |
+| `claude-opus-4-7` rejects `temperature` in streaming methods (catalog only covered 4-5) | BEPA TD-LLMPORTS-OPUS-4-7 | alpha.10 (`/^claude-(opus\|sonnet)-4-\d/`) |
+| `generateStructured` overwrites `usage` across retry-with-feedback attempts instead of accumulating | BEPA TD-LLMPORTS-VALIDATION-ATTEMPTS | alpha.11 (mergeTokenUsage across all 5 adapters) |
+| `reasoning_effort` parameter not exposed; Groq `gpt-oss-120b` can't reach `"high"` effort | BEPA TD-LLMPORTS-REASONING-EFFORT | alpha.12 (per-call option on all 5 `*Options`) |
+| Capability factories drop `reasoningEffort` (and `signal` / `forceProviderAlias`) — never propagated to underlying port call | BEPA TD-LLMPORTS-CAPABILITIES-REASONING-EFFORT | alpha.13 (all 7 factories) |
 
 ### Medium-impact (still open in v0.1)
 

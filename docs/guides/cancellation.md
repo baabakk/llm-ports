@@ -162,6 +162,28 @@ try {
 }
 ```
 
+## Capability factories propagate the signal (alpha.13+)
+
+Capability factories from `@llm-ports/capabilities` now propagate `signal` from the per-call input arg through to the underlying `port.generateText` / `port.generateStructured` call:
+
+```ts
+const classify = createClassifier({
+  port: llm,
+  schema: TriageSchema,
+  schemaName: "triage",
+});
+
+const controller = new AbortController();
+button.addEventListener("click", () => controller.abort());
+
+const result = await classify({
+  content: emailText,
+  signal: controller.signal,   // propagated to the port; cancels the in-flight call
+});
+```
+
+Same per-adapter semantics apply (in-flight on openai/anthropic/google/vercel, entry-only on ollama). All 7 factories support this: `createClassifier`, `createScorer`, `createExtractor`, `createPlanner`, `createAnalyzer`, `createDrafter`, `createSummarizer`.
+
 ## What it does NOT do
 
 - **Refund tokens already billed.** Once the provider has started generating, the request is on the meter. Aborting saves the **remainder** of the call, not what's already produced.
