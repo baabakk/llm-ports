@@ -35,6 +35,7 @@
     "alpha-12-reasoning-effort",
     "alpha-13-capability-passthrough",
     "alpha-14-strict-mode-default",
+    "alpha-15-sambanova-strict",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",
