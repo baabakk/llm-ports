@@ -144,15 +144,30 @@ export interface OpenAIAdapterOptions {
    * impossible (modulo provider bugs). The Zod schema is converted to
    * JSON Schema via `zod-to-json-schema`, then post-processed to add
    * `additionalProperties: false` on every object (a hard requirement of
-   * OpenAI / Cerebras strict mode).
+   * OpenAI / Cerebras / Groq strict mode).
    *
-   * Defaults to auto-detect: enabled when `baseURL` contains
-   * `api.cerebras.ai` (Cerebras's gpt-oss / Qwen3.6 endpoints require strict
-   * mode for reliable structured output) AND the model isn't a known
-   * reasoning model (those reject `response_format` entirely). Set
-   * explicitly to override the auto-detect.
+   * Defaults to auto-detect (alpha.14+). Auto-enabled when:
+   *   - `baseURL` is unset (= OpenAI native; strict json_schema has been GA
+   *     on gpt-4o / gpt-5 / o-series since August 2024)
+   *   - `baseURL` contains `api.cerebras.ai` (Cerebras's gpt-oss / Qwen3.6
+   *     endpoints silently ignore classic `json_object` mode; strict mode
+   *     is required for reliable structured output)
+   *   - `baseURL` contains `api.groq.com` (verified to support strict
+   *     `response_format: json_schema` with constrained decoding)
    *
-   * Available since `0.1.0-alpha.9`.
+   * Stays OPT-IN (default `false`) for unverified compat providers like
+   * SambaNova, Together AI, Fireworks AI, Clarifai. Set
+   * `useStrictResponseFormat: true` explicitly once you've verified the
+   * provider's strict-mode support.
+   *
+   * Opt-out: set `useStrictResponseFormat: false` explicitly if your Zod
+   * schemas use open shapes that can't accept `additionalProperties: false`
+   * (e.g. `z.record(...)`, schemas with computed/optional fields the
+   * model is allowed to extend), or if strict mode is causing your model
+   * to reject the request.
+   *
+   * Available since `0.1.0-alpha.9`; default expanded to OpenAI native +
+   * Groq in `0.1.0-alpha.14`.
    */
   useStrictResponseFormat?: boolean;
   /**
@@ -188,6 +203,29 @@ interface AdapterContext {
   useStrictResponseFormat: boolean;
   /** Observability hook for transient retries. Optional; no-op when unset. */
   onRetry?: OnRetry;
+}
+
+/**
+ * Auto-detect whether to default `useStrictResponseFormat` to true based on
+ * the `baseURL`. See the option's docstring for the rationale per provider.
+ *
+ * Exported for testability and for users who want to reuse the same default
+ * logic when constructing multiple adapter instances programmatically.
+ */
+export function autoDetectStrictResponseFormat(baseURL: string | undefined): boolean {
+  // OpenAI native: no baseURL set, or explicit api.openai.com host (some
+  // users redundantly point at the default). Strict json_schema GA on
+  // gpt-4o / gpt-5 / o-series since August 2024.
+  if (!baseURL) return true;
+  if (baseURL.includes("api.openai.com")) return true;
+  // Cerebras: classic json_object is silently ignored on gpt-oss / Qwen3.6
+  // tiers; strict mode is the only reliable path.
+  if (baseURL.includes("api.cerebras.ai")) return true;
+  // Groq: verified to support strict `response_format: json_schema` with
+  // constrained decoding (per Groq docs, May 2026).
+  if (baseURL.includes("api.groq.com")) return true;
+  // Unknown compat provider — stay opt-in.
+  return false;
 }
 
 /** Fire the onRetry hook fire-and-forget. Delegates to the shared `emitRetryEvent`
@@ -250,12 +288,7 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
       opts.transientAuthBackoffMs ?? ((attempt) => 500 * Math.pow(3, attempt)),
     imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
     useStrictResponseFormat:
-      opts.useStrictResponseFormat ??
-      // Auto-detect: Cerebras-hosted gpt-oss / Qwen3.6 / etc. need strict
-      // JSON schema for reliable structured output; the classic
-      // `response_format: { type: "json_object" }` is silently ignored on
-      // some Cerebras tiers and yields the model's freeform best-effort.
-      (opts.baseURL?.includes("api.cerebras.ai") ?? false),
+      opts.useStrictResponseFormat ?? autoDetectStrictResponseFormat(opts.baseURL),
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
@@ -878,7 +911,13 @@ function learnConstraintsFromError(err: unknown, req: LogicalChatRequest): boole
     rememberConstraint(req.modelId, { temperatureLocked: true });
     learned = true;
   }
-  if (isJsonModeRejection(err) && req.jsonMode) {
+  // `response_format` rejection covers BOTH paths:
+  //   - legacy `{ type: "json_object" }` (req.jsonMode)
+  //   - alpha.9+ strict `{ type: "json_schema", strict: true }` (req.strictResponseSchema)
+  // Either way, the model has told us it doesn't accept any `response_format`
+  // shape we know how to send — so flip `jsonModeUnsupported` and the next
+  // call will omit the field entirely.
+  if (isJsonModeRejection(err) && (req.jsonMode || req.strictResponseSchema)) {
     rememberConstraint(req.modelId, { jsonMode: false });
     learned = true;
   }

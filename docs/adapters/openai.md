@@ -119,7 +119,7 @@ interface OpenAIAdapterOptions {
   transientAuthRetries?: number;    // project-key 401 burst-protection retries (default 2)
   transientAuthBackoffMs?: (attempt: number) => number;
   dangerouslyAllowBrowser?: boolean; // alpha.9; opt in to browser execution
-  useStrictResponseFormat?: boolean; // alpha.9; auto-detects on api.cerebras.ai
+  useStrictResponseFormat?: boolean; // alpha.9; auto-detect expanded in alpha.14
   onRetry?: OnRetry;                // observability hook
 }
 // Per-call option (on every *Options interface, since alpha.12):
@@ -143,9 +143,9 @@ Groq's `openai/gpt-oss-120b` is the immediate case where this matters most — t
 
 Forwarded verbatim with no per-model gating in v0.1. If you set `reasoningEffort` on a model that rejects the field, the SDK throws. Runtime capability learning for this case (parallel to `jsonModeUnsupported`) is v0.2 scope.
 
-### `useStrictResponseFormat` (alpha.9)
+### `useStrictResponseFormat` (alpha.9 base + alpha.14 auto-detect expansion)
 
-`generateStructured` can emit OpenAI / Cerebras strict JSON Schema mode:
+`generateStructured` can emit OpenAI / Cerebras / Groq strict JSON Schema mode:
 
 ```json
 {
@@ -159,18 +159,45 @@ Forwarded verbatim with no per-model gating in v0.1. If you set `reasoningEffort
 …instead of the classic `{ type: "json_object" }`. With strict mode the provider constrains decoding to the exact schema before tokens are produced — invalid JSON and missing required fields are impossible (modulo provider bugs).
 
 ```ts
-const adapter = createOpenAIAdapter({
+// All three of these auto-enable strict mode in alpha.14+:
+const openai   = createOpenAIAdapter({ apiKey: process.env.OPENAI_API_KEY! });
+const cerebras = createOpenAIAdapter({
   apiKey: process.env.CEREBRAS_API_KEY!,
   baseURL: "https://api.cerebras.ai/v1",
-  // useStrictResponseFormat omitted — auto-enabled because baseURL contains api.cerebras.ai
+});
+const groq = createOpenAIAdapter({
+  apiKey: process.env.GROQ_API_KEY!,
+  baseURL: "https://api.groq.com/openai/v1",
 });
 ```
 
-**Auto-detection.** Cerebras's gpt-oss / Qwen3.6 tiers silently ignore the classic `json_object` mode (the request succeeds but the model returns freeform best-effort). Strict mode is the only way to get reliable structured output on Cerebras. The adapter auto-enables `useStrictResponseFormat` when `baseURL` contains `api.cerebras.ai`. Set the option to `false` explicitly to opt out.
+**Auto-detection (alpha.14+).** `useStrictResponseFormat` defaults to `true` when:
+
+| Condition | Why |
+|---|---|
+| `baseURL` is unset OR contains `api.openai.com` | OpenAI native — strict `json_schema` has been GA on gpt-4o / gpt-5 / o-series since August 2024 |
+| `baseURL` contains `api.cerebras.ai` | Cerebras silently ignores classic `json_object` mode on gpt-oss / Qwen3.6 tiers — strict mode is the only reliable path |
+| `baseURL` contains `api.groq.com` | Groq verified to support strict `response_format: json_schema` with constrained decoding (per Groq docs, May 2026) |
+
+For other compat providers (SambaNova, Together AI, Fireworks AI, Clarifai, LiteLLM proxy), the option **stays opt-in** — set `useStrictResponseFormat: true` explicitly once you've verified the provider's strict-mode support.
 
 **Schema conversion.** Zod schemas are converted via `zod-to-json-schema` (`target: "openAi"`, `$refStrategy: "none"`), then post-processed to add `additionalProperties: false` on every nested object — a hard requirement of strict mode the SDK does not auto-inject.
 
-**When NOT to use it.** Strict mode is rejected by older models (anything that doesn't speak the OpenAI `json_schema` shape, e.g. some Azure deployments) and by reasoning models that disable `response_format` entirely. The runtime-learning capability path catches the latter — if `useStrictResponseFormat: true` is set on an o3 / gpt-5-nano model, the first 400 teaches the adapter `jsonModeUnsupported: true` and subsequent calls fall back to prompted JSON.
+**When NOT to use it / how to opt out.** Set `useStrictResponseFormat: false` explicitly when:
+
+- **Your Zod schemas use open shapes** that can't accept `additionalProperties: false`: `z.record(...)`, schemas where the model is allowed to add extra fields, schemas with computed/optional sections.
+- **You target a model that rejects `response_format` entirely.** Some Azure deployments, very old OpenAI models, certain compat providers. The adapter's runtime capability learning catches this on the first 400 (`jsonModeUnsupported: true` is remembered; subsequent calls fall back to prompted JSON without the wasted round-trip), but explicit `false` saves even the first failure.
+
+**Runtime fallback.** If a model unexpectedly rejects the strict response format, the adapter learns the constraint on the first 400 and retries the same call with `response_format` stripped. The same learning applies to legacy `json_object` mode rejections; either signature flips `jsonModeUnsupported: true` for the model.
+
+**Auto-detect helper exported.** If you build adapter instances programmatically and want to inherit the same default logic:
+
+```ts
+import { autoDetectStrictResponseFormat } from "@llm-ports/adapter-openai";
+
+const wouldDefaultTo = autoDetectStrictResponseFormat("https://api.groq.com/openai/v1");
+// → true
+```
 
 ### `dangerouslyAllowBrowser` (alpha.9)
 

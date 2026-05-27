@@ -1,10 +1,15 @@
 /**
- * useStrictResponseFormat option (alpha.9).
+ * useStrictResponseFormat option (alpha.9 base + alpha.14 auto-detect expansion).
  *
- * generateStructured can emit OpenAI / Cerebras strict-mode
+ * generateStructured can emit OpenAI / Cerebras / Groq strict-mode
  * `response_format: { type: "json_schema", strict: true }` instead of
- * classic `response_format: { type: "json_object" }`. Auto-enabled when
- * baseURL contains "api.cerebras.ai"; can be set explicitly.
+ * classic `response_format: { type: "json_object" }`. Auto-enabled when:
+ *   - baseURL is unset (OpenAI native) — alpha.14+
+ *   - baseURL contains "api.cerebras.ai" — alpha.9
+ *   - baseURL contains "api.groq.com" — alpha.14+
+ *
+ * Stays opt-in for unverified compat providers (SambaNova, Together,
+ * Fireworks, Clarifai). Set explicitly via `useStrictResponseFormat`.
  *
  * Strict mode constrains decoding to the schema before tokens are
  * produced — so invalid JSON or missing fields are impossible (modulo
@@ -18,7 +23,7 @@ import {
   mockChatCompletionsCreate,
   resetMocks,
 } from "../helpers/mock-sdk.js";
-import { createOpenAIAdapter } from "../../src/index.js";
+import { autoDetectStrictResponseFormat, createOpenAIAdapter } from "../../src/index.js";
 
 beforeEach(() => {
   resetMocks();
@@ -92,7 +97,7 @@ describe("useStrictResponseFormat", () => {
     expect(callArgs.response_format?.type).toBe("json_schema");
   });
 
-  it("falls back to classic json_object when the option is omitted (non-Cerebras)", async () => {
+  it("auto-enables when baseURL is unset (OpenAI native — alpha.14+)", async () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({
         text: '{"x":1}',
@@ -103,9 +108,104 @@ describe("useStrictResponseFormat", () => {
 
     const adapter = createOpenAIAdapter({
       apiKey: "test",
-      pricingOverrides: { "test-model": { inputPer1M: 1, outputPer1M: 1 } },
+      // No baseURL: OpenAI native. Strict json_schema has been GA on
+      // gpt-4o / gpt-5 / o-series since August 2024 — auto-enabled.
+      pricingOverrides: { "gpt-5-nano": { inputPer1M: 0.05, outputPer1M: 0.2 } },
     });
-    const port = adapter.createLLMPort("test-model", "test");
+    const port = adapter.createLLMPort("gpt-5-nano", "openai");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    expect(callArgs.response_format?.type).toBe("json_schema");
+  });
+
+  it("auto-enables when baseURL is the Groq endpoint (alpha.14+)", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      baseURL: "https://api.groq.com/openai/v1",
+      displayName: "groq",
+      pricingOverrides: {
+        "openai/gpt-oss-120b": { inputPer1M: 0.15, outputPer1M: 0.6 },
+      },
+    });
+    const port = adapter.createLLMPort("openai/gpt-oss-120b", "groq");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    expect(callArgs.response_format?.type).toBe("json_schema");
+  });
+
+  it("stays opt-in (json_object default) for unverified compat providers like SambaNova", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      baseURL: "https://api.sambanova.ai/v1",
+      displayName: "sambanova",
+      pricingOverrides: {
+        "MiniMax-M2.7": { inputPer1M: 0.6, outputPer1M: 2.4 },
+      },
+    });
+    const port = adapter.createLLMPort("MiniMax-M2.7", "sambanova");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    expect(callArgs.response_format?.type).toBe("json_object");
+  });
+
+  it("explicit useStrictResponseFormat=false overrides the OpenAI-native default", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      // No baseURL: would auto-enable in alpha.14+. Explicit false
+      // suppresses the default — important for schemas with z.record()
+      // or other open shapes that can't accept additionalProperties: false.
+      useStrictResponseFormat: false,
+      pricingOverrides: { "gpt-5-nano": { inputPer1M: 1, outputPer1M: 1 } },
+    });
+    const port = adapter.createLLMPort("gpt-5-nano", "openai");
 
     await port.generateStructured({
       taskType: "test",
@@ -190,5 +290,33 @@ describe("useStrictResponseFormat", () => {
     expect(root.additionalProperties).toBe(false);
     expect(root.properties.user.additionalProperties).toBe(false);
     expect(root.properties.user.properties.address.additionalProperties).toBe(false);
+  });
+});
+
+describe("autoDetectStrictResponseFormat", () => {
+  it.each([
+    // [baseURL, expected]
+    [undefined, true],                                            // OpenAI native (alpha.14+)
+    ["https://api.openai.com/v1", true],                          // explicit OpenAI host — contains nothing we exclude
+    ["https://api.cerebras.ai/v1", true],                         // Cerebras (alpha.9)
+    ["https://api.groq.com/openai/v1", true],                     // Groq (alpha.14+)
+    ["https://api.sambanova.ai/v1", false],                       // SambaNova — unverified
+    ["https://api.together.xyz/v1", false],                       // Together — unverified
+    ["https://api.fireworks.ai/inference/v1", false],             // Fireworks — unverified
+    ["https://api.clarifai.com/v2/ext/openai/v1", false],         // Clarifai — unverified
+    ["http://localhost:11434/v1", false],                         // Ollama compat-mode — unverified
+    ["http://localhost:4000", false],                             // LiteLLM proxy — unverified
+  ])("baseURL=%j → strict-default=%s", (baseURL, expected) => {
+    expect(autoDetectStrictResponseFormat(baseURL)).toBe(expected);
+  });
+
+  it("matches when baseURL contains api.cerebras.ai (substring, not exact-match)", () => {
+    expect(autoDetectStrictResponseFormat("https://api.cerebras.ai/v1")).toBe(true);
+    expect(autoDetectStrictResponseFormat("https://api.cerebras.ai/v1/")).toBe(true);
+  });
+
+  it("matches when baseURL contains api.groq.com (substring, not exact-match)", () => {
+    expect(autoDetectStrictResponseFormat("https://api.groq.com/openai/v1")).toBe(true);
+    expect(autoDetectStrictResponseFormat("https://api.groq.com/v1")).toBe(true);
   });
 });

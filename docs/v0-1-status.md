@@ -22,7 +22,7 @@ These are load-bearing today, with comprehensive test coverage. Not "experimenta
 | USD cost gating (per-hour / per-day / per-month) | offline + Phase 2 live verification; precision verified at 10 decimals |
 | Session-scoped USD cost gating (`Registry.openCostSession`) | offline `cost-session.test.ts`; alpha.5 |
 | Anthropic adapter (full feature set: prompt caching, vision, tool use, `dangerouslyAllowBrowser`) | full live + contract suites |
-| OpenAI adapter (chat + embeddings + 12 compat providers via `baseURL`, `useStrictResponseFormat`, `dangerouslyAllowBrowser`, `reasoning_effort` passthrough) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
+| OpenAI adapter (chat + embeddings + 12 compat providers via `baseURL`, `useStrictResponseFormat` auto-detects on OpenAI native + Cerebras + Groq, `dangerouslyAllowBrowser`, `reasoning_effort` passthrough) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
 | Google Gemini adapter (chat + multimodal + streaming + multi-turn agent + native `responseSchema`) | alpha.9; offline content + contract + quirks |
 | Ollama adapter (chat + embeddings + model management + `listModels`) | offline + Phase 2 live |
 | Vercel AI SDK adapter (migration-friendly) | offline + contract; v0.1: single-turn agent + text-only multimodal |
@@ -67,6 +67,7 @@ Fourteen medium-impact issues filed between alpha.0 and alpha.9 have been resolv
 | `generateStructured` overwrites `usage` across retry-with-feedback attempts instead of accumulating | BEPA TD-LLMPORTS-VALIDATION-ATTEMPTS | alpha.11 (mergeTokenUsage across all 5 adapters) |
 | `reasoning_effort` parameter not exposed; Groq `gpt-oss-120b` can't reach `"high"` effort | BEPA TD-LLMPORTS-REASONING-EFFORT | alpha.12 (per-call option on all 5 `*Options`) |
 | Capability factories drop `reasoningEffort` (and `signal` / `forceProviderAlias`) — never propagated to underlying port call | BEPA TD-LLMPORTS-CAPABILITIES-REASONING-EFFORT | alpha.13 (all 7 factories) |
+| `useStrictResponseFormat` only auto-detected for Cerebras — OpenAI native + Groq users silently paid the un-strict tax (broken-by-default for nested schemas) | BEPA TD-APPLICATIONS-SCORING-SCHEMA-STRICT-MULTIPROVIDER | alpha.14 (auto-detect expanded to OpenAI native + `api.openai.com` + `api.groq.com`) |
 
 ### Medium-impact (still open in v0.1)
 
