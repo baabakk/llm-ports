@@ -1,5 +1,12 @@
 # @llm-ports/adapter-ollama
 
+## 0.1.0-alpha.16
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.16
+
 ## 0.1.0-alpha.13
 
 ### Patch Changes

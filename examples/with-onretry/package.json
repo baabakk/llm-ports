@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-with-onretry",
-  "version": "0.1.0-alpha.15",
+  "version": "0.1.0-alpha.16",
   "private": true,
   "description": "Wire the onRetry observability hook from @llm-ports/adapter-openai and @llm-ports/adapter-vercel to a console logger and a Prometheus-shaped counter sink. Demonstrates the four retry reasons: transient-auth, capability-fallback, reasoning-starvation, validation-feedback.",
   "type": "module",
