@@ -347,6 +347,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
         stream: false,
       });
       const r = response as {
@@ -411,6 +412,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             : {}),
           ...(options.signal ? { signal: options.signal } : {}),
           ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
           ...(strictResponseSchema ? { strictResponseSchema } : { jsonMode: true }),
           stream: false,
         });
@@ -496,6 +498,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
         stream: true,
       });
       for await (const chunk of stream) {
@@ -522,6 +525,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
         jsonMode: true,
         stream: true,
       });
@@ -567,6 +571,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             ...(tools.length > 0 ? { tools } : {}),
             ...(options.signal ? { signal: options.signal } : {}),
             ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
             stream: false,
           });
           const r = response as {
@@ -797,6 +802,16 @@ interface LogicalChatRequest {
    * Groq's `openai/gpt-oss-120b`) honor it.
    */
   reasoningEffort?: "low" | "medium" | "high";
+  /**
+   * Per-call escape hatch for provider-specific request fields. Shallow-
+   * merged into the SDK request body AFTER all typed port fields are set —
+   * so a caller passing `providerExtras: { reasoning_effort: "high" }` would
+   * override the alpha.12 typed field. Use this for knobs the port doesn't
+   * model: vLLM `chat_template_kwargs`, SGLang `regex`, vLLM `guided_json`
+   * (when not using strict mode), Together `repetition_penalty`, etc.
+   * (alpha.16+)
+   */
+  providerExtras?: Record<string, unknown>;
 }
 
 /** Build the SDK's request object from a logical request and the model's effective capabilities. */
@@ -882,6 +897,15 @@ function materializeRequest(
   }
   if (req.tools && req.tools.length > 0) {
     out["tools"] = req.tools;
+  }
+  // providerExtras: shallow merge LAST so callers can override our typed
+  // defaults if they need to (e.g. `providerExtras: { reasoning_effort:
+  // "high" }` overrides the alpha.12 typed field). Generic escape hatch for
+  // vLLM chat_template_kwargs, SGLang regex, vLLM guided_json, Together
+  // repetition_penalty, etc. Field semantics are provider-specific; we
+  // don't validate. (alpha.16+)
+  if (req.providerExtras) {
+    Object.assign(out, req.providerExtras);
   }
   return out;
 }

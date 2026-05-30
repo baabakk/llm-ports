@@ -21,6 +21,8 @@ export interface ScoreInput {
   signal?: AbortSignal;
   /** Override task routing for this call only. (alpha.13+) */
   forceProviderAlias?: string;
+  /** Per-call escape hatch for provider-specific request fields (vLLM chat_template_kwargs, SGLang regex, etc.). Threaded to the underlying port call. (alpha.16+) */
+  providerExtras?: Record<string, unknown>;
 }
 
 export interface CreateScorerConfig<TSchema extends z.ZodTypeAny> {
@@ -83,6 +85,7 @@ export function createScorer<TSchema extends z.ZodTypeAny>(
         ...(config.reasoningEffort !== undefined ? { reasoningEffort: config.reasoningEffort } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
+        ...(input.providerExtras ? { providerExtras: input.providerExtras } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "score",

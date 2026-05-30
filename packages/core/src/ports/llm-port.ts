@@ -119,6 +119,17 @@ export interface CostUsage {
  * `openai/gpt-oss-120b`). Silently ignored by adapters whose providers don't
  * have an equivalent (anthropic, ollama, google, vercel) — the call still
  * succeeds, just with the provider's default effort level.
+ *
+ * `providerExtras?: Record<string, unknown>` (alpha.16+) is a per-call escape
+ * hatch for provider-specific request fields not (yet) modeled on the port.
+ * Adapters that implement it shallow-merge the field into the SDK request
+ * body AFTER the typed port fields are set, so callers can override
+ * port-modeled defaults if they need to. Field semantics are provider-
+ * specific and not validated by the port. Common patterns documented in
+ * each adapter's docs (e.g. `adapter-openai` covers vLLM `chat_template_
+ * kwargs`, SGLang `regex`, vLLM `guided_json` for non-strict structured
+ * decoding). Generic on purpose — keeps the public type signature vendor-
+ * neutral while letting users reach any per-server / per-model knob.
  */
 
 export interface GenerateTextOptions {
@@ -136,6 +147,8 @@ export interface GenerateTextOptions {
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
   reasoningEffort?: "low" | "medium" | "high";
+  /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
+  providerExtras?: Record<string, unknown>;
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -154,6 +167,8 @@ export interface GenerateStructuredOptions<T> {
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
   reasoningEffort?: "low" | "medium" | "high";
+  /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
+  providerExtras?: Record<string, unknown>;
 }
 
 export interface StreamTextOptions {
@@ -169,6 +184,8 @@ export interface StreamTextOptions {
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
   reasoningEffort?: "low" | "medium" | "high";
+  /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
+  providerExtras?: Record<string, unknown>;
 }
 
 export interface StreamStructuredOptions<T> {
@@ -186,6 +203,8 @@ export interface StreamStructuredOptions<T> {
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
   reasoningEffort?: "low" | "medium" | "high";
+  /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
+  providerExtras?: Record<string, unknown>;
 }
 
 export interface RunAgentOptions {
@@ -203,6 +222,8 @@ export interface RunAgentOptions {
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
   reasoningEffort?: "low" | "medium" | "high";
+  /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
+  providerExtras?: Record<string, unknown>;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────

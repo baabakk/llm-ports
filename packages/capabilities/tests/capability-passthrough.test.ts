@@ -210,4 +210,108 @@ describe("capability factories — alpha.13 passthrough", () => {
       expect("forceProviderAlias" in call).toBe(false);
     });
   });
+
+  describe("providerExtras (per-call, alpha.16)", () => {
+    const VLLM_THINKING = { chat_template_kwargs: { enable_thinking: true } };
+
+    it("createClassifier forwards providerExtras from the input arg", async () => {
+      const fake = createFakePort();
+      fake.enqueueStructured({ ok: true });
+      const classifier = createClassifier({
+        port: fake.port,
+        schema: TrivialSchema,
+        schemaName: "x",
+      });
+      await classifier({ content: "?", providerExtras: VLLM_THINKING });
+      expect(fake.calls[0]?.options).toMatchObject({ providerExtras: VLLM_THINKING });
+    });
+
+    it("createScorer forwards providerExtras", async () => {
+      const fake = createFakePort();
+      fake.enqueueStructured({ ok: true });
+      const score = createScorer({
+        port: fake.port,
+        schema: TrivialSchema,
+        schemaName: "x",
+        rubric: "r",
+      });
+      await score({ content: "?", providerExtras: { regex: "[0-9]+" } });
+      expect(fake.calls[0]?.options).toMatchObject({
+        providerExtras: { regex: "[0-9]+" },
+      });
+    });
+
+    it("createExtractor forwards providerExtras", async () => {
+      const fake = createFakePort();
+      fake.enqueueStructured({ ok: true });
+      const extract = createExtractor({
+        port: fake.port,
+        schema: TrivialSchema,
+        schemaName: "x",
+      });
+      await extract({ content: "?", providerExtras: VLLM_THINKING });
+      expect(fake.calls[0]?.options).toMatchObject({ providerExtras: VLLM_THINKING });
+    });
+
+    it("createPlanner forwards providerExtras", async () => {
+      const fake = createFakePort();
+      fake.enqueueStructured({ ok: true });
+      const plan = createPlanner({
+        port: fake.port,
+        schema: TrivialSchema,
+        schemaName: "x",
+      });
+      await plan({ goal: "?", providerExtras: VLLM_THINKING });
+      expect(fake.calls[0]?.options).toMatchObject({ providerExtras: VLLM_THINKING });
+    });
+
+    it("createAnalyzer forwards providerExtras", async () => {
+      const fake = createFakePort();
+      fake.enqueueStructured({ ok: true });
+      const analyze = createAnalyzer({
+        port: fake.port,
+        schema: TrivialSchema,
+        schemaName: "x",
+        framework: "SWOT",
+      });
+      await analyze({ content: "?", providerExtras: VLLM_THINKING });
+      expect(fake.calls[0]?.options).toMatchObject({ providerExtras: VLLM_THINKING });
+    });
+
+    it("createDrafter forwards providerExtras (generateText path)", async () => {
+      const fake = createFakePort();
+      fake.enqueueText("ok");
+      const draft = createDrafter({
+        port: fake.port,
+        persona: "neutral",
+      });
+      await draft({ instructions: "?", providerExtras: { repetition_penalty: 1.1 } });
+      expect(fake.calls[0]?.options).toMatchObject({
+        providerExtras: { repetition_penalty: 1.1 },
+      });
+    });
+
+    it("createSummarizer forwards providerExtras (generateText path)", async () => {
+      const fake = createFakePort();
+      fake.enqueueText("ok");
+      const summarize = createSummarizer({
+        port: fake.port,
+      });
+      await summarize({ content: "?", providerExtras: VLLM_THINKING });
+      expect(fake.calls[0]?.options).toMatchObject({ providerExtras: VLLM_THINKING });
+    });
+
+    it("providerExtras is omitted when not supplied on the call", async () => {
+      const fake = createFakePort();
+      fake.enqueueStructured({ ok: true });
+      const classifier = createClassifier({
+        port: fake.port,
+        schema: TrivialSchema,
+        schemaName: "x",
+      });
+      await classifier({ content: "?" });
+      const call = fake.calls[0]?.options as Record<string, unknown>;
+      expect("providerExtras" in call).toBe(false);
+    });
+  });
 });

@@ -69,6 +69,7 @@ Fourteen medium-impact issues filed between alpha.0 and alpha.9 have been resolv
 | Capability factories drop `reasoningEffort` (and `signal` / `forceProviderAlias`) — never propagated to underlying port call | BEPA TD-LLMPORTS-CAPABILITIES-REASONING-EFFORT | alpha.13 (all 7 factories) |
 | `useStrictResponseFormat` only auto-detected for Cerebras — OpenAI native + Groq users silently paid the un-strict tax (broken-by-default for nested schemas) | BEPA TD-APPLICATIONS-SCORING-SCHEMA-STRICT-MULTIPROVIDER | alpha.14 (auto-detect expanded to OpenAI native + `api.openai.com` + `api.groq.com`) |
 | SambaNova MiniMax-M2.7 fails 0/10 on nested schemas with default settings; strict-mode behavior was undocumented | BEPA TD-APPLICATIONS-SCORING-SCHEMA-STRICT-MULTIPROVIDER sub-task 3 | alpha.15 (empirical probe confirmed strict mode works → `api.sambanova.ai` added to auto-detect) |
+| Provider-specific request knobs (vLLM `chat_template_kwargs` for Qwen3 `enable_thinking` and DeepSeek `thinking`, SGLang `regex` / `ebnf`, vLLM `guided_json` / `guided_grammar`, Together `repetition_penalty`, etc.) had no typed escape hatch on the port; users dropped to direct port calls with `as unknown as` casts | (alpha.16 design ticket; addresses frontier-OSS-via-vLLM gap) | alpha.16 (`providerExtras?: Record<string, unknown>` on every `*Options` interface, shallow-merged AFTER typed fields; threaded through all 7 capability factories; vLLM + SGLang worked examples in adapter docs) |
 
 ### Medium-impact (still open in v0.1)
 

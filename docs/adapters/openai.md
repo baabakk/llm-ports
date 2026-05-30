@@ -104,6 +104,97 @@ const sambanova = createOpenAIAdapter({
 
 > **Cost shape**: At blended $0.72/1M (Clarifai Qwen3.6) and $0.78/1M (SambaNova MiniMax-M2.7), these are comparable to Cerebras GptOSS 120B ($0.65 in / $0.85 out per 1M) and substantially cheaper than Claude Sonnet 4.5 ($3 in / $15 out). The 4:1 output:input premium on MiniMax-M2.7 means reasoning-heavy workloads (long internal chain-of-thought) will skew higher than the blended number suggests — budget on output tokens, not the blend.
 
+### Worked example: self-hosted vLLM (Qwen3-Reasoning, DeepSeek-V3.2, Llama 4, gpt-oss)
+
+vLLM serves OSS models behind an OpenAI-compatible HTTP surface. Launch with the parsers for the model family you're running:
+
+```bash
+# Qwen3-Reasoning with thinking + tool use
+vllm serve Qwen/Qwen3-235B-A22B-Thinking \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes \
+  --reasoning-parser deepseek_r1 \
+  --guided-decoding-backend xgrammar \
+  --port 8000
+```
+
+```ts
+const vllm = createOpenAIAdapter({
+  apiKey: "EMPTY",                              // vLLM ignores apiKey by default
+  baseURL: "http://localhost:8000/v1",
+  displayName: "vllm",
+  useStrictResponseFormat: true,                // vLLM 0.8+ supports xgrammar-backed strict json_schema
+  pricingOverrides: {
+    "Qwen/Qwen3-235B-A22B-Thinking": { inputPer1M: 0, outputPer1M: 0 },  // self-hosted = electricity
+  },
+});
+const port = vllm.createLLMPort("Qwen/Qwen3-235B-A22B-Thinking", "vllm");
+
+// Engage Qwen3's reasoning via vLLM's chat_template_kwargs
+const result = await port.generateText({
+  taskType: "complex-reasoning",
+  prompt: "Solve this step by step: ...",
+  providerExtras: {
+    chat_template_kwargs: { enable_thinking: true },
+  },
+});
+```
+
+The `providerExtras` field (alpha.16+) shallow-merges arbitrary fields into the SDK request body after typed port fields. Common vLLM patterns:
+
+| Pattern | `providerExtras` payload |
+|---|---|
+| Qwen3-Reasoning thinking | `{ chat_template_kwargs: { enable_thinking: true } }` |
+| DeepSeek-R1 / V3.2 thinking | `{ chat_template_kwargs: { thinking: true } }` |
+| Guided JSON (without strict mode) | `{ guided_json: { ...jsonSchema } }` |
+| Guided grammar | `{ guided_grammar: "..." }` |
+| Guided regex | `{ guided_regex: "[0-9]+" }` |
+
+vLLM autoselects `chat_template_kwargs` per model based on the chat template baked into the GGUF / HF weights; consult the model card for the exact variable name. The port doesn't validate; misnamed keys are passed through verbatim and silently ignored by vLLM.
+
+### Worked example: self-hosted SGLang (RadixAttention prefix-cache sharing)
+
+SGLang also exposes an OpenAI-compatible surface. Launch with constrained-output backends if you want regex / grammar gating:
+
+```bash
+sglang_router serve --model-path Qwen/Qwen3-30B-A3B \
+  --tool-call-parser qwen \
+  --reasoning-parser qwen3 \
+  --grammar-backend xgrammar \
+  --port 30000
+```
+
+```ts
+const sglang = createOpenAIAdapter({
+  apiKey: "EMPTY",
+  baseURL: "http://localhost:30000/v1",
+  displayName: "sglang",
+  pricingOverrides: {
+    "Qwen/Qwen3-30B-A3B": { inputPer1M: 0, outputPer1M: 0 },
+  },
+});
+const port = sglang.createLLMPort("Qwen/Qwen3-30B-A3B", "sglang");
+
+// SGLang-specific: regex-constrained output for high-precision extraction
+const result = await port.generateText({
+  taskType: "extract-id",
+  prompt: "Extract the order number from: 'Order #00472918 shipped today'",
+  providerExtras: {
+    regex: "[0-9]{8}",
+  },
+});
+```
+
+SGLang's value proposition is RadixAttention (shared KV-cache prefix tree across requests) and compiled FSM grammar constraints; both are server-side behaviors, transparent to the adapter. Common SGLang patterns:
+
+| Pattern | `providerExtras` payload |
+|---|---|
+| Regex-constrained output | `{ regex: "..." }` |
+| EBNF grammar constraint | `{ ebnf: "..." }` |
+| Choice-constrained output | `{ choices: ["A", "B", "C"] }` |
+
+> **Strict mode caveat (vLLM and SGLang)**: `useStrictResponseFormat: true` requires the server's grammar backend to support OpenAI's strict `json_schema` shape — vLLM 0.8+ with `--guided-decoding-backend xgrammar` and SGLang with `--grammar-backend xgrammar` both work. If your server returns 400 on strict mode, drop back to `useStrictResponseFormat: false` and use `providerExtras: { guided_json: ... }` (vLLM) or `providerExtras: { ebnf: ... }` (SGLang) instead.
+
 ## Adapter options
 
 ```ts
@@ -142,6 +233,29 @@ const result = await port.generateText({
 Groq's `openai/gpt-oss-120b` is the immediate case where this matters most — the model is exposed as a single model ID with no separate "low/medium/high" variants, so this knob is the only way to escalate quality. OpenAI's own reasoning models default to `"medium"`; setting `"high"` notably increases reasoning token spend (and quality on hard problems).
 
 Forwarded verbatim with no per-model gating in v0.1. If you set `reasoningEffort` on a model that rejects the field, the SDK throws. Runtime capability learning for this case (parallel to `jsonModeUnsupported`) is v0.2 scope.
+
+### `providerExtras` per-call (alpha.16)
+
+Per-call escape hatch for provider-specific request fields the port doesn't model. Shallow-merged into the SDK request body **after** the typed port fields, so it can override the typed defaults if needed:
+
+```ts
+const result = await port.generateText({
+  taskType: "reason",
+  prompt: "...",
+  reasoningEffort: "low",                          // typed field
+  providerExtras: { reasoning_effort: "high" },    // overrides reasoningEffort
+});
+```
+
+Use this for knobs the port intentionally doesn't expose as typed fields:
+
+- vLLM `chat_template_kwargs` (Qwen3 `enable_thinking`, DeepSeek `thinking`)
+- vLLM / SGLang guided-decoding shapes (`guided_json`, `guided_grammar`, `guided_regex`, `regex`, `ebnf`)
+- Together AI `repetition_penalty`, `prompt_truncate_len`
+- Fireworks AI `top_a`, `mirostat_tau`
+- Any future provider-specific knob
+
+The port doesn't validate `providerExtras` values; field semantics are entirely provider-specific. Misnamed keys are silently passed through to the SDK and (usually) silently ignored by the provider. Available on all 5 `*Options` interfaces (`GenerateTextOptions`, `GenerateStructuredOptions`, `StreamTextOptions`, `StreamStructuredOptions`, `RunAgentOptions`) and threaded through every capability factory (`createClassifier`, `createScorer`, `createExtractor`, `createPlanner`, `createAnalyzer`, `createDrafter`, `createSummarizer`).
 
 ### `useStrictResponseFormat` (alpha.9 base + alpha.14 auto-detect expansion)
 
