@@ -37,6 +37,7 @@
     "alpha-14-strict-mode-default",
     "alpha-15-sambanova-strict",
     "alpha-16-provider-extras",
+    "alpha-17-rerankport-backoff-onretry-parity",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",

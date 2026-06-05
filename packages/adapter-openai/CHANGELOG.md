@@ -1,5 +1,12 @@
 # @llm-ports/adapter-openai
 
+## 0.1.0-alpha.17
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.17
+
 ## 0.1.0-alpha.16
 
 ### Minor Changes
