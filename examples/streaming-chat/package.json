@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-streaming-chat",
-  "version": "0.1.0-alpha.17",
+  "version": "0.1.0-alpha.18",
   "private": true,
   "description": "Streaming chat server: Express routes for one-shot and SSE chat, multi-turn conversation, optional tool-augmented agent. Demonstrates streamText, streamStructured, runAgent, and how to expose them over HTTP.",
   "type": "module",

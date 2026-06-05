@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/core",
-  "version": "0.1.0-alpha.17",
+  "version": "0.1.0-alpha.18",
   "description": "Provider-agnostic LLM port interface, registry, cost gating, content blocks, validation strategies. The foundation of llm-ports.",
   "license": "MIT",
   "author": "Babak Abbaschian",

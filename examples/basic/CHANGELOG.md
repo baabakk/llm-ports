@@ -1,5 +1,13 @@
 # @llm-ports/example-basic
 
+## 0.1.0-alpha.18
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.18
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.18
+
 ## 0.1.0-alpha.17
 
 ### Patch Changes

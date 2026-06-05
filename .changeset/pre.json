@@ -38,6 +38,7 @@
     "alpha-15-sambanova-strict",
     "alpha-16-provider-extras",
     "alpha-17-rerankport-backoff-onretry-parity",
+    "alpha-18-typed-error-taxonomy-and-alpha17-closeout",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",
