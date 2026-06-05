@@ -23,7 +23,7 @@ import {
 } from "../helpers/mock-sdk.js";
 import { _resetLearnedConstraints } from "../../src/capabilities.js";
 import { createOpenAIAdapter } from "../../src/index.js";
-import { ProviderUnavailableError } from "@llm-ports/core";
+import { ServiceUnavailableError } from "@llm-ports/core";
 
 beforeEach(() => {
   resetMocks();
@@ -31,17 +31,19 @@ beforeEach(() => {
 });
 
 describe("Phase 8: failure-mode recovery", () => {
-  it("ProviderUnavailableError on call 1 does not poison state — call 2 succeeds", async () => {
+  it("ServiceUnavailableError on call 1 does not poison state — call 2 succeeds", async () => {
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
-    // First call: 503
+    // alpha.18: 503 maps to ServiceUnavailableError (the typed base for
+    // transient provider failures); ProviderUnavailableError is now
+    // reserved for the unknown-status fallback.
     mockChatCompletionsCreate.mockRejectedValueOnce(
       buildOpenAIError({ status: 503, message: "service unavailable" }),
     );
     await expect(
       port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 50 }),
-    ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    ).rejects.toBeInstanceOf(ServiceUnavailableError);
 
     // Second call: success — adapter context is reusable
     mockChatCompletionsCreate.mockResolvedValueOnce(

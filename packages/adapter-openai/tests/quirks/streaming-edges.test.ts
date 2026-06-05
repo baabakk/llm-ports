@@ -20,7 +20,7 @@ import {
 } from "../helpers/mock-sdk.js";
 import { _resetLearnedConstraints } from "../../src/capabilities.js";
 import { createOpenAIAdapter } from "../../src/index.js";
-import { ProviderUnavailableError } from "@llm-ports/core";
+import { AuthenticationError } from "@llm-ports/core";
 
 beforeEach(() => {
   resetMocks();
@@ -178,7 +178,10 @@ describe("Group E: streaming edges", () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(ProviderUnavailableError);
+    // alpha.18: 401 maps to AuthenticationError (not the generic
+    // ProviderUnavailableError) so consumers can distinguish credential
+    // problems from transient provider failures.
+    expect(caught).toBeInstanceOf(AuthenticationError);
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(1); // no retry
   });
 

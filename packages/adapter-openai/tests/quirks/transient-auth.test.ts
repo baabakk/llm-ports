@@ -21,7 +21,7 @@ import {
 } from "../helpers/mock-sdk.js";
 import { _resetLearnedConstraints } from "../../src/capabilities.js";
 import { createOpenAIAdapter, type OpenAIAdapterOptions } from "../../src/index.js";
-import { ProviderUnavailableError } from "@llm-ports/core";
+import { AuthenticationError } from "@llm-ports/core";
 
 beforeEach(() => {
   resetMocks();
@@ -51,7 +51,7 @@ describe("Group C: transient-401 retry boundaries", () => {
 
     await expect(
       port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 10 }),
-    ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    ).rejects.toBeInstanceOf(AuthenticationError);
 
     // Exactly one SDK call — no retry, because hasSucceeded was never true
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(1);
@@ -84,7 +84,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(3); // 1 + 2
   });
 
-  it("401 AFTER first success → retries exhausted → propagates as ProviderUnavailableError", async () => {
+  it("401 AFTER first success → retries exhausted → propagates as AuthenticationError", async () => {
     const adapter = createOpenAIAdapter({ apiKey: "test", transientAuthRetries: 2, ...NO_BACKOFF });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
@@ -101,7 +101,7 @@ describe("Group C: transient-401 retry boundaries", () => {
 
     await expect(
       port.generateText({ taskType: "t", prompt: "y", maxOutputTokens: 10 }),
-    ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    ).rejects.toBeInstanceOf(AuthenticationError);
 
     // 1 first success + 3 attempts (initial + 2 retries) = 4 SDK calls
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(4);
@@ -120,7 +120,7 @@ describe("Group C: transient-401 retry boundaries", () => {
 
     await expect(
       port.generateText({ taskType: "t", prompt: "y", maxOutputTokens: 10 }),
-    ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    ).rejects.toBeInstanceOf(AuthenticationError);
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(2); // 1 success + 1 fail (no retry)
   });
 
@@ -181,7 +181,7 @@ describe("Group C: transient-401 retry boundaries", () => {
 
     await expect(
       port.generateText({ taskType: "t", prompt: "after", maxOutputTokens: 10 }),
-    ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    ).rejects.toBeInstanceOf(AuthenticationError);
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(4);
   });
 });

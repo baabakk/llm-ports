@@ -58,6 +58,7 @@ Gemini exposes an OpenAI-compatible surface at `https://generativelanguage.googl
 | Vision input — URL images | ✓ (fileData) |
 | Audio input — base64 | ✓ (inlineData) |
 | Image size + URL validation at boundary | ✓ (alpha.5) |
+| `onRetry` observability hook (validation-feedback retries) | ✓ (alpha.17) |
 | Embeddings (`gemini-embedding-001`) | ✗ — v0.2 |
 | Explicit context caching | ✗ — v0.2 |
 | Code execution tool | ✗ — v0.2 |

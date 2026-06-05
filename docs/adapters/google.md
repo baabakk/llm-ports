@@ -43,8 +43,40 @@ interface GoogleAdapterOptions {
   pricingOverrides?: Record<string, ModelPricing>;
   validationStrategy?: ValidationStrategy;
   imageSizeLimitBytes?: number; // default 20 MB
+  onRetry?: OnRetry;            // alpha.17+
 }
 ```
+
+### `onRetry` observability hook (alpha.17)
+
+The adapter fires `onRetry` whenever it retries a `generateStructured` call
+after a Zod validation failure. Sync or async; called fire-and-forget;
+throwing from the hook does NOT cancel the retry. Pipe events into any
+tracing or metrics stack.
+
+```ts
+import { createGoogleAdapter } from "@llm-ports/adapter-google";
+
+const adapter = createGoogleAdapter({
+  apiKey: process.env.GOOGLE_API_KEY!,
+  onRetry: (event) => {
+    // Langfuse / Phoenix / OpenLLMetry / Datadog all accept this shape
+    span.addEvent("llm.retry", {
+      reason: event.reason,          // "validation-feedback" for Gemini
+      attempt: event.attempt,        // 0-indexed retry number
+      modelId: event.modelId,
+      providerAlias: event.providerAlias,
+      delayMs: event.delayMs,
+    });
+  },
+});
+```
+
+Gemini only fires the `validation-feedback` reason (no transient-auth or
+capability-fallback retry paths — Gemini doesn't 401 in the burst-protection
+shape and its parameter compatibility is uniform across models). The event
+shape matches the OpenAI and Anthropic adapters so consumers can wire one
+hook across all adapters.
 
 ## Why this over the OpenAI-compat baseURL
 

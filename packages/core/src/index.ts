@@ -113,14 +113,22 @@ export {
 
 // ─── Errors ──────────────────────────────────────────────────────────
 export {
+  AuthenticationError,
+  BadRequestError,
   BudgetExceededError,
   ConfigError,
   ContentBlockUnsupportedError,
+  ContentPolicyViolationError,
+  ContextWindowExceededError,
   EmptyResponseError,
+  errorMatchers,
   ImageTooLargeError,
   InvalidImageUrlError,
+  LLMPortError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
+  RateLimitError,
+  ServiceUnavailableError,
   SessionBudgetExceededError,
   ValidationError,
 } from "./errors.js";

@@ -17,7 +17,7 @@ import {
 } from "../helpers/mock-sdk.js";
 import { _resetLearnedConstraints } from "../../src/capabilities.js";
 import { createOpenAIAdapter } from "../../src/index.js";
-import { ProviderUnavailableError } from "@llm-ports/core";
+import { ProviderUnavailableError, ServiceUnavailableError } from "@llm-ports/core";
 
 beforeEach(() => {
   resetMocks();
@@ -25,14 +25,16 @@ beforeEach(() => {
 });
 
 describe("Group D: error-wrapping idempotence", () => {
-  it("ProviderUnavailableError thrown from executeChatRequest is NOT double-wrapped by runAgent's outer catch", async () => {
+  it("ServiceUnavailableError thrown from executeChatRequest is NOT double-wrapped by runAgent's outer catch", async () => {
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
     // First call inside runAgent throws a generic 500 error.
-    // executeChatRequest wraps it as ProviderUnavailableError.
-    // runAgent's outer try/catch sees the ProviderUnavailableError —
-    // and must NOT wrap it again as ProviderUnavailableError(ProviderUnavailableError).
+    // executeChatRequest wraps it as ServiceUnavailableError (alpha.18:
+    // 5xx maps to ServiceUnavailableError; ProviderUnavailableError is
+    // reserved as the unknown-status fallback).
+    // runAgent's outer try/catch sees the typed error and must NOT wrap
+    // it again.
     mockChatCompletionsCreate.mockRejectedValueOnce(
       buildOpenAIError({ status: 500, message: "internal server error" }),
     );
@@ -49,10 +51,10 @@ describe("Group D: error-wrapping idempotence", () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(ProviderUnavailableError);
-    // The cause is the original SDK error, not a nested ProviderUnavailableError
-    const cause = (caught as ProviderUnavailableError).cause;
-    expect(cause).not.toBeInstanceOf(ProviderUnavailableError);
+    expect(caught).toBeInstanceOf(ServiceUnavailableError);
+    // The cause is the original SDK error, not a nested typed error
+    const cause = (caught as ServiceUnavailableError).cause;
+    expect(cause).not.toBeInstanceOf(ServiceUnavailableError);
   });
 
   it("non-Error thrown values (string, plain object, null, undefined, BigInt) wrap cleanly", async () => {
@@ -117,7 +119,7 @@ describe("Group D: error-wrapping idempotence", () => {
     // Two-layer test: induce an error inside generateText, which goes through
     // wrapError once. Then call again in a path that re-catches and would wrap
     // a second time. Verify the final caught error has exactly one layer of
-    // ProviderUnavailableError, not nested.
+    // typed error, not nested.
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
@@ -131,7 +133,10 @@ describe("Group D: error-wrapping idempotence", () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(ProviderUnavailableError);
+    // alpha.18: 503 maps to ServiceUnavailableError (the base), not
+    // ProviderUnavailableError (which is now reserved for the
+    // unknown-status fallback).
+    expect(caught).toBeInstanceOf(ServiceUnavailableError);
 
     // If we re-throw and re-catch in a hypothetical outer layer that ALSO
     // calls wrapError, the result must be the same instance — that's the
@@ -146,9 +151,10 @@ describe("Group D: error-wrapping idempotence", () => {
     } catch (err) {
       caught2 = err;
     }
-    expect(caught2).toBeInstanceOf(ProviderUnavailableError);
-    // The second-catch error's cause must be the ORIGINAL ProviderUnavailableError,
-    // because wrapError passes ProviderUnavailableError through unchanged.
+    // alpha.18: idempotence test — the 503 produced a ServiceUnavailableError
+    // on the first round; wrapping it again yields the same instance because
+    // wrapProviderError passes LLMPortError subclasses through unchanged.
+    expect(caught2).toBeInstanceOf(ServiceUnavailableError);
     expect(caught2).toBe(caught);
   });
 });

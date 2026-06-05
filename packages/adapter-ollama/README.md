@@ -92,6 +92,7 @@ Application code never changes. `llm.generateText({ taskType: "draft", ... })` r
 | Model management | ✓ `listModels`, `pullModel(onProgress)`, `deleteModel`, `checkHealth` |
 | Auto-pull on first use | ✓ (opt-in via `autoPull` flag) |
 | `AbortSignal` cancellation | partial — entry-time check only (ollama-js limitation) |
+| `onRetry` observability hook (validation-feedback retries) | ✓ (alpha.17) |
 
 ## Content blocks supported
 

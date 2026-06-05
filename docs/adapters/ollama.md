@@ -53,8 +53,39 @@ interface OllamaAdapterOptions {
   keepAlive?: string;                        // default "5m"
   validationStrategy?: ValidationStrategy;
   pricingOverrides?: Record<string, ModelPricing>;
+  imageSizeLimitBytes?: number;              // default: unset (model-dependent)
+  onRetry?: OnRetry;                         // alpha.17+
 }
 ```
+
+### `onRetry` observability hook (alpha.17)
+
+The adapter fires `onRetry` whenever it retries a `generateStructured` call
+after a Zod validation failure. Sync or async; called fire-and-forget;
+throwing from the hook does NOT cancel the retry. Pipe events into any
+tracing or metrics stack.
+
+```ts
+import { createOllamaAdapter } from "@llm-ports/adapter-ollama";
+
+const adapter = createOllamaAdapter({
+  baseURL: "http://localhost:11434",
+  onRetry: (event) => {
+    span.addEvent("llm.retry", {
+      reason: event.reason,          // "validation-feedback" for Ollama
+      attempt: event.attempt,        // 0-indexed retry number
+      modelId: event.modelId,
+      providerAlias: event.providerAlias,
+      delayMs: event.delayMs,
+    });
+  },
+});
+```
+
+Ollama only fires the `validation-feedback` reason. Local daemons don't have
+the cloud retry patterns (no 429 burst protection, no transient 401 auth,
+no hidden reasoning starvation), so structured-output schema misses are the
+only retry trigger. The event shape matches all other adapters.
 
 ## Model management
 
