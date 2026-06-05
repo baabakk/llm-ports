@@ -85,7 +85,7 @@ export function getInstalledSdkVersion(): string | undefined {
     // Use require() rather than dynamic import so the check is synchronous
     // at adapter construction. Wrapped in try/catch because bundlers may
     // tree-shake or refuse to resolve package.json files.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const pkg = require("@anthropic-ai/sdk/package.json") as { version?: string };
     return pkg.version;
   } catch {

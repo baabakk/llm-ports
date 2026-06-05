@@ -63,7 +63,7 @@ let CACHED_PACKAGE_VERSION: string | undefined;
 function getPackageVersion(): string {
   if (CACHED_PACKAGE_VERSION !== undefined) return CACHED_PACKAGE_VERSION;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const pkg = require("../package.json") as { version?: string };
     CACHED_PACKAGE_VERSION = pkg.version ?? "unknown";
   } catch {
@@ -240,6 +240,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     // threading it here cancels the in-flight fetch on abort.
     const reqOpts = signal ? { signal } : undefined;
     // Single capability-fallback retry per call (the user-visible bug fix).
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const req = buildRequest({ temperatureLocked: caps.temperatureLocked });
       try {

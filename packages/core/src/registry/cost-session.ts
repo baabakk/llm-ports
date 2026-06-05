@@ -91,6 +91,7 @@ export class CostSession {
    * port — so an over-budget call never executes.
    */
   getPort(): LLMPort {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const session = this;
     const checkBudget = (): void => {
       if (session.closed) {
