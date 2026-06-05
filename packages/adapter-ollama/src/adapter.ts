@@ -14,6 +14,7 @@ import {
   attemptValidationRepair,
   computeChatCost,
   computeEmbeddingCost,
+  emitRetryEvent,
   extractJSON,
   failValidation,
   mergeTokenUsage,
@@ -23,6 +24,7 @@ import {
   validateImageBlocks,
   wrapProviderError,
   type AgentResult,
+  type OnRetry,
   type BatchEmbeddingOptions,
   type BatchEmbeddingResult,
   type ContentBlock,
@@ -71,6 +73,15 @@ export interface OllamaAdapterOptions {
    * client-side enforcement.
    */
   imageSizeLimitBytes?: number;
+  /**
+   * Observability hook fired whenever the adapter retries an in-flight
+   * structured-output request after a Zod validation failure (the only
+   * transient retry condition Ollama actually has; local daemons don't
+   * 429 or burst-protect like cloud providers). Sync or async; called
+   * fire-and-forget. Throwing from the hook does NOT cancel the retry.
+   * Added in alpha.17 (parity with adapter-openai + adapter-anthropic).
+   */
+  onRetry?: OnRetry;
 }
 
 // ─── ModelManagement interface implementation ────────────────────────
@@ -98,6 +109,7 @@ interface AdapterContext {
   pulled: Set<string>;
   /** undefined = no size check (Ollama default — model-dependent). */
   imageSizeLimitBytes?: number;
+  onRetry?: OnRetry;
 }
 
 function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
@@ -151,6 +163,7 @@ export function createOllamaAdapter(opts: OllamaAdapterOptions = {}): OllamaAdap
     ...(opts.imageSizeLimitBytes !== undefined
       ? { imageSizeLimitBytes: opts.imageSizeLimitBytes }
       : {}),
+    ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
 
   return {
@@ -343,6 +356,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
               .join("\n");
             correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
+            emitRetryEvent(ctx.onRetry, {
+              reason: "validation-feedback",
+              attempt: attempts - 1,
+              modelId: lastModelId,
+              providerAlias: alias,
+              delayMs: 0,
+              cause: parsed.error,
+            });
             continue;
           }
           failValidation(parsed.error.issues, attempts);

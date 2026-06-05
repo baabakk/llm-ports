@@ -74,6 +74,20 @@ export interface TokenUsage {
    * and for diagnosing "model used all the budget on thinking" cases.
    */
   reasoningTokens?: number;
+  /**
+   * Rerank-specific billing unit. Set by `RerankPort` adapters whose
+   * provider bills per "search unit" rather than per token (e.g. Cohere
+   * Rerank: 1 search unit = 1 query of ≤100 documents). Adapters whose
+   * rerank API bills in tokens populate `inputTokens` instead.
+   * (alpha.17+)
+   */
+  searchUnits?: number;
+  /**
+   * Count of documents reranked in this call. Telemetry only; not used
+   * for billing. Populated by `RerankPort` adapters; undefined for
+   * LLMPort and EmbeddingsPort calls. (alpha.17+)
+   */
+  rerankedDocuments?: number;
 }
 
 export interface CostUsage {

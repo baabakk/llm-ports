@@ -127,6 +127,65 @@ const classifyEmail = createClassifier({
 });
 ```
 
+## Lifting hand-rolled VOCABULARY blocks into `boundaryExamples`
+
+A common pattern in application code is a hand-rolled VOCABULARY string used in the system prompt:
+
+```typescript
+// Before: VOCABULARY hand-rolled in app code
+const VOCABULARY = `
+  "verification code" -> sms, urgency=none
+  "fraud alert from bank" -> sms, urgency=high
+  "delivery notification" -> sms, urgency=none
+  "calendar invite" -> email, urgency=medium
+`;
+
+const result = await llm.generateStructured({
+  taskType: "triage",
+  instructions: `Classify per VOCABULARY:\n${VOCABULARY}`,
+  prompt: messageBody,
+  schema: TriageSchema,
+});
+```
+
+Lift it into `boundaryExamples` so the classifier owns the calibration:
+
+```typescript
+// After: VOCABULARY lifted into the factory; per-call code is just data
+const classifyMessage = createClassifier({
+  port: llm,
+  schema: TriageSchema,
+  schemaName: "message-triage",
+  rubric: "Classify the message channel and urgency.",
+  boundaryExamples: `
+    "verification code" -> sms, urgency=none
+    "fraud alert from bank" -> sms, urgency=high
+    "delivery notification" -> sms, urgency=none
+    "calendar invite" -> email, urgency=medium
+  `,
+});
+
+// Per-call code stays small
+const result = await classifyMessage({ content: messageBody });
+```
+
+For schema-specific calibrations (different VOCABULARY blocks per consumer use case), resolve from the input:
+
+```typescript
+const classifyMessage = createClassifier({
+  port: llm,
+  schema: TriageSchema,
+  schemaName: "message-triage",
+  rubric: "Classify per the boundary examples.",
+  boundaryExamples: async (input) => {
+    // Different consumers ship different vocabularies; the input carries the tenant
+    return await loadVocabularyForTenant(input.tenantId);
+  },
+});
+```
+
+This pattern decouples the calibration data from the code that calls the classifier. Tests can stub `boundaryExamples` independently; A/B experiments can rotate vocabularies without touching call sites.
+
 ## License
 
 MIT

@@ -173,7 +173,9 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         expect(result.usage.totalTokens).toBe(70);
         // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
         expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
-        expect(result.validationAttempts).toBeGreaterThanOrEqual(1);
+        // Regression pin for TD-LLMPORTS-VALIDATION-ATTEMPTS (resolved alpha.11):
+        // first-try success MUST report exactly 1 attempt (not 0, not 2+).
+        expect(result.validationAttempts).toBe(1);
       });
 
       it("retries with feedback when first attempt fails validation", async () => {
@@ -192,7 +194,10 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         });
 
         expect(result.data).toEqual({ intent: "request", urgency: "high" });
-        expect(result.validationAttempts).toBeGreaterThanOrEqual(2);
+        // Regression pin for TD-LLMPORTS-VALIDATION-ATTEMPTS: after 1 retry the
+        // counter MUST be exactly 2 (initial attempt + 1 retry), not just >=2.
+        // Catches re-introduction of the "overwrites instead of accumulates" bug.
+        expect(result.validationAttempts).toBe(2);
       });
     });
 

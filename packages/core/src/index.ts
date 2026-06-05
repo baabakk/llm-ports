@@ -36,6 +36,13 @@ export type {
   EmbeddingsPort,
 } from "./ports/embeddings-port.js";
 
+export type {
+  RerankedDocument,
+  RerankInput,
+  RerankPort,
+  RerankResult,
+} from "./ports/rerank-port.js";
+
 // ─── Content blocks ──────────────────────────────────────────────────
 export type {
   AudioBlock,
@@ -119,7 +126,14 @@ export {
 } from "./errors.js";
 
 // ─── Retry observability ─────────────────────────────────────────────
-export type { OnRetry, RetryEvent, RetryReason } from "./retry.js";
+export type {
+  BackoffConfig,
+  JitterStrategy,
+  OnRetry,
+  RetryEvent,
+  RetryReason,
+} from "./retry.js";
+export { computeBackoffDelay } from "./retry.js";
 export { emitRetryEvent } from "./retry-emit.js";
 
 // ─── Capability learning (shared across adapters) ────────────────────

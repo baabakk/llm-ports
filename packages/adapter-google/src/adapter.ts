@@ -26,6 +26,7 @@ import { GoogleGenAI } from "@google/genai";
 import {
   attemptValidationRepair,
   computeChatCost,
+  emitRetryEvent,
   extractJSON,
   failValidation,
   mergeTokenUsage,
@@ -44,6 +45,7 @@ import {
   type LLMPort,
   type MessageContent,
   type ModelPricing,
+  type OnRetry,
   type ProviderModelInfo,
   type RunAgentOptions,
   type StreamStructuredOptions,
@@ -79,6 +81,14 @@ export interface GoogleAdapterOptions {
    * Set to 0 or a negative number to disable size validation.
    */
   imageSizeLimitBytes?: number;
+  /**
+   * Observability hook fired whenever the adapter retries an in-flight
+   * structured-output request after a Zod validation failure. Sync or
+   * async; called fire-and-forget. Throwing from the hook does NOT cancel
+   * the retry. Added in alpha.17 (parity with adapter-openai +
+   * adapter-anthropic + adapter-ollama).
+   */
+  onRetry?: OnRetry;
 }
 
 // ─── Internal context ────────────────────────────────────────────────
@@ -88,6 +98,7 @@ interface AdapterContext {
   validationStrategy: ValidationStrategy;
   pricingOverrides: Record<string, ModelPricing>;
   imageSizeLimitBytes: number;
+  onRetry?: OnRetry;
 }
 
 function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
@@ -122,6 +133,7 @@ export function createGoogleAdapter(opts: GoogleAdapterOptions): GoogleAdapter {
     },
     pricingOverrides: opts.pricingOverrides ?? {},
     imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
+    ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
   };
   return {
     name: "google",
@@ -282,6 +294,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               .map((i) => `- ${i.path.join(".") || "<root>"}: ${i.message}`)
               .join("\n");
             correctionPrompt = `Your previous response failed validation:\n${issues}\n\nReply with a single corrected JSON object only.`;
+            emitRetryEvent(ctx.onRetry, {
+              reason: "validation-feedback",
+              attempt: attempts - 1,
+              modelId: lastModelId,
+              providerAlias: alias,
+              delayMs: 0,
+              cause: parsed.error,
+            });
             continue;
           }
           failValidation(parsed.error.issues, attempts);

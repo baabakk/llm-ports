@@ -60,3 +60,103 @@ export interface RetryEvent {
  * throws. Use this to emit logs, metrics, or traces.
  */
 export type OnRetry = (event: RetryEvent) => void | Promise<void>;
+
+/**
+ * Jitter strategy for exponential backoff delays.
+ *
+ * Per the AWS Architecture Blog "Exponential Backoff And Jitter" (2015) and
+ * subsequent industry consensus, decorrelated jitter is the recommended
+ * default for high-concurrency clients because it preserves the average
+ * backoff while breaking up retry storms most aggressively. "Full" matches
+ * Genkit's default. "Equal" matches the classic Capacity-Random-Truncated
+ * Binary Exponential Backoff. "None" disables jitter (use for tests).
+ */
+export type JitterStrategy = "none" | "full" | "equal" | "decorrelated";
+
+/**
+ * Configurable jittered exponential backoff for adapter retry loops.
+ *
+ * Adapters consume this config when computing the delay before a retry.
+ * The shape matches Genkit's middleware retry config so users migrating
+ * from Genkit see a familiar API.
+ *
+ * Defaults (when fields are omitted):
+ *   - initialDelayMs: 200
+ *   - maxDelayMs:     10000
+ *   - multiplier:     2
+ *   - jitter:         "decorrelated"
+ *
+ * Pseudocode for delay computation:
+ *
+ *   baseDelay = min(initialDelayMs * multiplier^attempt, maxDelayMs)
+ *   switch (jitter) {
+ *     case "none":          return baseDelay
+ *     case "full":          return random(0, baseDelay)
+ *     case "equal":         return baseDelay/2 + random(0, baseDelay/2)
+ *     case "decorrelated":  return min(maxDelayMs, random(initialDelayMs, prevDelay * 3))
+ *   }
+ *
+ * Added in alpha.17. Adapters wire this in adapter-specific releases.
+ */
+export interface BackoffConfig {
+  /**
+   * Delay before the first retry, in milliseconds. The base from which
+   * subsequent attempts scale exponentially. Default: 200ms.
+   */
+  initialDelayMs?: number;
+
+  /**
+   * Hard ceiling on any single retry delay. Prevents runaway exponential
+   * growth. Default: 10000ms (10 seconds).
+   */
+  maxDelayMs?: number;
+
+  /**
+   * Exponential growth factor. Default: 2 (each attempt waits ~2x the
+   * previous one before jitter is applied).
+   */
+  multiplier?: number;
+
+  /** Jitter strategy. Default: "decorrelated". */
+  jitter?: JitterStrategy;
+}
+
+/**
+ * Compute the delay (in ms) before the Nth retry attempt under a given
+ * BackoffConfig. Pure function; useful for testing and for adapters that
+ * want to apply uniform backoff semantics.
+ *
+ * @param attempt 0-indexed retry number (0 = before the first retry).
+ * @param config  Backoff configuration. Missing fields filled with defaults.
+ * @param prevDelay The previous attempt's computed delay; required for
+ *   "decorrelated" jitter, ignored otherwise. Pass `initialDelayMs` for
+ *   the first call.
+ * @param rng A 0-1 uniform random function. Defaults to Math.random for
+ *   production; tests should pass a deterministic function.
+ */
+export function computeBackoffDelay(
+  attempt: number,
+  config: BackoffConfig = {},
+  prevDelay?: number,
+  rng: () => number = Math.random,
+): number {
+  const initial = config.initialDelayMs ?? 200;
+  const max = config.maxDelayMs ?? 10000;
+  const multiplier = config.multiplier ?? 2;
+  const jitter = config.jitter ?? "decorrelated";
+
+  const baseDelay = Math.min(initial * Math.pow(multiplier, attempt), max);
+
+  switch (jitter) {
+    case "none":
+      return baseDelay;
+    case "full":
+      return rng() * baseDelay;
+    case "equal":
+      return baseDelay / 2 + rng() * (baseDelay / 2);
+    case "decorrelated": {
+      const prev = prevDelay ?? initial;
+      return Math.min(max, initial + rng() * (prev * 3 - initial));
+    }
+  }
+}
