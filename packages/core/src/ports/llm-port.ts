@@ -94,8 +94,111 @@ export interface CostUsage {
   inputUSD: number;
   outputUSD: number;
   totalUSD: number;
-  /** Discount applied due to prompt cache reads. */
-  cacheDiscountUSD?: number;
+  /**
+   * USD saved on this call by hitting prompt cache, vs. paying the full
+   * input rate for the cached tokens. Populated whenever the provider
+   * returns cache telemetry (cacheReadTokens > 0). Aligns with
+   * OpenInference `llm.cost.cache_savings` and Helicone's "savings"
+   * vocabulary used in their dashboards.
+   *
+   * Renamed from `cacheDiscountUSD` in alpha.19 (BREAKING). The previous
+   * name implied a vendor-applied discount; "savings" better reflects
+   * that this is the caller-visible reduction in their bill regardless
+   * of how the provider books it on its side. See CHANGELOG alpha.19.
+   */
+  cacheSavingsUSD?: number;
+}
+
+// ─── Cache control (alpha.19+) ────────────────────────────────────────
+
+/**
+ * Provider-neutral cache configuration for a single call. Locks the
+ * shape across the three caching patterns the major providers expose:
+ *
+ *   - Anthropic's explicit `cache_control` markers on message blocks.
+ *   - OpenAI's implicit, automatic prompt cache (no opt-in / opt-out).
+ *   - Google Gemini's pre-created `CachedContent` handle pattern.
+ *
+ * `mode` selects which pattern to engage for this call:
+ *
+ *   - `"auto"`: let the adapter decide. Anthropic places a cache_control
+ *     marker at the last static block when one is identifiable. OpenAI
+ *     is a no-op (implicit caching is always on). Google is a no-op
+ *     unless `cachedContentHandle` is supplied.
+ *
+ *   - `"manual"`: caller supplies explicit `breakpoints`. Anthropic
+ *     places cache_control at the named positions. OpenAI is a no-op
+ *     (cannot influence the implicit cache). Google is a no-op.
+ *
+ *   - `"preCreated"`: caller supplies a `cachedContentHandle` returned
+ *     from a previous `createCachedContent` call. Google uses the
+ *     handle to serve the cached content. Anthropic + OpenAI are
+ *     no-ops.
+ *
+ *   - `"off"`: strip cache_control from Anthropic message blocks for
+ *     this call only. OpenAI + Google are no-ops (no API to disable
+ *     their caching).
+ *
+ * `namespace` partitions cache lookups by tenant or customer when the
+ * proxy in front of the provider supports it (e.g. Helicone's
+ * `Cache-Seed` header). The adapter forwards it where supported and
+ * ignores it elsewhere; it never changes the provider request body.
+ *
+ * Stability: SHAPE LOCKED in alpha.19. Per-mode adapter behaviors will
+ * mature across beta minors (full breakpoint placement, Gemini handle
+ * lifecycle, OpenAI proxy namespace forwarding) without breaking the
+ * shape.
+ *
+ * See `docs/concepts/cache.md` for the per-provider behavior table.
+ */
+export interface CacheControl {
+  /**
+   * Which caching pattern to engage for this call.
+   *
+   *   - `"auto"` — adapter decides per provider; sane default for most callers.
+   *   - `"manual"` — caller supplies explicit `breakpoints` (Anthropic).
+   *   - `"preCreated"` — caller supplies a `cachedContentHandle` (Google).
+   *   - `"off"` — caller opts out where the provider allows (Anthropic).
+   */
+  mode: "auto" | "manual" | "preCreated" | "off";
+
+  /**
+   * TTL in seconds for cache entries created by this call. Anthropic
+   * accepts the discrete values `300` (5 minutes) and `3600` (1 hour);
+   * other values fall back to `300`. Google Gemini accepts an arbitrary
+   * positive value subject to the provider's minimum. Ignored by OpenAI.
+   */
+  ttlSeconds?: number;
+
+  /**
+   * Explicit cache_control placement for `mode: "manual"`. Each entry
+   * names a position in the message stack where the adapter should
+   * insert a cache_control marker. `at` selects the section; `index`
+   * picks a specific block within that section (0-based) when the
+   * section has more than one block.
+   *
+   * Only honored by adapters that support explicit breakpoints
+   * (currently Anthropic). Silently ignored elsewhere.
+   */
+  breakpoints?: Array<{ at: "tools" | "system" | "message-index"; index?: number }>;
+
+  /**
+   * Pre-created cache handle for `mode: "preCreated"`. Returned by a
+   * previous `createCachedContent` call (Google Gemini). The adapter
+   * sends the handle as the source of the cached content for this
+   * call. Required for `mode: "preCreated"` on Google; silently
+   * ignored elsewhere.
+   */
+  cachedContentHandle?: string;
+
+  /**
+   * Per-tenant cache partition key. When the request flows through a
+   * caching proxy that supports partition keys (e.g. Helicone's
+   * `Cache-Seed` header), the adapter forwards this value verbatim.
+   * Adapters without proxy-aware caching ignore the field. Never
+   * changes the provider request body.
+   */
+  namespace?: string;
 }
 
 // ─── Request option types ─────────────────────────────────────────────
@@ -163,6 +266,8 @@ export interface GenerateTextOptions {
   reasoningEffort?: "low" | "medium" | "high";
   /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Provider-neutral cache configuration. Shape locked in alpha.19. */
+  cacheControl?: CacheControl;
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -183,6 +288,8 @@ export interface GenerateStructuredOptions<T> {
   reasoningEffort?: "low" | "medium" | "high";
   /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Provider-neutral cache configuration. Shape locked in alpha.19. */
+  cacheControl?: CacheControl;
 }
 
 export interface StreamTextOptions {
@@ -200,6 +307,8 @@ export interface StreamTextOptions {
   reasoningEffort?: "low" | "medium" | "high";
   /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Provider-neutral cache configuration. Shape locked in alpha.19. */
+  cacheControl?: CacheControl;
 }
 
 export interface StreamStructuredOptions<T> {
@@ -219,6 +328,8 @@ export interface StreamStructuredOptions<T> {
   reasoningEffort?: "low" | "medium" | "high";
   /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Provider-neutral cache configuration. Shape locked in alpha.19. */
+  cacheControl?: CacheControl;
 }
 
 export interface RunAgentOptions {
@@ -238,6 +349,8 @@ export interface RunAgentOptions {
   reasoningEffort?: "low" | "medium" | "high";
   /** Per-call escape hatch for provider-specific request fields not modeled on the port. Shallow-merged into the SDK request body after typed fields. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Provider-neutral cache configuration. Shape locked in alpha.19. */
+  cacheControl?: CacheControl;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────

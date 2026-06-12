@@ -10,6 +10,7 @@
 // ─── Ports ───────────────────────────────────────────────────────────
 export type {
   AgentResult,
+  CacheControl,
   CostUsage,
   GenerateStructuredOptions,
   GenerateStructuredResult,

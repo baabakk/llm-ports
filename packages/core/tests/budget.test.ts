@@ -41,7 +41,7 @@ describe("computeChatCost", () => {
     // cacheRead = 80k @ $0.3 → $0.024
     // output = 10k @ $15 → $0.15
     expect(cost.totalUSD).toBeCloseTo(0.234, 6);
-    expect(cost.cacheDiscountUSD).toBeGreaterThan(0);
+    expect(cost.cacheSavingsUSD).toBeGreaterThan(0);
   });
 });
 

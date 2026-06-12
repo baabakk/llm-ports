@@ -47,7 +47,7 @@ describe("Group G: cost-math edges", () => {
     );
     // 80k cache reads at $0.30 instead of $3.00 saves (3.0 - 0.3) * 0.08 = $0.216
     expect(noCache.totalUSD - withCache.totalUSD).toBeCloseTo(0.216, 6);
-    expect(withCache.cacheDiscountUSD).toBeCloseTo(0.216, 6);
+    expect(withCache.cacheSavingsUSD).toBeCloseTo(0.216, 6);
   });
 
   it("reasoning tokens are billed at output rate (they're a subset of outputTokens)", () => {

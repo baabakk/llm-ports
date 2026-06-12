@@ -29,8 +29,9 @@ export function computeChatCost(usage: TokenUsage, pricing: ModelPricing): CostU
   const cacheReadUSD = ((pricing.cacheReadPer1M ?? pricing.inputPer1M) * cacheReadTokens) / PER_1M;
   const cacheWriteUSD = ((pricing.cacheWritePer1M ?? pricing.inputPer1M) * cacheWriteTokens) / PER_1M;
 
-  // The "discount" is what the user saved by hitting cache vs paying full input rate.
-  const cacheDiscountUSD =
+  // Savings = what the caller saved by hitting cache vs paying full input rate.
+  // Renamed from cacheDiscountUSD in alpha.19 (BREAKING).
+  const cacheSavingsUSD =
     cacheReadTokens > 0
       ? (pricing.inputPer1M - (pricing.cacheReadPer1M ?? pricing.inputPer1M)) * (cacheReadTokens / PER_1M)
       : undefined;
@@ -41,7 +42,7 @@ export function computeChatCost(usage: TokenUsage, pricing: ModelPricing): CostU
     inputUSD: round6(inputUSD + cacheReadUSD + cacheWriteUSD),
     outputUSD: round6(outputUSD),
     totalUSD: round6(totalUSD),
-    ...(cacheDiscountUSD !== undefined ? { cacheDiscountUSD: round6(cacheDiscountUSD) } : {}),
+    ...(cacheSavingsUSD !== undefined ? { cacheSavingsUSD: round6(cacheSavingsUSD) } : {}),
   };
 }
 
