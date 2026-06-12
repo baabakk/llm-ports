@@ -31,7 +31,12 @@ export interface CapabilityEvent<TOutput> {
   providerAlias: string;
   /** Token usage and USD cost. */
   usage: { inputTokens: number; outputTokens: number; totalTokens: number };
-  cost: { inputUSD: number; outputUSD: number; totalUSD: number };
+  /**
+   * USD cost. `cacheSavingsUSD` is populated when the provider returned cache
+   * telemetry on this call (so the consumer can attribute savings per-capability).
+   * (alpha.19.1+)
+   */
+  cost: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number };
   latencyMs: number;
   /** The validated output the capability returned. */
   output: TOutput;

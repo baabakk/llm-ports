@@ -1,5 +1,12 @@
 # @llm-ports/adapter-anthropic
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- Translate the typed CacheControl shape into Anthropic`s `cache_control` markers. mode: auto places a marker on the system block when instructions are set. mode: manual honors breakpoints at {at: "system"} | {at: "tools"} | {at: "message-index", index}. mode: off and mode: preCreated are no-ops. ttlSeconds: 3600 emits ttl: "1h"; 300 / undefined omit ttl (Anthropic default 5m). 10 new tests in tests/quirks/cache-control.test.ts.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes

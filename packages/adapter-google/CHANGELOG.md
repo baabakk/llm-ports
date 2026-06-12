@@ -1,5 +1,12 @@
 # @llm-ports/adapter-google
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- Wire CacheControl mode: preCreated to Gemini cachedContent. When set with cachedContentHandle, the adapter sets config.cachedContent on the generateContent call. Other modes are documented no-ops on Gemini. 7 new tests in tests/quirks/cache-control.test.ts.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes

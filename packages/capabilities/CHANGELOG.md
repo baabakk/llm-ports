@@ -1,5 +1,12 @@
 # @llm-ports/capabilities
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- Plumb `cacheControl` through all 7 capability factories (createClassifier, createScorer, createExtractor, createDrafter, createSummarizer, createAnalyzer, createPlanner). Each accepts `cacheControl?: CacheControl` on its per-call input and forwards it to the underlying `port.generateStructured` / `port.generateText` call. `CapabilityEvent.cost.cacheSavingsUSD` propagated on `onResult`. 11 new tests in tests/cache-control-passthrough.test.ts.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes

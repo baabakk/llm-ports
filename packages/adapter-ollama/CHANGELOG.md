@@ -1,5 +1,12 @@
 # @llm-ports/adapter-ollama
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- No behavior change. Documented that all CacheControl modes are no-ops on Ollama (local models, no billed prompt cache surface). Version bump for workspace alignment.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes

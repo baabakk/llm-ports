@@ -6,7 +6,7 @@
  * reasoning field). Configure once at app startup; call many times.
  */
 
-import type { LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
 import type { z } from "zod";
 import {
   buildSystemPrompt,
@@ -27,6 +27,8 @@ export interface ClassifyInput {
   forceProviderAlias?: string;
   /** Per-call escape hatch for provider-specific request fields (vLLM chat_template_kwargs, SGLang regex, etc.). Threaded to the underlying port call. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Per-call prompt cache configuration. Forwarded to the underlying port call. (alpha.19.1+) */
+  cacheControl?: CacheControl;
 }
 
 export interface CreateClassifierConfig<TSchema extends z.ZodTypeAny> {
@@ -119,6 +121,7 @@ export function createClassifier<TSchema extends z.ZodTypeAny>(
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
         ...(input.providerExtras ? { providerExtras: input.providerExtras } : {}),
+        ...(input.cacheControl ? { cacheControl: input.cacheControl } : {}),
       });
 
       await safelyInvoke(config.onResult, {
@@ -135,6 +138,7 @@ export function createClassifier<TSchema extends z.ZodTypeAny>(
           inputUSD: result.cost.inputUSD,
           outputUSD: result.cost.outputUSD,
           totalUSD: result.cost.totalUSD,
+          ...(result.cost.cacheSavingsUSD !== undefined ? { cacheSavingsUSD: result.cost.cacheSavingsUSD } : {}),
         },
         latencyMs: result.latencyMs,
         output: result.data,

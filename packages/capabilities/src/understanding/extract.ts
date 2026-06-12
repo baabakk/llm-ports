@@ -5,7 +5,7 @@
  * items, extracting contact info from text, structured data from documents.
  */
 
-import type { LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
 import type { z } from "zod";
 import {
   buildSystemPrompt,
@@ -25,6 +25,8 @@ export interface ExtractInput {
   forceProviderAlias?: string;
   /** Per-call escape hatch for provider-specific request fields (vLLM chat_template_kwargs, SGLang regex, etc.). Threaded to the underlying port call. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Per-call prompt cache configuration. Forwarded to the underlying port call. (alpha.19.1+) */
+  cacheControl?: CacheControl;
 }
 
 export interface CreateExtractorConfig<TSchema extends z.ZodTypeAny> {
@@ -88,6 +90,7 @@ export function createExtractor<TSchema extends z.ZodTypeAny>(
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
         ...(input.providerExtras ? { providerExtras: input.providerExtras } : {}),
+        ...(input.cacheControl ? { cacheControl: input.cacheControl } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "extract",

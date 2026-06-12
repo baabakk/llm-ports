@@ -42,6 +42,7 @@ import {
   type ValidationStrategy,
 } from "@llm-ports/core";
 import { ANTHROPIC_PRICING } from "./pricing.js";
+import { applyAnthropicCacheControl } from "./cache-control.js";
 import {
   extractAssistantText,
   fromAnthropicContent,
@@ -305,20 +306,23 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       try {
         const response = await executeMessageCreate<Anthropic.Messages.Message>(
           (caps) =>
-            applyCapabilityFilter(
-              {
-                model: modelId,
-                max_tokens: options.maxOutputTokens ?? 1024,
-                ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-                messages: [
-                  {
-                    role: "user",
-                    content: toAnthropicContent(options.prompt) as never,
-                  },
-                ],
-              },
-              caps,
+            applyAnthropicCacheControl(
+              applyCapabilityFilter(
+                {
+                  model: modelId,
+                  max_tokens: options.maxOutputTokens ?? 1024,
+                  ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                  ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                  messages: [
+                    {
+                      role: "user",
+                      content: toAnthropicContent(options.prompt) as never,
+                    },
+                  ],
+                },
+                caps,
+              ),
+              options.cacheControl,
             ),
           options.signal,
         );
@@ -368,15 +372,18 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
           const response = await executeMessageCreate<Anthropic.Messages.Message>(
             (caps) =>
-              applyCapabilityFilter(
-                {
-                  model: modelId,
-                  max_tokens: options.maxOutputTokens ?? 2048,
-                  ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-                  temperature: options.temperature ?? 0,
-                  messages: [{ role: "user", content: userContent }],
-                },
-                caps,
+              applyAnthropicCacheControl(
+                applyCapabilityFilter(
+                  {
+                    model: modelId,
+                    max_tokens: options.maxOutputTokens ?? 2048,
+                    ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                    temperature: options.temperature ?? 0,
+                    messages: [{ role: "user", content: userContent }],
+                  },
+                  caps,
+                ),
+                options.cacheControl,
               ),
             options.signal,
           );
@@ -445,20 +452,23 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       const caps = getEffectiveCapabilities(modelId, userCapabilities);
       try {
         const stream = ctx.client.messages.stream(
-          {
-            model: modelId,
-            max_tokens: options.maxOutputTokens ?? 1024,
-            ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-            ...(options.temperature !== undefined && !caps.temperatureLocked
-              ? { temperature: options.temperature }
-              : {}),
-            messages: [
-              {
-                role: "user",
-                content: toAnthropicContent(options.prompt) as never,
-              },
-            ],
-          },
+          applyAnthropicCacheControl(
+            {
+              model: modelId,
+              max_tokens: options.maxOutputTokens ?? 1024,
+              ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+              ...(options.temperature !== undefined && !caps.temperatureLocked
+                ? { temperature: options.temperature }
+                : {}),
+              messages: [
+                {
+                  role: "user",
+                  content: toAnthropicContent(options.prompt) as never,
+                },
+              ],
+            },
+            options.cacheControl,
+          ) as Parameters<typeof ctx.client.messages.stream>[0],
           options.signal ? { signal: options.signal } : undefined,
         );
         for await (const event of stream) {
@@ -483,20 +493,23 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       const caps = getEffectiveCapabilities(modelId, userCapabilities);
       try {
         const stream = ctx.client.messages.stream(
-          {
-            model: modelId,
-            max_tokens: options.maxOutputTokens ?? 2048,
-            ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-            // Omit temperature on models that reject it; otherwise default to 0
-            // for deterministic JSON parsing.
-            ...(caps.temperatureLocked ? {} : { temperature: options.temperature ?? 0 }),
-            messages: [
-              {
-                role: "user",
-                content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
-              },
-            ],
-          },
+          applyAnthropicCacheControl(
+            {
+              model: modelId,
+              max_tokens: options.maxOutputTokens ?? 2048,
+              ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+              // Omit temperature on models that reject it; otherwise default to 0
+              // for deterministic JSON parsing.
+              ...(caps.temperatureLocked ? {} : { temperature: options.temperature ?? 0 }),
+              messages: [
+                {
+                  role: "user",
+                  content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
+                },
+              ],
+            },
+            options.cacheControl,
+          ) as Parameters<typeof ctx.client.messages.stream>[0],
           options.signal ? { signal: options.signal } : undefined,
         );
         let buffer = "";
@@ -538,16 +551,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           const { system, messages } = toAnthropicMessages(conversation);
           const response = await executeMessageCreate<Anthropic.Messages.Message>(
             (caps) =>
-              applyCapabilityFilter(
-                {
-                  model: modelId,
-                  max_tokens: options.maxOutputTokens ?? 4096,
-                  system: system ?? options.instructions,
-                  ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-                  messages: messages as never,
-                  tools: toAnthropicTools(options.tools),
-                },
-                caps,
+              applyAnthropicCacheControl(
+                applyCapabilityFilter(
+                  {
+                    model: modelId,
+                    max_tokens: options.maxOutputTokens ?? 4096,
+                    system: system ?? options.instructions,
+                    ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                    messages: messages as never,
+                    tools: toAnthropicTools(options.tools),
+                  },
+                  caps,
+                ),
+                options.cacheControl,
               ),
             options.signal,
           );

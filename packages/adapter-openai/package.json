@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-openai",
-  "version": "0.1.0-alpha.19",
+  "version": "0.1.0-alpha.19.1",
   "description": "OpenAI SDK adapter for llm-ports. Implements LLMPort and EmbeddingsPort. baseURL support covers 10+ OpenAI-compatible providers (Azure, Groq, Together, Fireworks, DeepInfra, Perplexity, Cerebras, LiteLLM proxy).",
   "license": "MIT",
   "author": "Babak Abbaschian",

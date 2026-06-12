@@ -26,9 +26,9 @@ export interface RecordedCall {
 export interface FakePortControl {
   port: LLMPort;
   /** Queue a generateText response. */
-  enqueueText(text: string, opts?: { usage?: Partial<TokenUsage>; modelId?: string }): void;
+  enqueueText(text: string, opts?: { usage?: Partial<TokenUsage>; modelId?: string; cost?: Partial<CostUsage> }): void;
   /** Queue a generateStructured response (the data must satisfy the caller's schema). */
-  enqueueStructured(data: unknown, opts?: { usage?: Partial<TokenUsage>; modelId?: string }): void;
+  enqueueStructured(data: unknown, opts?: { usage?: Partial<TokenUsage>; modelId?: string; cost?: Partial<CostUsage> }): void;
   /** Queue a network-style error. */
   enqueueError(err: Error): void;
   /** All calls made on the port, in order. */
@@ -39,13 +39,23 @@ const DEFAULT_USAGE: TokenUsage = { inputTokens: 100, outputTokens: 30, totalTok
 const DEFAULT_COST: CostUsage = { inputUSD: 0.0003, outputUSD: 0.0009, totalUSD: 0.0012 };
 
 export function createFakePort(alias = "fake-alias", modelId = "fake-model"): FakePortControl {
-  const queue: Array<{ kind: "text" | "structured" | "error"; payload: unknown; usage?: Partial<TokenUsage>; modelId?: string }> = [];
+  const queue: Array<{ kind: "text" | "structured" | "error"; payload: unknown; usage?: Partial<TokenUsage>; modelId?: string; cost?: Partial<CostUsage> }> = [];
   const calls: RecordedCall[] = [];
 
-  function nextOrThrow(): { kind: "text" | "structured" | "error"; payload: unknown; usage?: Partial<TokenUsage>; modelId?: string } {
+  function nextOrThrow(): { kind: "text" | "structured" | "error"; payload: unknown; usage?: Partial<TokenUsage>; modelId?: string; cost?: Partial<CostUsage> } {
     const next = queue.shift();
     if (!next) throw new Error("FakePort: response queue is empty");
     return next;
+  }
+
+  function buildCost(partial?: Partial<CostUsage>): CostUsage {
+    if (!partial) return DEFAULT_COST;
+    return {
+      inputUSD: partial.inputUSD ?? DEFAULT_COST.inputUSD,
+      outputUSD: partial.outputUSD ?? DEFAULT_COST.outputUSD,
+      totalUSD: partial.totalUSD ?? DEFAULT_COST.totalUSD,
+      ...(partial.cacheSavingsUSD !== undefined ? { cacheSavingsUSD: partial.cacheSavingsUSD } : {}),
+    };
   }
 
   function buildUsage(partial?: Partial<TokenUsage>): TokenUsage {
@@ -73,7 +83,7 @@ export function createFakePort(alias = "fake-alias", modelId = "fake-model"): Fa
       return {
         text: next.payload as string,
         usage,
-        cost: DEFAULT_COST,
+        cost: buildCost(next.cost),
         modelId: next.modelId ?? modelId,
         providerAlias: alias,
         latencyMs: 1,
@@ -98,7 +108,7 @@ export function createFakePort(alias = "fake-alias", modelId = "fake-model"): Fa
       return {
         data: parsed.data as T,
         usage,
-        cost: DEFAULT_COST,
+        cost: buildCost(next.cost),
         modelId: next.modelId ?? modelId,
         providerAlias: alias,
         latencyMs: 1,
@@ -131,7 +141,7 @@ export function createFakePort(alias = "fake-alias", modelId = "fake-model"): Fa
         messages: options.messages,
         toolCalls: [],
         usage,
-        cost: DEFAULT_COST,
+        cost: buildCost(next.cost),
         modelId: next.modelId ?? modelId,
         providerAlias: alias,
         latencyMs: 1,
@@ -149,6 +159,7 @@ export function createFakePort(alias = "fake-alias", modelId = "fake-model"): Fa
         payload: text,
         ...(opts?.usage ? { usage: opts.usage } : {}),
         ...(opts?.modelId ? { modelId: opts.modelId } : {}),
+        ...(opts?.cost ? { cost: opts.cost } : {}),
       });
     },
     enqueueStructured(data, opts) {
@@ -157,6 +168,7 @@ export function createFakePort(alias = "fake-alias", modelId = "fake-model"): Fa
         payload: data,
         ...(opts?.usage ? { usage: opts.usage } : {}),
         ...(opts?.modelId ? { modelId: opts.modelId } : {}),
+        ...(opts?.cost ? { cost: opts.cost } : {}),
       });
     },
     enqueueError(err) {

@@ -5,7 +5,7 @@
  * explicit list of action items), use createExtractor with a schema instead.
  */
 
-import type { LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
 import {
   buildSystemPrompt,
   resolve,
@@ -24,6 +24,8 @@ export interface SummarizeInput {
   forceProviderAlias?: string;
   /** Per-call escape hatch for provider-specific request fields (vLLM chat_template_kwargs, SGLang regex, etc.). Threaded to the underlying port call. (alpha.16+) */
   providerExtras?: Record<string, unknown>;
+  /** Per-call prompt cache configuration. Forwarded to the underlying port call. (alpha.19.1+) */
+  cacheControl?: CacheControl;
 }
 
 export interface CreateSummarizerConfig {
@@ -95,6 +97,7 @@ export function createSummarizer(
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
         ...(input.providerExtras ? { providerExtras: input.providerExtras } : {}),
+        ...(input.cacheControl ? { cacheControl: input.cacheControl } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "summarize",

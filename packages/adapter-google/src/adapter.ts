@@ -65,6 +65,7 @@ import {
   type GeminiPart,
 } from "./content.js";
 import { GEMINI_PRICING } from "./pricing.js";
+import { applyGoogleCacheControl } from "./cache-control.js";
 
 // ─── Adapter options ─────────────────────────────────────────────────
 
@@ -171,16 +172,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         const response = await ctx.client.models.generateContent({
           model: modelId,
           contents: [{ role: "user", parts }],
-          config: {
-            ...(options.instructions !== undefined
-              ? { systemInstruction: options.instructions }
-              : {}),
-            ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-            ...(options.maxOutputTokens !== undefined
-              ? { maxOutputTokens: options.maxOutputTokens }
-              : {}),
-            ...(options.signal ? { abortSignal: options.signal } : {}),
-          },
+          config: applyGoogleCacheControl(
+            {
+              ...(options.instructions !== undefined
+                ? { systemInstruction: options.instructions }
+                : {}),
+              ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+              ...(options.maxOutputTokens !== undefined
+                ? { maxOutputTokens: options.maxOutputTokens }
+                : {}),
+              ...(options.signal ? { abortSignal: options.signal } : {}),
+            },
+            options.cacheControl,
+          ),
         });
         const candidate = response.candidates?.[0];
         const text = extractGeminiText(candidate?.content?.parts as GeminiPart[] | undefined);
@@ -247,18 +251,21 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           const response = await ctx.client.models.generateContent({
             model: modelId,
             contents: [{ role: "user", parts: [{ text: userText }] }],
-            config: {
-              ...(options.instructions !== undefined
-                ? { systemInstruction: options.instructions }
-                : {}),
-              temperature: options.temperature ?? 0,
-              ...(options.maxOutputTokens !== undefined
-                ? { maxOutputTokens: options.maxOutputTokens }
-                : {}),
-              responseMimeType: "application/json",
-              ...(sanitizedSchema ? { responseSchema: sanitizedSchema } : {}),
-              ...(options.signal ? { abortSignal: options.signal } : {}),
-            },
+            config: applyGoogleCacheControl(
+              {
+                ...(options.instructions !== undefined
+                  ? { systemInstruction: options.instructions }
+                  : {}),
+                temperature: options.temperature ?? 0,
+                ...(options.maxOutputTokens !== undefined
+                  ? { maxOutputTokens: options.maxOutputTokens }
+                  : {}),
+                responseMimeType: "application/json",
+                ...(sanitizedSchema ? { responseSchema: sanitizedSchema } : {}),
+                ...(options.signal ? { abortSignal: options.signal } : {}),
+              },
+              options.cacheControl,
+            ),
           });
           const candidate = response.candidates?.[0];
           const raw = extractGeminiText(candidate?.content?.parts as GeminiPart[] | undefined);
@@ -320,16 +327,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         const stream = await ctx.client.models.generateContentStream({
           model: modelId,
           contents: [{ role: "user", parts }],
-          config: {
-            ...(options.instructions !== undefined
-              ? { systemInstruction: options.instructions }
-              : {}),
-            ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-            ...(options.maxOutputTokens !== undefined
-              ? { maxOutputTokens: options.maxOutputTokens }
-              : {}),
-            ...(options.signal ? { abortSignal: options.signal } : {}),
-          },
+          config: applyGoogleCacheControl(
+            {
+              ...(options.instructions !== undefined
+                ? { systemInstruction: options.instructions }
+                : {}),
+              ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+              ...(options.maxOutputTokens !== undefined
+                ? { maxOutputTokens: options.maxOutputTokens }
+                : {}),
+              ...(options.signal ? { abortSignal: options.signal } : {}),
+            },
+            options.cacheControl,
+          ),
         });
         for await (const chunk of stream) {
           const text = extractGeminiText(
@@ -358,17 +368,20 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               ],
             },
           ],
-          config: {
-            ...(options.instructions !== undefined
-              ? { systemInstruction: options.instructions }
-              : {}),
-            temperature: options.temperature ?? 0,
-            ...(options.maxOutputTokens !== undefined
-              ? { maxOutputTokens: options.maxOutputTokens }
-              : {}),
-            responseMimeType: "application/json",
-            ...(options.signal ? { abortSignal: options.signal } : {}),
-          },
+          config: applyGoogleCacheControl(
+            {
+              ...(options.instructions !== undefined
+                ? { systemInstruction: options.instructions }
+                : {}),
+              temperature: options.temperature ?? 0,
+              ...(options.maxOutputTokens !== undefined
+                ? { maxOutputTokens: options.maxOutputTokens }
+                : {}),
+              responseMimeType: "application/json",
+              ...(options.signal ? { abortSignal: options.signal } : {}),
+            },
+            options.cacheControl,
+          ),
         });
         let buffer = "";
         for await (const chunk of stream) {
@@ -413,22 +426,25 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           const response = await ctx.client.models.generateContent({
             model: modelId,
             contents,
-            config: {
-              // options.instructions takes precedence over a system message
-              // baked into the messages array, matching the per-method pattern
-              // used elsewhere in the adapter.
-              ...(options.instructions !== undefined
-                ? { systemInstruction: options.instructions }
-                : systemInstruction !== undefined
-                  ? { systemInstruction }
+            config: applyGoogleCacheControl(
+              {
+                // options.instructions takes precedence over a system message
+                // baked into the messages array, matching the per-method pattern
+                // used elsewhere in the adapter.
+                ...(options.instructions !== undefined
+                  ? { systemInstruction: options.instructions }
+                  : systemInstruction !== undefined
+                    ? { systemInstruction }
+                    : {}),
+                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                ...(options.maxOutputTokens !== undefined
+                  ? { maxOutputTokens: options.maxOutputTokens }
                   : {}),
-              ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-              ...(options.maxOutputTokens !== undefined
-                ? { maxOutputTokens: options.maxOutputTokens }
-                : {}),
-              ...(geminiTools ? { tools: geminiTools } : {}),
-              ...(options.signal ? { abortSignal: options.signal } : {}),
-            },
+                ...(geminiTools ? { tools: geminiTools } : {}),
+                ...(options.signal ? { abortSignal: options.signal } : {}),
+              },
+              options.cacheControl,
+            ),
           });
 
           totalUsage = mergeTokenUsage(totalUsage, parseUsage(response));

@@ -1,5 +1,12 @@
 # @llm-ports/core
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- CacheControl behavior implementation. The shape committed in alpha.19 is now backed by verified per-mode behavior on the cloud adapters and pass-through on every capability factory. No core source changes vs alpha.19; this is a coordinated multi-package release ensuring core stays version-aligned with consumers.
+
 ## 0.1.0-alpha.19
 
 ### Minor Changes

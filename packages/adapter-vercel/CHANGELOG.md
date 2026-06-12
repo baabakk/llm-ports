@@ -1,5 +1,12 @@
 # @llm-ports/adapter-vercel
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- No behavior change. CacheControl is accepted but not forwarded through to the underlying Vercel AI SDK call. Bridged providers needing caching should be configured via the Vercel SDK directly. Version bump for workspace alignment.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes

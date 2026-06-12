@@ -1,5 +1,12 @@
 # @llm-ports/adapter-openai
 
+
+## 0.1.0-alpha.19.1
+
+### Patch Changes
+
+- No behavior change. Documented that all CacheControl modes are no-ops on OpenAI: the implicit prompt cache is always on with no API to influence it. Forward-compatible: callers can write against the shape today; OpenAI-compat providers (Cerebras, Groq, etc.) inherit the same documented no-op behavior. Version bump for workspace alignment.
+
 ## 0.1.0-alpha.19
 
 ### Patch Changes
