@@ -15,6 +15,7 @@
 
 import type { z } from "zod";
 import type { MessageContent } from "../content/blocks.js";
+import type { BudgetScopeRef } from "../budget/types.js";
 
 // ─── Routing primitives ───────────────────────────────────────────────
 
@@ -268,6 +269,13 @@ export interface GenerateTextOptions {
   providerExtras?: Record<string, unknown>;
   /** Provider-neutral cache configuration. Shape locked in alpha.19. */
   cacheControl?: CacheControl;
+  /**
+   * Per-call scope hint. When set, the Registry hashes (scope, scopeId)
+   * into the gating storage key so configured caps apply per-scope rather
+   * than per-alias. Omitting it preserves alpha.19.1 per-alias behavior.
+   * (alpha.20+)
+   */
+  budgetScope?: BudgetScopeRef;
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -290,6 +298,13 @@ export interface GenerateStructuredOptions<T> {
   providerExtras?: Record<string, unknown>;
   /** Provider-neutral cache configuration. Shape locked in alpha.19. */
   cacheControl?: CacheControl;
+  /**
+   * Per-call scope hint. When set, the Registry hashes (scope, scopeId)
+   * into the gating storage key so configured caps apply per-scope rather
+   * than per-alias. Omitting it preserves alpha.19.1 per-alias behavior.
+   * (alpha.20+)
+   */
+  budgetScope?: BudgetScopeRef;
 }
 
 export interface StreamTextOptions {
@@ -309,6 +324,13 @@ export interface StreamTextOptions {
   providerExtras?: Record<string, unknown>;
   /** Provider-neutral cache configuration. Shape locked in alpha.19. */
   cacheControl?: CacheControl;
+  /**
+   * Per-call scope hint. When set, the Registry hashes (scope, scopeId)
+   * into the gating storage key so configured caps apply per-scope rather
+   * than per-alias. Omitting it preserves alpha.19.1 per-alias behavior.
+   * (alpha.20+)
+   */
+  budgetScope?: BudgetScopeRef;
 }
 
 export interface StreamStructuredOptions<T> {
@@ -330,6 +352,13 @@ export interface StreamStructuredOptions<T> {
   providerExtras?: Record<string, unknown>;
   /** Provider-neutral cache configuration. Shape locked in alpha.19. */
   cacheControl?: CacheControl;
+  /**
+   * Per-call scope hint. When set, the Registry hashes (scope, scopeId)
+   * into the gating storage key so configured caps apply per-scope rather
+   * than per-alias. Omitting it preserves alpha.19.1 per-alias behavior.
+   * (alpha.20+)
+   */
+  budgetScope?: BudgetScopeRef;
 }
 
 export interface RunAgentOptions {
@@ -351,6 +380,13 @@ export interface RunAgentOptions {
   providerExtras?: Record<string, unknown>;
   /** Provider-neutral cache configuration. Shape locked in alpha.19. */
   cacheControl?: CacheControl;
+  /**
+   * Per-call scope hint. When set, the Registry hashes (scope, scopeId)
+   * into the gating storage key so configured caps apply per-scope rather
+   * than per-alias. Omitting it preserves alpha.19.1 per-alias behavior.
+   * (alpha.20+)
+   */
+  budgetScope?: BudgetScopeRef;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────

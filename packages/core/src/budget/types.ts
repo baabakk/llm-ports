@@ -8,10 +8,80 @@
  * See implementation plan v3 §6.6.
  */
 
+// ─── Budget scope (alpha.20+) ────────────────────────────────────────
+
+/**
+ * Five-tier scope hierarchy. The caller passes one of these in
+ * `budgetScope?: { scope, scopeId }` on any per-call options interface
+ * to make the gating storage key per-tenant / per-customer / per-user /
+ * per-agent / per-session instead of just per-alias.
+ *
+ * Tier semantics (from outermost to innermost):
+ *   - "tenant"   — the billing org.
+ *   - "customer" — the end-customer of a multi-tenant SaaS.
+ *   - "user"     — an individual identity.
+ *   - "agent"    — a logical agent (workflow, automation, persona).
+ *   - "session"  — a bounded run.
+ *
+ * Shipped in 0.1.0-alpha.20. The Registry composes storage keys as
+ * `${alias}|${scope}:${scopeId}` when budgetScope is set; backwards
+ * compatible: existing callers who omit budgetScope see identical
+ * behavior to alpha.19.1.
+ */
+export type BudgetScope = "tenant" | "customer" | "user" | "agent" | "session";
+
+/**
+ * Per-call hint identifying which scope this call belongs to. Set on any
+ * of the five request option types to make gating storage per-scope.
+ */
+export interface BudgetScopeRef {
+  scope: BudgetScope;
+  scopeId: string;
+}
+
+/**
+ * Public type describing a single budget gate the caller can declare
+ * programmatically (the documented shape for the next-level budget
+ * surface shipping in beta.2 alongside the persistent BudgetBackend).
+ * In alpha.20 the env-driven gates are still authoritative.
+ */
+export interface BudgetGate {
+  scope: BudgetScope;
+  scopeId: string;
+  limitUsd: number;
+  window: "minute" | "hour" | "day" | "month" | "session";
+  onExceed: "throw" | "downgrade" | "queue";
+}
+
 // ─── Budget (request-count) gating ───────────────────────────────────
 
+/**
+ * Request-count gating. `kind: "requests"` carries optional per-window caps;
+ * any combination is allowed, and the first cap to trip blocks the call.
+ *
+ * `requestsPerHour` exists for backwards compatibility with alpha.19 — the
+ * `parseGating` token `req:N/hour` still writes that field. Backends
+ * consume `perHour` if set, else fall back to `requestsPerHour`.
+ */
 export type BudgetLimit =
-  | { kind: "requests"; requestsPerHour: number }
+  | {
+      kind: "requests";
+      /**
+       * @deprecated alpha.20 — use `perHour` instead. Still populated by
+       * `parseGating` when it sees `req:N/hour` so existing env configs
+       * keep working. Backends fall back to it when `perHour` is unset.
+       */
+      requestsPerHour?: number;
+      /** Request ceiling per rolling minute window. (alpha.20+) */
+      perMinute?: number;
+      /** Request ceiling per rolling hour window. (alpha.20+) */
+      perHour?: number;
+      /**
+       * Request ceiling per CostSession. (alpha.20+) Only enforced when a
+       * CostSession is open; ignored on direct port calls.
+       */
+      perSession?: number;
+    }
   | { kind: "unlimited" };
 
 export interface BudgetCheckResult {
@@ -36,12 +106,19 @@ export interface BudgetBackend {
 export type CostLimit =
   | {
       kind: "usd";
+      /** USD ceiling per rolling minute. (alpha.20+) */
+      perMinute?: number;
       /** USD ceiling per rolling hour. */
       perHour?: number;
       /** USD ceiling per rolling day (24h). */
       perDay?: number;
       /** USD ceiling per rolling 30-day window. */
       perMonth?: number;
+      /**
+       * USD ceiling per CostSession. (alpha.20+) Only enforced when a
+       * CostSession is open; ignored on direct port calls.
+       */
+      perSession?: number;
     }
   | { kind: "unlimited" };
 
@@ -59,6 +136,21 @@ export interface CostBackend {
   recordCost(alias: string, usd: number): Promise<void>;
   /** Check whether another request would exceed any configured cost ceiling. */
   check(alias: string, limit: CostLimit): Promise<CostCheckResult>;
+}
+
+// ─── Session-grain limits (alpha.20+) ────────────────────────────────
+
+/**
+ * Token / tool-call ceilings that apply within a single CostSession. The
+ * env-driven `parseGating` tokens `total_tokens:N/session` and
+ * `tool_calls:N/session` write to this shape. Only enforced when a
+ * CostSession is open; ignored on direct port calls.
+ */
+export interface SessionGrainLimits {
+  /** Total tokens (input + output, including reasoning + cache) per session. */
+  totalTokensPerSession?: number;
+  /** Tool / function calls per session (runAgent only). */
+  toolCallsPerSession?: number;
 }
 
 // ─── Per-model pricing tables ────────────────────────────────────────

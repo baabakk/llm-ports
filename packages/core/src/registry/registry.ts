@@ -31,7 +31,12 @@ import type {
   EmbeddingResult,
   EmbeddingsPort,
 } from "../ports/embeddings-port.js";
-import type { BudgetBackend, CostBackend, ModelPricing } from "../budget/types.js";
+import type {
+  BudgetBackend,
+  BudgetScopeRef,
+  CostBackend,
+  ModelPricing,
+} from "../budget/types.js";
 import { InMemoryBudget, InMemoryCost } from "../budget/memory.js";
 import {
   DEFAULT_VALIDATION_STRATEGY,
@@ -160,10 +165,22 @@ export class Registry {
     }
   }
 
+  /**
+   * Compose the gating storage key. When `budgetScope` is set, the backend
+   * sees `${alias}|${scope}:${scopeId}` so configured caps apply per-scope.
+   * Otherwise the key is just `${alias}` — backwards-compatible with every
+   * release up to alpha.19.1. (alpha.20+)
+   */
+  scopedKey(alias: string, budgetScope?: BudgetScopeRef): string {
+    if (!budgetScope) return alias;
+    return `${alias}|${budgetScope.scope}:${budgetScope.scopeId}`;
+  }
+
   /** Resolve the first usable provider in the task's fallback chain. */
   async selectModel(
     taskType: string,
     priority: 0 | 1 | 2 | 3 = 2,
+    budgetScope?: BudgetScopeRef,
   ): Promise<ModelSelection> {
     const chain = this.config.taskRoutes[taskType] ?? this.config.taskRoutes["general"] ?? [];
     if (chain.length === 0) {
@@ -187,12 +204,13 @@ export class Registry {
 
       // P0 bypasses budget gating.
       if (priority > 0) {
-        const budgetCheck = await this.budget.check(alias, entry.budgetLimit);
+        const key = this.scopedKey(alias, budgetScope);
+        const budgetCheck = await this.budget.check(key, entry.budgetLimit);
         if (!budgetCheck.allowed) {
           reasons[alias] = budgetCheck.reason ?? "budget exceeded";
           continue;
         }
-        const costCheck = await this.cost.check(alias, entry.costLimit);
+        const costCheck = await this.cost.check(key, entry.costLimit);
         if (!costCheck.allowed) {
           reasons[alias] = costCheck.reason ?? "cost cap exceeded";
           continue;
@@ -228,6 +246,7 @@ export class Registry {
   async selectByAlias(
     alias: string,
     priority: 0 | 1 | 2 | 3 = 2,
+    budgetScope?: BudgetScopeRef,
   ): Promise<ModelSelection> {
     const entry = this.config.providers[alias];
     if (!entry) {
@@ -242,13 +261,14 @@ export class Registry {
       });
     }
     if (priority > 0) {
-      const budgetCheck = await this.budget.check(alias, entry.budgetLimit);
+      const key = this.scopedKey(alias, budgetScope);
+      const budgetCheck = await this.budget.check(key, entry.budgetLimit);
       if (!budgetCheck.allowed) {
         throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
           [alias]: budgetCheck.reason ?? "budget exceeded",
         });
       }
-      const costCheck = await this.cost.check(alias, entry.costLimit);
+      const costCheck = await this.cost.check(key, entry.costLimit);
       if (!costCheck.allowed) {
         throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
           [alias]: costCheck.reason ?? "cost cap exceeded",
@@ -286,6 +306,7 @@ export class Registry {
   async selectViableChain(
     taskType: string,
     priority: 0 | 1 | 2 | 3 = 2,
+    budgetScope?: BudgetScopeRef,
   ): Promise<ModelSelection[]> {
     const chain = this.config.taskRoutes[taskType] ?? this.config.taskRoutes["general"] ?? [];
     if (chain.length === 0) {
@@ -307,12 +328,13 @@ export class Registry {
         continue;
       }
       if (priority > 0) {
-        const budgetCheck = await this.budget.check(alias, entry.budgetLimit);
+        const key = this.scopedKey(alias, budgetScope);
+        const budgetCheck = await this.budget.check(key, entry.budgetLimit);
         if (!budgetCheck.allowed) {
           reasons[alias] = budgetCheck.reason ?? "budget exceeded";
           continue;
         }
-        const costCheck = await this.cost.check(alias, entry.costLimit);
+        const costCheck = await this.cost.check(key, entry.costLimit);
         if (!costCheck.allowed) {
           reasons[alias] = costCheck.reason ?? "cost cap exceeded";
           continue;
@@ -535,25 +557,27 @@ async function walkChain<R>(
   taskType: string,
   priority: 0 | 1 | 2 | 3 | undefined,
   attempt: (sel: ModelSelection) => Promise<R>,
-  recordCost: (sel: ModelSelection, result: R) => Promise<void>,
+  recordCost: (sel: ModelSelection, result: R, key: string) => Promise<void>,
   forceProviderAlias?: string,
+  budgetScope?: BudgetScopeRef,
 ): Promise<R> {
   // forceProviderAlias short-circuit: bypass task routing entirely. Single-
   // element chain. Runtime fallback does NOT engage — caller explicitly asked
   // for this provider; falling back would defeat the point.
   if (forceProviderAlias !== undefined) {
-    const sel = await registry.selectByAlias(forceProviderAlias, priority);
+    const sel = await registry.selectByAlias(forceProviderAlias, priority, budgetScope);
     if (!sel.port) {
       throw new NoProvidersAvailableError(`forced:${forceProviderAlias}`, [sel.alias], {
         [sel.alias]: `adapter "${sel.adapter.name}" does not implement LLMPort`,
       });
     }
     const result = await attempt(sel);
-    await registry.budget.recordRequest(sel.alias);
-    await recordCost(sel, result);
+    const key = registry.scopedKey(sel.alias, budgetScope);
+    await registry.budget.recordRequest(key);
+    await recordCost(sel, result, key);
     return result;
   }
-  const chain = await registry.selectViableChain(taskType, priority);
+  const chain = await registry.selectViableChain(taskType, priority, budgetScope);
   const reasons: Record<string, string> = {};
   let lastErr: unknown;
   for (const sel of chain) {
@@ -563,8 +587,9 @@ async function walkChain<R>(
     }
     try {
       const result = await attempt(sel);
-      await registry.budget.recordRequest(sel.alias);
-      await recordCost(sel, result);
+      const key = registry.scopedKey(sel.alias, budgetScope);
+      await registry.budget.recordRequest(key);
+      await recordCost(sel, result, key);
       return result;
     } catch (err) {
       lastErr = err;
@@ -594,8 +619,9 @@ class RegistryPort implements LLMPort {
       options.taskType,
       options.priority,
       (sel) => sel.port!.generateText(options),
-      (sel, result) => this.registry.cost.recordCost(sel.alias, result.cost.totalUSD),
+      (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
+      options.budgetScope,
     );
   }
 
@@ -607,8 +633,9 @@ class RegistryPort implements LLMPort {
       options.taskType,
       options.priority,
       (sel) => sel.port!.generateStructured(options),
-      (sel, result) => this.registry.cost.recordCost(sel.alias, result.cost.totalUSD),
+      (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
+      options.budgetScope,
     );
   }
 
@@ -621,7 +648,8 @@ class RegistryPort implements LLMPort {
     // propagate as-is to the consumer; users handle them with a try/catch
     // inside the for-await. Document this limit in the cancellation guide.
     const startStream = async (sel: ModelSelection): Promise<AsyncIterable<string>> => {
-      await this.registry.budget.recordRequest(sel.alias);
+      // walkChain records the request after startStream resolves; pre-record
+      // is intentional only for streaming since the cost isn't observed.
       return sel.port!.streamText(options);
     };
     const stream = await walkChain(
@@ -635,13 +663,13 @@ class RegistryPort implements LLMPort {
         /* noop */
       },
       options.forceProviderAlias,
+      options.budgetScope,
     );
     yield* stream;
   }
 
   async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
     const startStream = async (sel: ModelSelection): Promise<AsyncIterable<Partial<T>>> => {
-      await this.registry.budget.recordRequest(sel.alias);
       return sel.port!.streamStructured(options);
     };
     const stream = await walkChain(
@@ -653,6 +681,7 @@ class RegistryPort implements LLMPort {
         /* noop */
       },
       options.forceProviderAlias,
+      options.budgetScope,
     );
     yield* stream;
   }
@@ -663,8 +692,9 @@ class RegistryPort implements LLMPort {
       options.taskType,
       options.priority,
       (sel) => sel.port!.runAgent(options),
-      (sel, result) => this.registry.cost.recordCost(sel.alias, result.cost.totalUSD),
+      (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
+      options.budgetScope,
     );
   }
 }
@@ -672,8 +702,8 @@ class RegistryPort implements LLMPort {
 class RegistryEmbeddingsPort implements EmbeddingsPort {
   constructor(private readonly registry: Registry) {}
 
-  private async resolve(taskType: string): Promise<ModelSelection> {
-    const sel = await this.registry.selectModel(taskType, 2);
+  private async resolve(taskType: string, budgetScope?: BudgetScopeRef): Promise<ModelSelection> {
+    const sel = await this.registry.selectModel(taskType, 2, budgetScope);
     if (!sel.embeddingsPort) {
       throw new NoProvidersAvailableError(taskType, [sel.alias], {
         [sel.alias]: `adapter "${sel.adapter.name}" does not implement EmbeddingsPort`,
@@ -683,18 +713,20 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
   }
 
   async generateEmbedding(options: EmbeddingOptions): Promise<EmbeddingResult> {
-    const sel = await this.resolve(options.taskType);
+    const sel = await this.resolve(options.taskType, options.budgetScope);
     const result = await sel.embeddingsPort!.generateEmbedding(options);
-    await this.registry.budget.recordRequest(sel.alias);
-    await this.registry.cost.recordCost(sel.alias, result.cost.totalUSD);
+    const key = this.registry.scopedKey(sel.alias, options.budgetScope);
+    await this.registry.budget.recordRequest(key);
+    await this.registry.cost.recordCost(key, result.cost.totalUSD);
     return result;
   }
 
   async generateEmbeddings(options: BatchEmbeddingOptions): Promise<BatchEmbeddingResult> {
-    const sel = await this.resolve(options.taskType);
+    const sel = await this.resolve(options.taskType, options.budgetScope);
     const result = await sel.embeddingsPort!.generateEmbeddings(options);
-    await this.registry.budget.recordRequest(sel.alias);
-    await this.registry.cost.recordCost(sel.alias, result.cost.totalUSD);
+    const key = this.registry.scopedKey(sel.alias, options.budgetScope);
+    await this.registry.budget.recordRequest(key);
+    await this.registry.cost.recordCost(key, result.cost.totalUSD);
     return result;
   }
 }

@@ -1,6 +1,13 @@
 # @llm-ports/core
 
 
+## 0.1.0-alpha.20
+
+### Minor Changes
+
+- BudgetScope + minute / session gating grammar. **Additive only**, no breaking changes. `BudgetScope = "tenant" | "customer" | "user" | "agent" | "session"` plus a per-call `budgetScope?: { scope, scopeId }` field on every request option type (GenerateTextOptions, GenerateStructuredOptions, StreamTextOptions, StreamStructuredOptions, RunAgentOptions, EmbeddingOptions, BatchEmbeddingOptions). When set, the Registry composes the gating storage key as `${alias}|${scope}:${scopeId}` so every configured cap applies per-scope. `parseGating` now accepts `req:N/minute`, `cost:N/minute`, `cost:N/session`, `req:N/session`, `total_tokens:N/session`, `tool_calls:N/session` in addition to the alpha.19 tokens. `InMemoryBudget` + `InMemoryCost` enforce the new minute window. `CostSession` extends with `maxRequests`, `maxTokens`, `maxToolCalls` ceilings and exposes `requestsMade()`, `tokensUsed()`, `toolCallsMade()` getters; `SessionBudgetExceededError` gains an optional `grain` field naming which cap tripped. 24 new tests in tests/budget-scope.test.ts cover all five scope axes, Cerebras 30 RPM minute-grain expressibility (closes TD-LLMPORTS-GATING-MINUTE), and all four new session-grain tokens. Backwards-compatible: existing callers see identical behavior to alpha.19.1; alpha.19 `req:N/hour` env tokens still populate the legacy `requestsPerHour` field for any backend that has not been upgraded.
+
+
 ## 0.1.0-alpha.19.1
 
 ### Patch Changes

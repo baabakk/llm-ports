@@ -213,14 +213,32 @@ export class BudgetExceededError extends LLMPortError {
  */
 export class SessionBudgetExceededError extends LLMPortError {
   public override readonly name: string = "SessionBudgetExceededError";
+  /**
+   * Optional reason tag distinguishing which session-grain cap tripped
+   * (e.g. `"tokens (50000 >= 50000)"`, `"tool_calls (8 >= 8)"`,
+   * `"requests (100 >= 100)"`). When undefined the default USD cap
+   * tripped. (alpha.20+)
+   */
+  public readonly grain?: string;
+  /**
+   * Backwards-compatible constructor. The first three args are the legacy
+   * USD-cap shape; pass a fourth `grain` string when the cap that tripped
+   * is one of the alpha.20+ token / tool_call / request session ceilings.
+   * `budgetUSD` and `spentUSD` are repurposed as `cap` and `current` in
+   * that case so the existing fields keep working for diagnostics.
+   */
   constructor(
     public readonly sessionId: string,
     public readonly budgetUSD: number,
     public readonly spentUSD: number,
+    grain?: string,
   ) {
     super(
-      `Cost session "${sessionId}" exceeded its budget: $${spentUSD.toFixed(6)} > $${budgetUSD.toFixed(6)}`,
+      grain
+        ? `Cost session "${sessionId}" exceeded its ${grain} cap`
+        : `Cost session "${sessionId}" exceeded its budget: $${spentUSD.toFixed(6)} > $${budgetUSD.toFixed(6)}`,
     );
+    if (grain) this.grain = grain;
   }
 }
 

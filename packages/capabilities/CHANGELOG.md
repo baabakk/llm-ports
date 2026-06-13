@@ -1,6 +1,13 @@
 # @llm-ports/capabilities
 
 
+## 0.1.0-alpha.20
+
+### Minor Changes
+
+- No behavior change. `budgetScope` flows through to the underlying port call because capabilities forward all per-call options; documenting the alpha.20 plumbing here. Version bump for workspace alignment.
+
+
 ## 0.1.0-alpha.19.1
 
 ### Patch Changes

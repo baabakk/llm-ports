@@ -92,12 +92,16 @@ export {
 export type {
   BudgetBackend,
   BudgetCheckResult,
+  BudgetGate,
   BudgetLimit,
+  BudgetScope,
+  BudgetScopeRef,
   CostBackend,
   CostCheckResult,
   CostLimit,
   ModelCapabilities,
   ModelPricing,
+  SessionGrainLimits,
 } from "./budget/types.js";
 
 export { InMemoryBudget, InMemoryCost } from "./budget/memory.js";

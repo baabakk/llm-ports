@@ -10,6 +10,7 @@
  */
 
 import type { CostUsage, TaskType } from "./llm-port.js";
+import type { BudgetScopeRef } from "../budget/types.js";
 
 export interface EmbeddingOptions {
   taskType: TaskType;
@@ -17,6 +18,8 @@ export interface EmbeddingOptions {
   input: string;
   /** Optional model hint; the registry typically picks via taskType. */
   modelHint?: string;
+  /** Per-call scope hint for gating. Same semantics as LLMPort. (alpha.20+) */
+  budgetScope?: BudgetScopeRef;
 }
 
 export interface BatchEmbeddingOptions {
@@ -24,6 +27,8 @@ export interface BatchEmbeddingOptions {
   /** Multiple inputs to embed in a single API call (provider-dependent batching). */
   inputs: string[];
   modelHint?: string;
+  /** Per-call scope hint for gating. Same semantics as LLMPort. (alpha.20+) */
+  budgetScope?: BudgetScopeRef;
 }
 
 export interface EmbeddingResult {

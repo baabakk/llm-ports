@@ -8,11 +8,13 @@ describe("parseRegistryConfig", () => {
         LLM_PROVIDER_FAST: "anthropic|claude-haiku-4-5|req:200/hour",
       },
     });
-    expect(config.providers["fast"]).toEqual({
+    expect(config.providers["fast"]).toMatchObject({
       alias: "fast",
       adapter: "anthropic",
       modelId: "claude-haiku-4-5",
-      budgetLimit: { kind: "requests", requestsPerHour: 200 },
+      // alpha.20 writes both requestsPerHour (legacy) and perHour (new) so
+      // alpha.19 backends consuming the legacy field keep working.
+      budgetLimit: { kind: "requests", requestsPerHour: 200, perHour: 200 },
       costLimit: { kind: "unlimited" },
     });
   });
@@ -36,7 +38,7 @@ describe("parseRegistryConfig", () => {
       },
     });
     const entry = config.providers["balanced"];
-    expect(entry?.budgetLimit).toEqual({ kind: "requests", requestsPerHour: 500 });
+    expect(entry?.budgetLimit).toMatchObject({ kind: "requests", requestsPerHour: 500, perHour: 500 });
     expect(entry?.costLimit).toMatchObject({ kind: "usd", perDay: 50 });
   });
 

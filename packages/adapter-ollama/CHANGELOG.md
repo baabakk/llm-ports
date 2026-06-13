@@ -1,6 +1,13 @@
 # @llm-ports/adapter-ollama
 
 
+## 0.1.0-alpha.20
+
+### Minor Changes
+
+- No behavior change. Same plumbing as adapter-anthropic. Version bump for workspace alignment.
+
+
 ## 0.1.0-alpha.19.1
 
 ### Patch Changes

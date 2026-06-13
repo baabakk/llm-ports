@@ -1,18 +1,63 @@
 # Cost vs Request Gating
 
-`llm-ports` supports two gating modes per provider: **request count** (`req:N/hour`) and **USD cost** (`cost:N/day`, also `/hour`, `/month`). They can combine. This page explains when to use which.
+`llm-ports` supports four gating dimensions per provider, configurable via env tokens, plus a per-scope dimension that the caller supplies at call time. This page documents every token alpha.20 ships and shows how they compose.
 
-## TL;DR
+## TL;DR (alpha.20)
 
 | You want to | Use |
-|-------------|-----|
-| Cap real dollar spend | `cost:N/day` (or `/hour`, `/month`) |
-| Cap rate of requests (e.g. respect provider's RPM limit) | `req:N/hour` |
-| Hard ceiling regardless of model size | `cost:N/day` |
-| Both: rate AND budget | `req:N/hour,cost:N/day` |
+|---|---|
+| Cap real dollar spend per day / hour / month | `cost:N/day` (or `/hour`, `/month`) |
+| Cap dollar spend per minute (rate-protect against expensive bursts) | `cost:N/minute` |
+| Cap request rate per minute (provider RPM limit, e.g. Cerebras 30 RPM) | `req:N/minute` |
+| Cap request rate per hour | `req:N/hour` |
+| Hard per-session ceilings | `cost:N/session`, `req:N/session`, `total_tokens:N/session`, `tool_calls:N/session` |
+| Per-tenant / per-customer / per-user / per-agent / per-session quotas | Set caps in env; pass `budgetScope: { scope, scopeId }` on each call |
 | Local Ollama (no real cost, no rate limit) | `unlimited` |
 
-For most production usage, **cost gating is the primary tool**. Request count is what you used in 2023 because that was easier to compute. Now, knowing the dollar amount per call is built in — use it.
+For most production usage, **cost gating is the primary tool**. Request count is what you used in 2023 because that was easier to compute. Now, knowing the dollar amount per call is built in — use it. Use `req:N/minute` only when a provider's RPM limit physically caps your throughput.
+
+## What's new in alpha.20
+
+The env-token grammar gained five dimensions:
+
+- **`req:N/minute`** — request-count cap per rolling minute. Designed for Cerebras (30 RPM) and similar providers whose throughput cap can't be expressed in `req:N/hour` without false negatives.
+- **`cost:N/minute`** — USD cap per rolling minute. Catches expensive bursts without waiting for the hour mark.
+- **`cost:N/session`** — USD cap per `CostSession`. Backwards-compatible with the alpha.18 `openCostSession({ budgetUSD })` constructor argument.
+- **`req:N/session`**, **`total_tokens:N/session`**, **`tool_calls:N/session`** — request, token, and tool-call ceilings per `CostSession`. Trip `SessionBudgetExceededError` with a `grain` field naming which cap fired.
+
+Plus a per-call scope hint: `budgetScope?: { scope, scopeId }` on every request option type. When set, the Registry composes the gating storage key as `${alias}|${scope}:${scopeId}`, making every configured cap apply per-tenant / per-customer / per-user / per-agent / per-session instead of per-alias. Omitting it preserves alpha.19.1 per-alias behavior — every existing caller works unchanged.
+
+```ts
+// Same provider config, two tenants. Each tenant has its own $50/day budget.
+await llm.generateText({
+  taskType: "triage",
+  prompt: messageForTenantAcme,
+  budgetScope: { scope: "tenant", scopeId: "acme" },
+});
+
+await llm.generateText({
+  taskType: "triage",
+  prompt: messageForTenantInitech,
+  budgetScope: { scope: "tenant", scopeId: "initech" },
+});
+```
+
+## Verified behavior matrix (alpha.20)
+
+Every cell is enforced at runtime and covered by a test in [`packages/core/tests/budget-scope.test.ts`](https://github.com/baabakk/llm-ports/blob/main/packages/core/tests/budget-scope.test.ts).
+
+| Dimension | Env token | Enforced by | Per-scope? |
+|---|---|---|---|
+| Requests per minute | `req:N/minute` | `InMemoryBudget.check` | Yes (when `budgetScope` set) |
+| Requests per hour | `req:N/hour` | `InMemoryBudget.check` (legacy `requestsPerHour` populated for backwards compat) | Yes |
+| Requests per session | `req:N/session` | `CostSession.maxRequests` | n/a (session = scope) |
+| USD per minute | `cost:N/minute` | `InMemoryCost.check` | Yes |
+| USD per hour | `cost:N/hour` | same | Yes |
+| USD per day | `cost:N/day` | same | Yes |
+| USD per month | `cost:N/month` | same | Yes |
+| USD per session | `cost:N/session` | `CostSession.budgetUSD` | n/a |
+| Total tokens per session | `total_tokens:N/session` | `CostSession.maxTokens` | n/a |
+| Tool calls per session | `tool_calls:N/session` | `CostSession.maxToolCalls` | n/a |
 
 ## What "request gating" measures
 

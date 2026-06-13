@@ -1,6 +1,13 @@
 # @llm-ports/adapter-anthropic
 
 
+## 0.1.0-alpha.20
+
+### Minor Changes
+
+- No behavior change. Adapter accepts `budgetScope` transparently (option flows to Registry, never to the adapter). Version bump for workspace alignment.
+
+
 ## 0.1.0-alpha.19.1
 
 ### Patch Changes

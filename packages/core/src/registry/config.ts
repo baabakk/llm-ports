@@ -9,15 +9,21 @@
  *   LLM_PROVIDER_<ALIAS>=<adapter>|<modelId>|<gating>[,<gating>...]
  *   LLM_TASK_ROUTE_<TASK>=<alias>[,<alias>...]
  *
- * Gating tokens:
- *   req:N/hour       -> request-count limit per hour
- *   cost:N/day       -> USD limit per day (also: /hour, /month)
- *   unlimited        -> no gating (useful for local Ollama)
+ * Gating tokens (alpha.20):
+ *   req:N/{minute|hour|session}                       -> request-count limit
+ *   cost:N/{minute|hour|day|month|session}            -> USD limit
+ *   total_tokens:N/session                            -> tokens per CostSession
+ *   tool_calls:N/session                              -> tool calls per CostSession
+ *   unlimited                                         -> no gating (useful for local Ollama)
+ *
+ * Backwards compatible: `req:N/hour` and `cost:N/{hour|day|month}` from
+ * alpha.19 keep working unchanged. `req:N/hour` still writes the legacy
+ * `requestsPerHour` field for backend backwards compat.
  *
  * See docs/concepts/task-routing for the full design rationale.
  */
 
-import type { BudgetLimit, CostLimit } from "../budget/types.js";
+import type { BudgetLimit, CostLimit, SessionGrainLimits } from "../budget/types.js";
 import { ConfigError } from "../errors.js";
 
 export interface ProviderEntry {
@@ -29,6 +35,8 @@ export interface ProviderEntry {
   modelId: string;
   budgetLimit: BudgetLimit;
   costLimit: CostLimit;
+  /** Session-grain limits (token + tool-call ceilings). Enforced by CostSession. (alpha.20+) */
+  sessionLimits?: SessionGrainLimits;
 }
 
 export interface RegistryConfig {
@@ -64,13 +72,14 @@ export function parseRegistryConfig(opts: ParseConfigOptions = {}): RegistryConf
         );
       }
       const [adapter, modelId, gatingStr] = parts;
-      const { budgetLimit, costLimit } = parseGating(gatingStr ?? "unlimited", key);
+      const { budgetLimit, costLimit, sessionLimits } = parseGating(gatingStr ?? "unlimited", key);
       providers[alias] = {
         alias,
         adapter: adapter!.trim(),
         modelId: modelId!.trim(),
         budgetLimit,
         costLimit,
+        ...(sessionLimits ? { sessionLimits } : {}),
       };
     } else if (key.startsWith(`${prefix}TASK_ROUTE_`)) {
       const taskName = key.slice(`${prefix}TASK_ROUTE_`.length).toLowerCase().replace(/_/g, "-");
@@ -89,19 +98,28 @@ export function parseRegistryConfig(opts: ParseConfigOptions = {}): RegistryConf
 }
 
 /**
- * Parse a comma-separated gating string into BudgetLimit + CostLimit.
- * Examples:
- *   "req:200/hour"            -> request-only
- *   "cost:100/day"            -> cost-only
- *   "req:500/hour,cost:50/day" -> both apply (first to trip blocks)
- *   "unlimited"               -> no gating
+ * Parse a comma-separated gating string into BudgetLimit + CostLimit +
+ * SessionGrainLimits. Examples:
+ *
+ *   "req:200/hour"                         -> request-only
+ *   "cost:100/day"                         -> cost-only
+ *   "req:30/minute,cost:50/day"            -> minute-grain rate limit + daily USD cap
+ *   "req:500/hour,cost:50/day"             -> both apply (first to trip blocks)
+ *   "cost:1.00/session,total_tokens:50000/session,tool_calls:8/session"
+ *                                          -> session-grain ceilings (enforced by CostSession)
+ *   "unlimited"                            -> no gating
+ *
+ * Backwards compatible: `req:N/hour` from alpha.19 still writes the legacy
+ * `requestsPerHour` field so existing backend wiring keeps working.
  */
 function parseGating(input: string, envKey: string): {
   budgetLimit: BudgetLimit;
   costLimit: CostLimit;
+  sessionLimits?: SessionGrainLimits;
 } {
   let budgetLimit: BudgetLimit = { kind: "unlimited" };
   let costLimit: CostLimit = { kind: "unlimited" };
+  let sessionLimits: SessionGrainLimits | undefined;
 
   if (input.trim() === "unlimited") {
     return { budgetLimit, costLimit };
@@ -112,32 +130,74 @@ function parseGating(input: string, envKey: string): {
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
 
+  function ensureRequests(): Extract<BudgetLimit, { kind: "requests" }> {
+    if (budgetLimit.kind !== "requests") {
+      budgetLimit = { kind: "requests" };
+    }
+    return budgetLimit;
+  }
+
+  function ensureUsd(): Extract<CostLimit, { kind: "usd" }> {
+    if (costLimit.kind !== "usd") {
+      costLimit = { kind: "usd" };
+    }
+    return costLimit;
+  }
+
+  function ensureSession(): SessionGrainLimits {
+    if (!sessionLimits) sessionLimits = {};
+    return sessionLimits;
+  }
+
   for (const token of tokens) {
     if (token.startsWith("req:")) {
-      const m = token.match(/^req:(\d+)\/hour$/);
-      if (!m) throw new ConfigError(`Invalid request gating in ${envKey}: "${token}" (expected req:N/hour)`);
-      budgetLimit = { kind: "requests", requestsPerHour: parseInt(m[1]!, 10) };
-    } else if (token.startsWith("cost:")) {
-      const m = token.match(/^cost:(\d+(?:\.\d+)?)\/(hour|day|month)$/);
+      const m = token.match(/^req:(\d+)\/(minute|hour|session)$/);
       if (!m) {
         throw new ConfigError(
-          `Invalid cost gating in ${envKey}: "${token}" (expected cost:N/{hour|day|month})`,
+          `Invalid request gating in ${envKey}: "${token}" (expected req:N/{minute|hour|session})`,
+        );
+      }
+      const amount = parseInt(m[1]!, 10);
+      const window = m[2] as "minute" | "hour" | "session";
+      const next = ensureRequests();
+      if (window === "minute") next.perMinute = amount;
+      else if (window === "hour") {
+        next.perHour = amount;
+        // Backwards-compat: legacy field still populated so older backends
+        // that haven't been upgraded to read `perHour` keep working.
+        next.requestsPerHour = amount;
+      } else if (window === "session") next.perSession = amount;
+    } else if (token.startsWith("cost:")) {
+      const m = token.match(/^cost:(\d+(?:\.\d+)?)\/(minute|hour|day|month|session)$/);
+      if (!m) {
+        throw new ConfigError(
+          `Invalid cost gating in ${envKey}: "${token}" (expected cost:N/{minute|hour|day|month|session})`,
         );
       }
       const amount = parseFloat(m[1]!);
-      const window = m[2] as "hour" | "day" | "month";
-      const next: { kind: "usd"; perHour?: number; perDay?: number; perMonth?: number } = {
-        kind: "usd",
-      };
-      if (costLimit.kind === "usd") {
-        if (costLimit.perHour !== undefined) next.perHour = costLimit.perHour;
-        if (costLimit.perDay !== undefined) next.perDay = costLimit.perDay;
-        if (costLimit.perMonth !== undefined) next.perMonth = costLimit.perMonth;
+      const window = m[2] as "minute" | "hour" | "day" | "month" | "session";
+      const next = ensureUsd();
+      if (window === "minute") next.perMinute = amount;
+      else if (window === "hour") next.perHour = amount;
+      else if (window === "day") next.perDay = amount;
+      else if (window === "month") next.perMonth = amount;
+      else if (window === "session") next.perSession = amount;
+    } else if (token.startsWith("total_tokens:")) {
+      const m = token.match(/^total_tokens:(\d+)\/session$/);
+      if (!m) {
+        throw new ConfigError(
+          `Invalid session-grain gating in ${envKey}: "${token}" (expected total_tokens:N/session)`,
+        );
       }
-      if (window === "hour") next.perHour = amount;
-      if (window === "day") next.perDay = amount;
-      if (window === "month") next.perMonth = amount;
-      costLimit = next;
+      ensureSession().totalTokensPerSession = parseInt(m[1]!, 10);
+    } else if (token.startsWith("tool_calls:")) {
+      const m = token.match(/^tool_calls:(\d+)\/session$/);
+      if (!m) {
+        throw new ConfigError(
+          `Invalid session-grain gating in ${envKey}: "${token}" (expected tool_calls:N/session)`,
+        );
+      }
+      ensureSession().toolCallsPerSession = parseInt(m[1]!, 10);
     } else if (token === "unlimited") {
       // explicit unlimited; do nothing
     } else {
@@ -145,5 +205,5 @@ function parseGating(input: string, envKey: string): {
     }
   }
 
-  return { budgetLimit, costLimit };
+  return sessionLimits ? { budgetLimit, costLimit, sessionLimits } : { budgetLimit, costLimit };
 }
