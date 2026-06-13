@@ -62,6 +62,7 @@ export default defineConfig({
             { text: "Task Routing", link: "/concepts/task-routing" },
             { text: "Cost vs Request Gating", link: "/concepts/cost-vs-request-gating" },
             { text: "Content Blocks", link: "/concepts/content-blocks" },
+            { text: "Cache Control", link: "/concepts/cache" },
             { text: "Validation Strategies", link: "/concepts/validation-strategies" },
           ],
         },
@@ -112,6 +113,7 @@ export default defineConfig({
             { text: "From Vercel AI SDK", link: "/migration/from-vercel-ai" },
             { text: "From direct SDKs", link: "/migration/from-direct-sdk" },
             { text: "From LangChain.js (planned)", link: "/migration/from-langchain" },
+            { text: "alpha.18 → alpha.19 (BREAKING)", link: "/migration/alpha-18-to-alpha-19" },
           ],
         },
         {

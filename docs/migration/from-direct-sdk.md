@@ -85,7 +85,7 @@ result.usage.outputTokens;      // output tokens
 result.usage.totalTokens;       // sum
 result.usage.cacheReadTokens;   // present when prompt cache used (Anthropic)
 result.cost.totalUSD;           // exact USD for this call
-result.cost.cacheDiscountUSD;   // savings from cache
+result.cost.cacheSavingsUSD;    // savings from cache (alpha.19+; renamed from cacheDiscountUSD)
 result.modelId;                 // which model was actually used
 result.providerAlias;           // which env alias was selected
 result.latencyMs;               // measured end-to-end latency

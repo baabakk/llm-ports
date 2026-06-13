@@ -70,7 +70,7 @@ const result = await llm.generateText({ taskType: "triage", prompt });
 result.cost.inputUSD;   // input tokens cost (incl. cache reads/writes)
 result.cost.outputUSD;  // output tokens cost
 result.cost.totalUSD;   // sum
-result.cost.cacheDiscountUSD;  // savings vs paying full input rate (when cache used)
+result.cost.cacheSavingsUSD;  // savings vs paying full input rate (when cache used; alpha.19+)
 
 result.usage.inputTokens;       // raw token counts
 result.usage.outputTokens;
