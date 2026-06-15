@@ -20,7 +20,9 @@
     "@llm-ports/adapter-vercel": "0.1.0-alpha.13",
     "@llm-ports/benchmarks": "0.0.0",
     "@llm-ports/capabilities": "0.1.0-alpha.13",
-    "@llm-ports/core": "0.1.0-alpha.13"
+    "@llm-ports/consumer-type-check": "0.0.0",
+    "@llm-ports/core": "0.1.0-alpha.13",
+    "@llm-ports/migrate": "0.1.0-alpha.20.1"
   },
   "changesets": [
     "abort-signal-options",

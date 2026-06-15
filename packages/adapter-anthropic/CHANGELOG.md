@@ -1,6 +1,13 @@
 # @llm-ports/adapter-anthropic
 
 
+## 0.1.0-alpha.20.1
+
+### Patch Changes
+
+- No code change. Version bump for workspace alignment with the alpha.20.1 migration-safeguards release.
+
+
 ## 0.1.0-alpha.20
 
 ### Minor Changes

@@ -1,6 +1,13 @@
 # @llm-ports/core
 
 
+## 0.1.0-alpha.20.1
+
+### Patch Changes
+
+- Migration safeguards release. Adds a postinstall banner that prints a one-line notice when @llm-ports/core changes versions between installs, pointing users at MIGRATION.md. The banner skips on CI (CI=true), skips when stdout is not a TTY, skips when LLM_PORTS_NO_NOTICE=1 is set, and bails silently on any error so it can never block an install. Run-only on version change; a marker file in the package install dir prevents repeat prints for the same version. No runtime API change; the banner is install-time only.
+
+
 ## 0.1.0-alpha.20
 
 ### Minor Changes

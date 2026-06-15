@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-anthropic",
-  "version": "0.1.0-alpha.20",
+  "version": "0.1.0-alpha.20.1",
   "description": "Direct @anthropic-ai/sdk adapter for llm-ports. Implements LLMPort with prompt caching, vision, and tool use support for Claude models.",
   "license": "MIT",
   "author": "Babak Abbaschian",

@@ -9,19 +9,34 @@ This page gets you from `pnpm install` to a working LLM call in under 5 minutes.
 You always need `@llm-ports/core`. You also pick at least one adapter and (optionally) the capabilities package.
 
 ```bash
-pnpm add @llm-ports/core @llm-ports/adapter-anthropic @anthropic-ai/sdk zod
+# Recommended: pin to the exact alpha version (see "Pinning" below).
+pnpm add @llm-ports/core@0.1.0-alpha.20.1 @llm-ports/adapter-anthropic@0.1.0-alpha.20.1 @anthropic-ai/sdk zod
 
 # Optional: reusable cognitive operations (classify, draft, score, ...)
-pnpm add @llm-ports/capabilities
+pnpm add @llm-ports/capabilities@0.1.0-alpha.20.1
 ```
 
-For other providers:
+For other providers (pin the same exact version):
 
 | Provider | Install |
-|----------|---------|
-| OpenAI (or 10+ compat: Groq, Together, Fireworks, Cerebras, ...) | `pnpm add @llm-ports/adapter-openai openai` |
-| Ollama (local LLMs) | `pnpm add @llm-ports/adapter-ollama ollama` |
-| Vercel AI SDK migration | `pnpm add @llm-ports/adapter-vercel ai @ai-sdk/anthropic` |
+|---|---|
+| OpenAI (or 10+ compat: Groq, Together, Fireworks, Cerebras, ...) | `pnpm add @llm-ports/adapter-openai@0.1.0-alpha.20.1 openai` |
+| Ollama (local LLMs) | `pnpm add @llm-ports/adapter-ollama@0.1.0-alpha.20.1 ollama` |
+| Vercel AI SDK migration | `pnpm add @llm-ports/adapter-vercel@0.1.0-alpha.20.1 ai @ai-sdk/anthropic` |
+
+### Pinning during the alpha series
+
+Pin exactly during the alpha line. The `@alpha` dist-tag tracks the latest published prerelease and can therefore jump you across breaking changes on a routine `pnpm install`. An exact pin locks you to a known-good version until you deliberately upgrade. See [MIGRATION.md](https://github.com/baabakk/llm-ports/blob/main/MIGRATION.md) for the per-release migration table; use the codemod for mechanical rewrites:
+
+```bash
+npx @llm-ports/migrate@alpha alpha-19-to-alpha-20 --write
+```
+
+The `@alpha` tag is fine for experimentation:
+
+```bash
+pnpm add @llm-ports/core@alpha
+```
 
 ## Configure providers in `.env`
 

@@ -114,6 +114,7 @@ export default defineConfig({
             { text: "From direct SDKs", link: "/migration/from-direct-sdk" },
             { text: "From LangChain.js (planned)", link: "/migration/from-langchain" },
             { text: "alpha.18 → alpha.19 (BREAKING)", link: "/migration/alpha-18-to-alpha-19" },
+            { text: "alpha.19 → alpha.20 (TS-level)", link: "/migration/alpha-19-to-alpha-20" },
           ],
         },
         {

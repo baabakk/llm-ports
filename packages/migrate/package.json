@@ -1,0 +1,53 @@
+{
+  "name": "@llm-ports/migrate",
+  "version": "0.1.0-alpha.20.1",
+  "description": "Codemods for migrating consumer code across @llm-ports/* alpha releases. Conservative, best-effort, runs offline.",
+  "license": "MIT",
+  "author": "Babak Abbaschian",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "bin": {
+    "llm-ports-migrate": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baabakk/llm-ports.git",
+    "directory": "packages/migrate"
+  },
+  "keywords": [
+    "llm-ports",
+    "migrate",
+    "codemod",
+    "alpha"
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/core",
-  "version": "0.1.0-alpha.20",
+  "version": "0.1.0-alpha.20.1",
   "description": "Provider-agnostic LLM port interface, registry, cost gating, content blocks, validation strategies. The foundation of llm-ports.",
   "license": "MIT",
   "author": "Babak Abbaschian",
@@ -17,6 +17,7 @@
   },
   "files": [
     "dist",
+    "scripts/postinstall-notice.mjs",
     "README.md"
   ],
   "scripts": {
@@ -25,7 +26,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "postinstall": "node scripts/postinstall-notice.mjs || true"
   },
   "dependencies": {
     "jsonrepair": "^3.14.0"

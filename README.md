@@ -304,26 +304,53 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Installation
 
-`llm-ports` is in alpha. All 7 packages are at `v0.1.0-alpha.13`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
+`llm-ports` is in alpha. All 7 packages plus the new `@llm-ports/migrate` codemod ship at `v0.1.0-alpha.20.1`. Stable v0.1 lands after a short alpha bake — see the [v0.1 status page](https://baabakk.github.io/llm-ports/v0-1-status) for what's stable today vs still being hardened.
 
 ```bash
-npm install @llm-ports/core
+npm install @llm-ports/core@0.1.0-alpha.20.1
 ```
 
 Install adapters as needed:
 
 ```bash
-npm install @llm-ports/adapter-anthropic
-npm install @llm-ports/adapter-openai
-npm install @llm-ports/adapter-google
-npm install @llm-ports/adapter-ollama
-npm install @llm-ports/adapter-vercel
-npm install @llm-ports/capabilities
+npm install @llm-ports/adapter-anthropic@0.1.0-alpha.20.1
+npm install @llm-ports/adapter-openai@0.1.0-alpha.20.1
+npm install @llm-ports/adapter-google@0.1.0-alpha.20.1
+npm install @llm-ports/adapter-ollama@0.1.0-alpha.20.1
+npm install @llm-ports/adapter-vercel@0.1.0-alpha.20.1
+npm install @llm-ports/capabilities@0.1.0-alpha.20.1
 ```
 
-(All six packages are scoped under `@llm-ports`. They're versioned together via changesets.)
+(Scoped under `@llm-ports`. Versioned together via changesets.)
 
 Peer dependency: `zod >=3.24.0 <5`. Bring your own SDKs (`@anthropic-ai/sdk`, `openai`, `ollama`, `ai`).
+
+### Pinning during the alpha series
+
+**Recommended: pin to the exact alpha version**, not the `@alpha` dist-tag, while we're still shape-locking. The `@alpha` tag tracks the latest published prerelease; a `pnpm install` or `npm update` can therefore jump you across breaking changes silently. Exact pins lock the version until you deliberately bump it, at which point you read [MIGRATION.md](./MIGRATION.md) and apply the per-release migration.
+
+```jsonc
+// package.json — recommended during alphas
+{
+  "dependencies": {
+    "@llm-ports/core": "0.1.0-alpha.20.1",
+    "@llm-ports/adapter-anthropic": "0.1.0-alpha.20.1"
+  }
+}
+```
+
+The `@alpha` tag is fine for experimentation:
+
+```bash
+npm install @llm-ports/core@alpha
+```
+
+When you bump, the `@llm-ports/core` postinstall emits a one-line banner pointing at the migration page. To upgrade across multiple alphas mechanically, use the bundled codemod:
+
+```bash
+npx @llm-ports/migrate@alpha alpha-19-to-alpha-20 --dry-run    # preview
+npx @llm-ports/migrate@alpha alpha-19-to-alpha-20 --write      # apply
+```
 
 ---
 

@@ -6,6 +6,23 @@ This is the page to share when someone asks "what works in alpha?" or "what shou
 
 ---
 
+## How to install during the alpha line
+
+> **Recommended: exact-version pin** during alphas, not the `@alpha` dist-tag. The `@alpha` tag tracks the latest published prerelease; a routine `pnpm install` can jump you across breaking changes. Pin the exact version (e.g. `0.1.0-alpha.20.1`) and bump deliberately, reading [MIGRATION.md](https://github.com/baabakk/llm-ports/blob/main/MIGRATION.md) at each step.
+>
+> ```jsonc
+> // package.json — recommended during alphas
+> { "dependencies": { "@llm-ports/core": "0.1.0-alpha.20.1" } }
+> ```
+>
+> For mechanical migrations across releases:
+>
+> ```bash
+> npx @llm-ports/migrate@alpha alpha-19-to-alpha-20 --write
+> ```
+
+---
+
 ## What's stable in v0.1
 
 These are load-bearing today, with comprehensive test coverage. Not "experimental"; not "planned." If you build on these, the contract will not change without a deprecation cycle.
