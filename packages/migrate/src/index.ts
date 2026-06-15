@@ -140,7 +140,7 @@ registerMigration({
       return lo + 1;
     }
 
-    let next = source.replace(pattern, (_full, expr: string, offset: number) => {
+    const next = source.replace(pattern, (_full, expr: string, offset: number) => {
       // Skip if the match is inside an `if (` condition on the same line —
       // the conditional narrowing handles it.
       const ln = lineOf(offset);
