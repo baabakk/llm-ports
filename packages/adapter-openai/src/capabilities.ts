@@ -137,19 +137,42 @@ export function isTemperatureRejection(err: unknown): boolean {
 }
 
 /**
- * True if this error is OpenAI rejecting `response_format: { type: "json_object" }`.
- * Some reasoning models don't support native JSON mode.
+ * True if this error is OpenAI (or an OpenAI-compatible backend) rejecting our
+ * `response_format` field. Covers two distinct cause classes that both want the
+ * same rescue (downgrade: drop `response_format`, fall back to prompted JSON):
+ *
+ *  1. **Model doesn't support native JSON mode.** Some reasoning models reject
+ *     `response_format: { type: "json_object" }` outright. Error shape:
+ *       - structured: `code: "unsupported_value"`, `param: "response_format"`
+ *       - message: contains "response_format" + one of "unsupported" / "not support" / "does not"
+ *     This was the original alpha.14/.15-era trigger.
+ *
+ *  2. **Schema is strict-incompatible.** OpenAI native validates the supplied
+ *     JSON Schema before generation. Schemas containing open-ended dictionaries
+ *     (`z.record(...)`), regex constraints, or other features strict mode can't
+ *     express get rejected with errors like:
+ *       - `"Invalid schema for response_format... Extra required key 'X' supplied"`
+ *       - `"Invalid schema for response_format... 'properties' must be specified"`
+ *     The rescue is the same: drop strict mode, drop the schema field, fall back
+ *     to prompted JSON. Added alpha.21 after 2026-06-17 probe showed the rescue
+ *     was silently dead on OpenAI native's most common structured-output failure
+ *     mode. See issue #46.
  */
 export function isJsonModeRejection(err: unknown): boolean {
   const fields = getErrorFields(err);
   if (!fields) return false;
-  if (fields.code === "unsupported_value" && fields.param === "response_format") {
+  if (
+    (fields.code === "unsupported_value" || fields.code === "invalid_value") &&
+    fields.param === "response_format"
+  ) {
     return true;
   }
   if (
     typeof fields.message === "string" &&
     /response_format/i.test(fields.message) &&
-    /(unsupported|not support|does not)/i.test(fields.message)
+    /(unsupported|not support|does not|invalid schema|extra required|missing required)/i.test(
+      fields.message,
+    )
   ) {
     return true;
   }
