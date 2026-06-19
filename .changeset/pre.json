@@ -45,6 +45,8 @@
     "alpha-21-adapter-openai-strict-allowlist-pricing",
     "alpha-21-capabilities-strict-passthrough",
     "alpha-21-core-strict-and-observability",
+    "alpha-22-adapter-google-httpoptions",
+    "alpha-22-adapter-openai-reasoning-architecture",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",

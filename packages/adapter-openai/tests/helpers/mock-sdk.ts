@@ -86,6 +86,54 @@ export function buildOpenAIChatResponse(spec: MockedOpenAIChatResponse): {
 }
 
 /**
+ * Build a DeepInfra gpt-oss-shaped chat response (alpha.22+ test helper).
+ *
+ * DeepInfra serves gpt-oss-120b in OpenAI's harmony format with the
+ * tool-call / reasoning intent in `message.reasoning_content` rather than
+ * standard `tool_calls`. Crucially, `finish_reason` is `"stop"` (not
+ * `"length"`), `content` is empty, and `tool_calls` is empty/absent. The
+ * `usage.completion_tokens_details.reasoning_tokens` field is typically
+ * NOT populated either.
+ *
+ * Empirically captured by ADW's 2026-06-19 raw 2-turn probe.
+ */
+export function buildDeepInfraHarmonyResponse(spec: {
+  reasoningContent: string;
+  content?: string;
+  promptTokens: number;
+  completionTokens: number;
+  modelId?: string;
+  finishReason?: "stop" | "length";
+}): unknown {
+  const message: Record<string, unknown> = {
+    role: "assistant",
+    reasoning_content: spec.reasoningContent,
+  };
+  if (spec.content !== undefined) message["content"] = spec.content;
+  else message["content"] = "";
+  return {
+    id: `chatcmpl-deepinfra-${Math.random().toString(36).slice(2)}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: spec.modelId ?? "openai/gpt-oss-120b",
+    choices: [
+      {
+        index: 0,
+        message,
+        finish_reason: spec.finishReason ?? "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: spec.promptTokens,
+      completion_tokens: spec.completionTokens,
+      total_tokens: spec.promptTokens + spec.completionTokens,
+      // DeepInfra typically doesn't populate reasoning_tokens for gpt-oss.
+      // This is part of why pre-alpha.22 runtime detection missed it.
+    },
+  };
+}
+
+/**
  * Build a Cerebras gpt-oss-shaped chat response: CoT in `message.reasoning`,
  * `content` field omitted entirely on starved responses, `reasoning_tokens=0`
  * in usage (Cerebras doesn't separately count them).

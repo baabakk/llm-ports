@@ -1,5 +1,12 @@
 # @llm-ports/example-multi-provider
 
+## 0.1.0-alpha.22
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/adapter-openai@0.1.0-alpha.22
+
 ## 0.1.0-alpha.21
 
 ### Patch Changes

@@ -34,5 +34,6 @@ export {
   createGoogleAdapter,
   type GoogleAdapter,
   type GoogleAdapterOptions,
+  type HttpOptions,
 } from "./adapter.js";
 export { GEMINI_PRICING, lookupGeminiPricing } from "./pricing.js";

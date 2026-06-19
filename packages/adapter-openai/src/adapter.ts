@@ -993,24 +993,30 @@ function learnConstraintsFromError(err: unknown, req: LogicalChatRequest): boole
 
 /**
  * Inspect a successful response and remember any newly-observed model behavior.
- * Marks the model as reasoning if either signal is present:
+ * Marks the model as reasoning if any of these signals is present:
  *   - `usage.completion_tokens_details.reasoning_tokens > 0` (OpenAI o-series, gpt-5-nano)
- *   - `choices[0].message.reasoning` populated (Cerebras gpt-oss-* and similar
- *     compat providers that expose CoT as a separate field)
+ *   - `choices[0].message.reasoning` populated (Cerebras gpt-oss-*, vLLM, some
+ *     OpenAI-compat providers that expose CoT as a separate field)
+ *   - `choices[0].message.reasoning_content` populated (DeepInfra's gpt-oss
+ *     harmony serving — the tool-call / reasoning intent lands here when the
+ *     provider hasn't translated harmony channels into standard `tool_calls`).
+ *     Added alpha.22 after ADW empirical findings.
  * Future calls to this model will get an expanded max_completion_tokens budget
  * via the headroom multiplier so visible output has room after reasoning.
  */
 function learnFromResponse(modelId: string, response: unknown): void {
   if (!response || typeof response !== "object") return;
   const r = response as {
-    choices?: Array<{ message?: { reasoning?: string | null } }>;
+    choices?: Array<{ message?: { reasoning?: string | null; reasoning_content?: string | null } }>;
     usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
   };
   const reasoningTokens = r.usage?.completion_tokens_details?.reasoning_tokens;
   const reasoningField = r.choices?.[0]?.message?.reasoning;
+  const reasoningContent = r.choices?.[0]?.message?.reasoning_content;
   const isReasoning =
     (reasoningTokens !== undefined && reasoningTokens > 0) ||
-    (typeof reasoningField === "string" && reasoningField.length > 0);
+    (typeof reasoningField === "string" && reasoningField.length > 0) ||
+    (typeof reasoningContent === "string" && reasoningContent.length > 0);
   if (isReasoning) {
     rememberConstraint(modelId, { reasoningModel: true });
   }
@@ -1018,23 +1024,45 @@ function learnFromResponse(modelId: string, response: unknown): void {
 
 /**
  * Detect the "all budget consumed by reasoning" pattern: empty visible text +
- * finish_reason=length, with any signal that the model is reasoning (either
- * usage.reasoning_tokens > 0 OR a populated message.reasoning field). This
- * tells the caller to retry with the now-learned reasoning multiplier so the
- * model has budget for visible output.
+ * no tool_calls + any signal that the model is reasoning. This tells the
+ * caller to retry with the now-learned reasoning multiplier so the model has
+ * budget for visible output.
  *
  * Different providers expose reasoning differently:
- *   - OpenAI o-series + gpt-5-nano: message.content empty, usage has reasoning_tokens
- *   - Cerebras gpt-oss-*: message.content missing entirely, message.reasoning has CoT
- * Both produce the same end-user symptom (empty visible text), so we recover the
- * same way: expand the total budget and retry.
+ *   - OpenAI o-series + gpt-5-nano: message.content empty, usage has reasoning_tokens, finish=length
+ *   - Cerebras gpt-oss-*: message.content missing entirely, message.reasoning has CoT, finish=length
+ *   - DeepInfra gpt-oss (alpha.22 ADW finding): message.content empty,
+ *     message.reasoning_content has harmony channel output (the tool-call
+ *     intent lands here), finish=stop (not length)
+ * All produce the same end-user symptom (empty visible text, no executable
+ * tool_calls), so we recover the same way: expand the total budget and retry.
+ *
+ * The alpha.22 broadening relaxes finish_reason from `length` only to either
+ * `length` or `stop` whenever the empty-visible-output + reasoning-signal
+ * pattern holds. The narrow `length`-only check missed the DeepInfra gpt-oss
+ * harmony case where the provider returns `stop` despite the reasoning channel
+ * holding the intended output. See llm-ports#46 / discussion #49 for the
+ * empirical evidence motivating the broadening.
+ *
+ * Note: this detection rescues the same call once with an expanded budget;
+ * it does NOT yet parse the reasoning_content channel for tool-call intent.
+ * Full harmony-channel parsing (so DeepInfra-served gpt-oss tool calls become
+ * executable) is a separate workstream tracked in a follow-up issue — that
+ * requires design work across provider serving formats. This change makes
+ * the failure observable and budget-correct; it does not auto-recover the
+ * harmony tool-call case.
  */
 function reasoningStarvedResponse(response: unknown, req: LogicalChatRequest): boolean {
   if (!response || typeof response !== "object") return false;
   if (req.maxOutputTokens === undefined) return false;
   const r = response as {
     choices?: Array<{
-      message?: { content?: string | null; reasoning?: string | null };
+      message?: {
+        content?: string | null;
+        reasoning?: string | null;
+        reasoning_content?: string | null;
+        tool_calls?: Array<unknown> | null;
+      };
       finish_reason?: string;
     }>;
     usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
@@ -1042,12 +1070,25 @@ function reasoningStarvedResponse(response: unknown, req: LogicalChatRequest): b
   const choice = r.choices?.[0];
   const text = choice?.message?.content ?? "";
   const finishReason = choice?.finish_reason;
+  const toolCalls = choice?.message?.tool_calls;
   const reasoningTokens = r.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
   const reasoningField = choice?.message?.reasoning;
+  const reasoningContent = choice?.message?.reasoning_content;
   const hasReasoningSignal =
     reasoningTokens > 0 ||
-    (typeof reasoningField === "string" && reasoningField.length > 0);
-  return text === "" && finishReason === "length" && hasReasoningSignal;
+    (typeof reasoningField === "string" && reasoningField.length > 0) ||
+    (typeof reasoningContent === "string" && reasoningContent.length > 0);
+  // Empty visible output = no content text AND no executable tool_calls. A
+  // response with valid tool_calls is not starved — the model successfully
+  // produced output, even if content is empty.
+  const noVisibleOutput =
+    text === "" && (!Array.isArray(toolCalls) || toolCalls.length === 0);
+  // alpha.22+: accept both finish_reason values. Pre-alpha.22 required
+  // `length` only (OpenAI native + Cerebras pattern); DeepInfra's gpt-oss
+  // harmony serving returns `stop`. The reasoning-signal + no-visible-output
+  // conjunction is sufficient to discriminate from genuine completion.
+  const finishStarvable = finishReason === "length" || finishReason === "stop";
+  return noVisibleOutput && finishStarvable && hasReasoningSignal;
 }
 
 /**

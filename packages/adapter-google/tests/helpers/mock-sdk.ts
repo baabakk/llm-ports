@@ -4,22 +4,34 @@
 
 import { vi, type Mock } from "vitest";
 
-export const mockGenerateContent: Mock = vi.fn();
-export const mockGenerateContentStream: Mock = vi.fn();
-
-vi.mock("@google/genai", () => {
-  const ctor = vi.fn().mockImplementation(() => ({
+// `vi.hoisted` ensures the mock function references are defined BEFORE
+// `vi.mock()` runs (vi.mock is hoisted above ordinary const declarations).
+// Required to expose the constructor spy for alpha.22's httpOptions
+// pass-through tests.
+const hoisted = vi.hoisted(() => {
+  const mockGenerateContent = vi.fn();
+  const mockGenerateContentStream = vi.fn();
+  const mockGoogleGenAICtor = vi.fn().mockImplementation(() => ({
     models: {
       generateContent: mockGenerateContent,
       generateContentStream: mockGenerateContentStream,
     },
   }));
-  return { GoogleGenAI: ctor };
+  return { mockGenerateContent, mockGenerateContentStream, mockGoogleGenAICtor };
+});
+
+export const mockGenerateContent: Mock = hoisted.mockGenerateContent;
+export const mockGenerateContentStream: Mock = hoisted.mockGenerateContentStream;
+export const mockGoogleGenAICtor: Mock = hoisted.mockGoogleGenAICtor;
+
+vi.mock("@google/genai", () => {
+  return { GoogleGenAI: hoisted.mockGoogleGenAICtor };
 });
 
 export function resetMocks(): void {
   mockGenerateContent.mockReset();
   mockGenerateContentStream.mockReset();
+  mockGoogleGenAICtor.mockClear();
 }
 
 // ─── Response builders ────────────────────────────────────────────────

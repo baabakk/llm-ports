@@ -27,6 +27,50 @@
 import { createCapabilityLearner } from "@llm-ports/core";
 import type { KnownModelConstraint, ModelCapabilities } from "@llm-ports/core";
 
+// ─── Model-ID normalization (alpha.22+) ──────────────────────────────
+//
+// OpenAI-compat providers expose models under HuggingFace-style namespaced
+// IDs: DeepInfra uses `openai/gpt-oss-120b`, `deepseek-ai/DeepSeek-V4-Flash`,
+// `google/gemma-4-31B-it`; Parasail uses `XiaomiMiMo/MiMo-V2.5`; Groq uses
+// `openai/gpt-oss-120b`. The same canonical model served by different
+// providers shows up with different prefixes (Cerebras's `gpt-oss-120b`
+// is the same model as DeepInfra's `openai/gpt-oss-120b`, but the catalog
+// patterns are anchored at `^` and don't match the prefixed form).
+//
+// Architecture choice: rather than maintain a per-(model × provider) regex
+// matrix, normalize every model ID to its canonical name (the part after
+// the last `/`) before any catalog or learner lookup. The catalog stays a
+// small list of anchored patterns against canonical names; new providers
+// hosting an already-known model require zero catalog edits.
+//
+// The raw model ID is still used in the SDK request body — DeepInfra
+// expects `openai/gpt-oss-120b`, not `gpt-oss-120b`. Normalization is
+// scoped to the capability-learning layer only.
+//
+// OpenAI-native IDs (`gpt-5`, `o3`, `gpt-4o-mini`) have no slash and pass
+// through unchanged. Anthropic + Google adapters don't use namespaced IDs.
+//
+// See llm-ports#46 / discussion #49 for the originating ADW + Dramma
+// findings and the architectural critique that motivated this design.
+
+/**
+ * Strip a provider/namespace prefix from a model ID, returning the
+ * canonical name. The canonical name is the substring after the last `/`.
+ * Model IDs with no `/` pass through unchanged.
+ *
+ * Examples:
+ *   gpt-oss-120b                       → gpt-oss-120b   (OpenAI native, unchanged)
+ *   openai/gpt-oss-120b                → gpt-oss-120b   (DeepInfra/Groq form)
+ *   deepseek-ai/DeepSeek-V4-Flash      → DeepSeek-V4-Flash
+ *   XiaomiMiMo/MiMo-V2.5               → MiMo-V2.5
+ *   google/gemma-4-31B-it              → gemma-4-31B-it
+ *   models/gemini-2.0-flash            → gemini-2.0-flash
+ */
+export function normalizeModelId(modelId: string): string {
+  const lastSlash = modelId.lastIndexOf("/");
+  return lastSlash === -1 ? modelId : modelId.slice(lastSlash + 1);
+}
+
 // ─── Process-wide learned constraints (one learner shared by this adapter) ─
 
 const learner = createCapabilityLearner();
@@ -36,12 +80,12 @@ export function getEffectiveCapabilities(
   modelId: string,
   userSupplied: ModelCapabilities | undefined,
 ): ModelCapabilities {
-  return learner.get(modelId, userSupplied);
+  return learner.get(normalizeModelId(modelId), userSupplied);
 }
 
 /** Record a discovered constraint; used by the adapter after a fallback retry. */
 export function rememberConstraint(modelId: string, constraint: Partial<ModelCapabilities>): void {
-  learner.remember(modelId, constraint);
+  learner.remember(normalizeModelId(modelId), constraint);
 }
 
 /** Test-only: clear learned state. */
@@ -85,7 +129,7 @@ export const KNOWN_REASONING_MODELS: readonly KnownModelConstraint[] = [
 
 /** Seed the learner with this adapter's known-reasoning catalog for a model. */
 export function seedKnownConstraints(modelId: string): void {
-  learner.seedFromCatalog(modelId, KNOWN_REASONING_MODELS);
+  learner.seedFromCatalog(normalizeModelId(modelId), KNOWN_REASONING_MODELS);
 }
 
 // ─── Error classification (OpenAI-specific) ──────────────────────────

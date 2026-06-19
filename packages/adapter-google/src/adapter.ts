@@ -22,7 +22,7 @@
  *   - Code execution tool (Gemini's built-in code interpreter; lands in v0.2)
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type HttpOptions } from "@google/genai";
 import {
   attemptValidationRepair,
   computeChatCost,
@@ -90,7 +90,32 @@ export interface GoogleAdapterOptions {
    * adapter-anthropic + adapter-ollama).
    */
   onRetry?: OnRetry;
+  /**
+   * HTTP transport options forwarded verbatim to the underlying
+   * `@google/genai` `GoogleGenAI` constructor. (alpha.22+)
+   *
+   * The most common use case: a backend proxy that holds the real
+   * `GEMINI_API_KEY` and exposes a Bearer-token-authenticated endpoint
+   * to a browser bundle. Setting `httpOptions: { baseUrl: "https://your-
+   * backend/v1/llm/google" }` redirects every Gemini API call through
+   * the proxy without changing any other adapter behavior.
+   *
+   * Other supported fields (per @google/genai's `HttpOptions` interface):
+   *   - `apiVersion`           — pin v1 / v1beta etc.
+   *   - `headers`              — append custom request headers
+   *   - `timeout`              — per-request HTTP timeout
+   *   - `baseUrlResourceScope` — Vertex resource-scope when overriding baseUrl
+   *   - `retryOptions`         — built-in @google/genai retry tuning
+   *
+   * When omitted, `@google/genai`'s defaults apply (talks to
+   * `generativelanguage.googleapis.com`). See llm-ports#46 / discussion #49
+   * for the originating Dramma backend-proxy use case.
+   */
+  httpOptions?: HttpOptions;
 }
+
+// Re-export so consumers can type their httpOptions without an extra dep.
+export type { HttpOptions } from "@google/genai";
 
 // ─── Internal context ────────────────────────────────────────────────
 
@@ -126,7 +151,10 @@ export function createGoogleAdapter(opts: GoogleAdapterOptions): GoogleAdapter {
     ...(opts.pricingOverrides ?? {}),
   };
   const ctx: AdapterContext = {
-    client: new GoogleGenAI({ apiKey: opts.apiKey }),
+    client: new GoogleGenAI({
+      apiKey: opts.apiKey,
+      ...(opts.httpOptions ? { httpOptions: opts.httpOptions } : {}),
+    }),
     validationStrategy: opts.validationStrategy ?? {
       kind: "retry-with-feedback",
       maxAttempts: 2,
