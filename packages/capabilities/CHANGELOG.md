@@ -1,5 +1,29 @@
 # @llm-ports/capabilities
 
+## 0.1.0-alpha.21
+
+### Minor Changes
+
+- The five structured-output capability factories (`createClassifier`, `createScorer`, `createExtractor`, `createAnalyzer`, `createPlanner`) now accept and forward an optional per-call `strict?: boolean` to the underlying `LLMPort.generateStructured` call.
+
+  ```ts
+  const classify = createClassifier({ port, schema: ClosedShape, schemaName: "intent" });
+
+  // Force strict mode for this call (e.g. because the operator knows the
+  // schema is closed and the adapter's default is json_object).
+  const result = await classify({ content: "...", strict: true });
+  ```
+
+  `createSummarizer` and `createDrafter` are NOT updated because they call `generateText`, not `generateStructured` — strict mode is a structured-output concept and would be a no-op there.
+
+  Same precedence as the core port surface: per-call > adapter-level > auto-detect. Adapters that don't implement strict mode silently ignore the hint.
+
+  See llm-ports#46 and the alpha.21 `@llm-ports/core` changelog entry.
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.21
 
 ## 0.1.0-alpha.20.1
 
@@ -7,13 +31,11 @@
 
 - No code change. Version bump for workspace alignment with the alpha.20.1 migration-safeguards release.
 
-
 ## 0.1.0-alpha.20
 
 ### Minor Changes
 
 - No behavior change. `budgetScope` flows through to the underlying port call because capabilities forward all per-call options; documenting the alpha.20 plumbing here. Version bump for workspace alignment.
-
 
 ## 0.1.0-alpha.19.1
 

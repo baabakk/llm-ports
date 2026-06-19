@@ -24,6 +24,14 @@ import type {
   StreamStructuredOptions,
   StreamTextOptions,
 } from "../ports/llm-port.js";
+import {
+  deriveCacheHit,
+  emitCacheHit,
+  emitCost,
+  emitFallback,
+  emitTokenUsage,
+  type ObservabilityHooks,
+} from "../observability.js";
 import type {
   BatchEmbeddingOptions,
   BatchEmbeddingResult,
@@ -106,6 +114,33 @@ export interface RegistryOptions {
     | "default" // walk on ProviderUnavailableError
     | "none" // disable; caller handles errors
     | { shouldFallback: (err: unknown) => boolean };
+  /**
+   * OTel-aligned observability hooks. Optional; each hook is independent.
+   * Hooks are fire-and-forget — errors thrown by hook callbacks are swallowed
+   * so observability instrumentation can't break inference.
+   *
+   * Coverage in this release (alpha.21):
+   *   - onCost / onTokenUsage / onCacheHit : emitted by the Registry on every
+   *     successful call against generateText, generateStructured, runAgent
+   *     (and on each cache-hit response). Streaming methods do not emit cost
+   *     yet (streamed cost surfacing is a follow-up, mirroring the alpha.7
+   *     `walkChain` "no cost to record at stream-creation" behavior).
+   *   - onFallback : emitted by the Registry's `walkChain` whenever it
+   *     advances from one provider alias to the next due to runtime error,
+   *     budget rejection, or empty response. Per-call only; not emitted for
+   *     the initial selection or for `forceProviderAlias` calls (which by
+   *     contract don't fall back).
+   *   - onValidationRetry : hook type defined but not Registry-emitted in
+   *     alpha.21. Consumers wanting validation-retry observability should
+   *     use the adapter's existing `onRetry` hook and filter on
+   *     `reason === "validation-feedback"`. Registry-level emission is the
+   *     alpha.22 follow-up.
+   *
+   * Added in 0.1.0-alpha.21. Aligned with OpenTelemetry's `gen_ai.*` semantic
+   * conventions where applicable; events are designed to map cleanly onto
+   * spans and metrics in a downstream OTel pipeline.
+   */
+  observability?: ObservabilityHooks;
 }
 
 // ─── Selection result ────────────────────────────────────────────────
@@ -131,6 +166,8 @@ export class Registry {
    * viable provider in the fallback chain. See `RegistryOptions.runtimeFallback`.
    */
   public readonly shouldFallback: (err: unknown) => boolean;
+  /** OTel-aligned observability hooks, set at construction. Read by `walkChain` + `RegistryPort`. */
+  public readonly observability: ObservabilityHooks;
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -142,6 +179,7 @@ export class Registry {
     this.validationStrategy = opts.validationStrategy ?? DEFAULT_VALIDATION_STRATEGY;
     this.pricingOverrides = opts.pricingOverrides ?? {};
     this.shouldFallback = resolveRuntimeFallback(opts.runtimeFallback);
+    this.observability = opts.observability ?? {};
     this.validateConfig();
   }
 
@@ -560,6 +598,12 @@ async function walkChain<R>(
   recordCost: (sel: ModelSelection, result: R, key: string) => Promise<void>,
   forceProviderAlias?: string,
   budgetScope?: BudgetScopeRef,
+  operation:
+    | "generateText"
+    | "generateStructured"
+    | "streamText"
+    | "streamStructured"
+    | "runAgent" = "generateText",
 ): Promise<R> {
   // forceProviderAlias short-circuit: bypass task routing entirely. Single-
   // element chain. Runtime fallback does NOT engage — caller explicitly asked
@@ -580,10 +624,23 @@ async function walkChain<R>(
   const chain = await registry.selectViableChain(taskType, priority, budgetScope);
   const reasons: Record<string, string> = {};
   let lastErr: unknown;
+  let prevSelForFallback: ModelSelection | undefined;
   for (const sel of chain) {
     if (!sel.port) {
       reasons[sel.alias] = `adapter "${sel.adapter.name}" does not implement LLMPort`;
       continue;
+    }
+    // If a previous alias failed, this is a fallback advancement. Emit
+    // before we re-attempt so observers see the from→to transition in order.
+    if (prevSelForFallback) {
+      emitFallback(registry.observability.onFallback, {
+        fromAlias: prevSelForFallback.alias,
+        toAlias: sel.alias,
+        cause: "provider-error",
+        operation,
+        taskType,
+        reason: lastErr,
+      });
     }
     try {
       const result = await attempt(sel);
@@ -597,6 +654,7 @@ async function walkChain<R>(
       const message =
         err instanceof Error ? err.message : typeof err === "string" ? err : "unknown error";
       reasons[sel.alias] = `runtime fallback: ${message}`;
+      prevSelForFallback = sel;
       continue;
     }
   }
@@ -613,8 +671,67 @@ async function walkChain<R>(
 class RegistryPort implements LLMPort {
   constructor(private readonly registry: Registry) {}
 
+  /**
+   * Emit OTel-aligned observability events for a completed result.
+   *
+   * Called from generateText, generateStructured, runAgent after walkChain
+   * returns the successful result. Stream methods do not call this — streamed
+   * cost surfacing is the alpha.22 follow-up. (alpha.21+)
+   */
+  private emitResultEvents(
+    result: { cost: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
+    operation: "generateText" | "generateStructured" | "runAgent" | "embed" | "rerank",
+    taskType: string | undefined,
+    budgetScope?: BudgetScopeRef,
+  ): void {
+    const hooks = this.registry.observability;
+    if (hooks.onCost) {
+      emitCost(hooks.onCost, {
+        promptUsd: result.cost.inputUSD,
+        completionUsd: result.cost.outputUSD,
+        totalUsd: result.cost.totalUSD,
+        ...(result.cost.cacheSavingsUSD !== undefined ? { cacheReadUsd: result.cost.cacheSavingsUSD } : {}),
+        modelId: result.modelId,
+        providerAlias: result.providerAlias,
+        operation,
+        ...(taskType ? { taskType } : {}),
+        ...(budgetScope ? { budgetScope } : {}),
+      });
+    }
+    if (hooks.onTokenUsage) {
+      emitTokenUsage(hooks.onTokenUsage, {
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        totalTokens: result.usage.totalTokens,
+        ...(result.usage.cacheReadTokens !== undefined ? { cachedInputTokens: result.usage.cacheReadTokens } : {}),
+        ...(result.usage.cacheWriteTokens !== undefined ? { cacheCreationTokens: result.usage.cacheWriteTokens } : {}),
+        ...(result.usage.reasoningTokens !== undefined ? { reasoningTokens: result.usage.reasoningTokens } : {}),
+        modelId: result.modelId,
+        providerAlias: result.providerAlias,
+        operation,
+        ...(taskType ? { taskType } : {}),
+        ...(budgetScope ? { budgetScope } : {}),
+      });
+    }
+    if (hooks.onCacheHit) {
+      const hit = deriveCacheHit(result.usage, result.cost);
+      if (hit) {
+        emitCacheHit(hooks.onCacheHit, {
+          cachedTokens: hit.cachedTokens,
+          inputTokensTotal: hit.inputTokensTotal,
+          hitRatio: hit.hitRatio,
+          ...(hit.savingsUsd !== undefined ? { savingsUsd: hit.savingsUsd } : {}),
+          modelId: result.modelId,
+          providerAlias: result.providerAlias,
+          operation,
+          ...(taskType ? { taskType } : {}),
+        });
+      }
+    }
+  }
+
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
-    return walkChain(
+    const result = await walkChain(
       this.registry,
       options.taskType,
       options.priority,
@@ -622,13 +739,16 @@ class RegistryPort implements LLMPort {
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
       options.budgetScope,
+      "generateText",
     );
+    this.emitResultEvents(result, "generateText", options.taskType, options.budgetScope);
+    return result;
   }
 
   async generateStructured<T>(
     options: GenerateStructuredOptions<T>,
   ): Promise<GenerateStructuredResult<T>> {
-    return walkChain(
+    const result = await walkChain(
       this.registry,
       options.taskType,
       options.priority,
@@ -636,7 +756,10 @@ class RegistryPort implements LLMPort {
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
       options.budgetScope,
+      "generateStructured",
     );
+    this.emitResultEvents(result, "generateStructured", options.taskType, options.budgetScope);
+    return result;
   }
 
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
@@ -664,6 +787,7 @@ class RegistryPort implements LLMPort {
       },
       options.forceProviderAlias,
       options.budgetScope,
+      "streamText",
     );
     yield* stream;
   }
@@ -682,12 +806,13 @@ class RegistryPort implements LLMPort {
       },
       options.forceProviderAlias,
       options.budgetScope,
+      "streamStructured",
     );
     yield* stream;
   }
 
   async runAgent(options: RunAgentOptions): Promise<AgentResult> {
-    return walkChain(
+    const result = await walkChain(
       this.registry,
       options.taskType,
       options.priority,
@@ -695,7 +820,10 @@ class RegistryPort implements LLMPort {
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
       options.budgetScope,
+      "runAgent",
     );
+    this.emitResultEvents(result, "runAgent", options.taskType, options.budgetScope);
+    return result;
   }
 }
 

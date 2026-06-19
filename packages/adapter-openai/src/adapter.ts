@@ -231,6 +231,16 @@ export function autoDetectStrictResponseFormat(baseURL: string | undefined): boo
   // on a nested production scoring schema (BEPA A/B harness). Docs were
   // ambiguous; the probe is the source of truth.
   if (baseURL.includes("api.sambanova.ai")) return true;
+  // DeepInfra: empirically verified 2026-06-17 — deepseek-flash + gemma-31b
+  // jumped from 2/8 + 8/8 validation retries (json_object default) to 0/8 + 0/8
+  // with strict mode (ADW 04-Structured-Output-Reliability.md). DeepInfra's
+  // own docs explicitly recommend strict `json_schema` with `strict: true`
+  // for production schemas. Added alpha.21 per llm-ports#47.
+  if (baseURL.includes("api.deepinfra.com")) return true;
+  // Parasail: empirically verified 2026-06-17 — mimo-parasail (MiMo-V2.5)
+  // dropped from 3/8 validation retries to 0/8 with strict mode (same ADW
+  // sweep). Added alpha.21 per llm-ports#47.
+  if (baseURL.includes("api.parasail.io")) return true;
   // Unknown compat provider — stay opt-in.
   return false;
 }
@@ -389,10 +399,22 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
           : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
 
-        // When Cerebras / OpenAI strict mode is enabled, build the JSON
-        // Schema for the call. The schema is reused across retry-with-
-        // feedback rounds so we only build it once.
-        const strictResponseSchema = ctx.useStrictResponseFormat
+        // When strict mode is enabled, build the JSON Schema for the call.
+        // The schema is reused across retry-with-feedback rounds so we only
+        // build it once.
+        //
+        // Precedence (alpha.21+):
+        //   1. options.strict (per-call override; takes priority)
+        //   2. ctx.useStrictResponseFormat (adapter-level, set at construction)
+        //   3. autoDetectStrictResponseFormat(baseURL) (default, applied to (2)
+        //      at construction time if the user didn't pass useStrictResponseFormat)
+        //
+        // See llm-ports#46 for the empirical case driving the per-call hook:
+        // a registry with one adapter alias per provider needs to flip strict
+        // on/off per call based on the schema shape (closed-shape → strict,
+        // `z.record(...)` → json_object).
+        const effectiveStrict = options.strict ?? ctx.useStrictResponseFormat;
+        const strictResponseSchema = effectiveStrict
           ? {
               name: options.schemaName ?? "structured_output",
               schema: buildStrictJsonSchema(options.schema),
@@ -512,6 +534,16 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
       validateContent(options.prompt);
+      // alpha.21+: mirror generateStructured's strict-mode precedence chain
+      // so streamStructured callers can also opt into strict json_schema
+      // mode per call.
+      const effectiveStrict = options.strict ?? ctx.useStrictResponseFormat;
+      const strictResponseSchema = effectiveStrict
+        ? {
+            name: options.schemaName ?? "structured_output",
+            schema: buildStrictJsonSchema(options.schema),
+          }
+        : undefined;
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
         messages: [
@@ -526,7 +558,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
         ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
-        jsonMode: true,
+        ...(strictResponseSchema ? { strictResponseSchema } : { jsonMode: true }),
         stream: true,
       });
       let buffer = "";

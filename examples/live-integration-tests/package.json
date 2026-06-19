@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-live-integration-tests",
-  "version": "0.1.0-alpha.19",
+  "version": "0.1.0-alpha.21",
   "private": true,
   "description": "Live API-backed integration tests that exercise the full LLMPort surface against real provider APIs. Each script proves one slice of the contract end-to-end: single-provider generateText + generateStructured, OpenAI-only fallback chain (surrogate), real Anthropic adapter with Zod tool-use, and a real cross-adapter Anthropic+OpenAI fallback. Used to close Gate C of the publishing checklist and as a reproducible bake before each prerelease bump.",
   "type": "module",

@@ -1,5 +1,61 @@
 # @llm-ports/core
 
+## 0.1.0-alpha.21
+
+### Minor Changes
+
+- Adds per-call `strict?: boolean` to `GenerateStructuredOptions` + `StreamStructuredOptions`, plus five OTel-aligned observability hooks on `RegistryOptions.observability` (`onCost`, `onTokenUsage`, `onFallback`, `onValidationRetry`, `onCacheHit`).
+
+  ## What changed
+
+  ### Per-call structured-output strict override
+
+  `GenerateStructuredOptions` and `StreamStructuredOptions` now accept an optional `strict?: boolean`:
+  - `strict: true` — force strict `response_format: { type: "json_schema", strict: true }` for this call
+  - `strict: false` — force classic `response_format: { type: "json_object" }` for this call
+  - `strict: undefined` — use the adapter's existing default (auto-detected per baseURL allowlist, or whatever `useStrictResponseFormat` was set to at construction)
+
+  Adapters that do not implement strict mode (or whose backing provider doesn't support it) silently ignore the hint rather than throw. See llm-ports#46 for the empirical case driving this addition (ADW 04-Structured-Output-Reliability.md): registries with one adapter alias per provider need to flip strict on/off per call based on the schema shape (closed-shape → strict, `z.record(...)` → json_object).
+
+  ### OTel-aligned observability hooks
+
+  `RegistryOptions` gains an optional `observability` bundle:
+
+  ```ts
+  const registry = createRegistryFromEnv({
+    // ...existing options...
+    observability: {
+      onCost: (e) => {
+        /* per-call USD breakdown */
+      },
+      onTokenUsage: (e) => {
+        /* per-call token counts */
+      },
+      onFallback: (e) => {
+        /* fired when chain advances */
+      },
+      onCacheHit: (e) => {
+        /* fired when cached_tokens > 0 */
+      },
+      onValidationRetry: (e) => {
+        /* type-only in alpha.21 */
+      },
+    },
+  });
+  ```
+
+  All hooks are fire-and-forget; sync OR async; hook errors are swallowed (observability instrumentation can't break inference). Event shapes align with the OpenTelemetry `gen_ai.*` semantic-conventions taxonomy so downstream pipelines can map them onto spans + metrics without re-deriving fields.
+
+  #### Coverage in this release
+  - **`onCost` / `onTokenUsage` / `onCacheHit`** — emitted by the Registry on every successful `generateText`, `generateStructured`, `runAgent` call. Stream methods do not emit cost yet (streamed cost surfacing is the alpha.22 follow-up).
+  - **`onFallback`** — emitted by `walkChain` whenever it advances from one provider alias to the next due to runtime error. Per-call only; not emitted for the initial selection or for `forceProviderAlias` calls.
+  - **`onValidationRetry`** — hook type defined; Registry-level emission is the alpha.22 follow-up. Consumers wanting validation-retry observability today should use the adapter's existing `onRetry` hook and filter on `reason === "validation-feedback"`.
+
+  ### Backwards compatibility
+
+  Both additions are additive. Registries constructed without the `observability` field behave identically to alpha.20.1; calls without the `strict` field preserve the adapter's existing default behavior.
+
+  See also: llm-ports#46 (per-call strict opt-out), llm-ports#47 (allowlist expansion), llm-ports#48 (pricing entries).
 
 ## 0.1.0-alpha.20.1
 
@@ -7,13 +63,11 @@
 
 - Migration safeguards release. Adds a postinstall banner that prints a one-line notice when @llm-ports/core changes versions between installs, pointing users at MIGRATION.md. The banner skips on CI (CI=true), skips when stdout is not a TTY, skips when LLM_PORTS_NO_NOTICE=1 is set, and bails silently on any error so it can never block an install. Run-only on version change; a marker file in the package install dir prevents repeat prints for the same version. No runtime API change; the banner is install-time only.
 
-
 ## 0.1.0-alpha.20
 
 ### Minor Changes
 
 - BudgetScope + minute / session gating grammar. **Additive only**, no breaking changes. `BudgetScope = "tenant" | "customer" | "user" | "agent" | "session"` plus a per-call `budgetScope?: { scope, scopeId }` field on every request option type (GenerateTextOptions, GenerateStructuredOptions, StreamTextOptions, StreamStructuredOptions, RunAgentOptions, EmbeddingOptions, BatchEmbeddingOptions). When set, the Registry composes the gating storage key as `${alias}|${scope}:${scopeId}` so every configured cap applies per-scope. `parseGating` now accepts `req:N/minute`, `cost:N/minute`, `cost:N/session`, `req:N/session`, `total_tokens:N/session`, `tool_calls:N/session` in addition to the alpha.19 tokens. `InMemoryBudget` + `InMemoryCost` enforce the new minute window. `CostSession` extends with `maxRequests`, `maxTokens`, `maxToolCalls` ceilings and exposes `requestsMade()`, `tokensUsed()`, `toolCallsMade()` getters; `SessionBudgetExceededError` gains an optional `grain` field naming which cap tripped. 24 new tests in tests/budget-scope.test.ts cover all five scope axes, Cerebras 30 RPM minute-grain expressibility (closes TD-LLMPORTS-GATING-MINUTE), and all four new session-grain tokens. Backwards-compatible: existing callers see identical behavior to alpha.19.1; alpha.19 `req:N/hour` env tokens still populate the legacy `requestsPerHour` field for any backend that has not been upgraded.
-
 
 ## 0.1.0-alpha.19.1
 

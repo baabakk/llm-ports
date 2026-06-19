@@ -149,6 +149,31 @@ export type {
 export { computeBackoffDelay } from "./retry.js";
 export { emitRetryEvent } from "./retry-emit.js";
 
+// ─── OTel-aligned observability hooks (alpha.21+) ────────────────────
+export type {
+  CacheHitEvent,
+  CostEvent,
+  FallbackCause,
+  FallbackEvent,
+  ObservabilityHooks,
+  OnCacheHit,
+  OnCost,
+  OnFallback,
+  OnTokenUsage,
+  OnValidationRetry,
+  TokenUsageEvent,
+  ValidationRetryCause,
+  ValidationRetryEvent,
+} from "./observability.js";
+export {
+  deriveCacheHit,
+  emitCacheHit,
+  emitCost,
+  emitFallback,
+  emitTokenUsage,
+  emitValidationRetry,
+} from "./observability.js";
+
 // ─── Capability learning (shared across adapters) ────────────────────
 export {
   createCapabilityLearner,

@@ -25,6 +25,11 @@ export interface ScoreInput {
   providerExtras?: Record<string, unknown>;
   /** Per-call prompt cache configuration. Forwarded to the underlying port call. (alpha.19.1+) */
   cacheControl?: CacheControl;
+  /**
+   * Per-call override for strict-schema response_format mode. (alpha.21+)
+   * Forwarded to the underlying port call. See `GenerateStructuredOptions.strict`.
+   */
+  strict?: boolean;
 }
 
 export interface CreateScorerConfig<TSchema extends z.ZodTypeAny> {
@@ -89,6 +94,7 @@ export function createScorer<TSchema extends z.ZodTypeAny>(
         ...(input.forceProviderAlias ? { forceProviderAlias: input.forceProviderAlias } : {}),
         ...(input.providerExtras ? { providerExtras: input.providerExtras } : {}),
         ...(input.cacheControl ? { cacheControl: input.cacheControl } : {}),
+        ...(input.strict !== undefined ? { strict: input.strict } : {}),
       });
       await safelyInvoke(config.onResult, {
         capability: "score",

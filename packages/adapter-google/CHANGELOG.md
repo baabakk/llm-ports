@@ -1,5 +1,11 @@
 # @llm-ports/adapter-google
 
+## 0.1.0-alpha.21
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.21
 
 ## 0.1.0-alpha.20.1
 
@@ -7,13 +13,11 @@
 
 - No code change. Version bump for workspace alignment with the alpha.20.1 migration-safeguards release.
 
-
 ## 0.1.0-alpha.20
 
 ### Minor Changes
 
 - No behavior change. Same plumbing as adapter-anthropic. Version bump for workspace alignment.
-
 
 ## 0.1.0-alpha.19.1
 

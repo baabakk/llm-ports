@@ -335,6 +335,8 @@ describe("autoDetectStrictResponseFormat", () => {
     ["https://api.cerebras.ai/v1", true],                         // Cerebras (alpha.9)
     ["https://api.groq.com/openai/v1", true],                     // Groq (alpha.14+)
     ["https://api.sambanova.ai/v1", true],                        // SambaNova (alpha.15+) — empirically verified
+    ["https://api.deepinfra.com/v1/openai", true],                // DeepInfra (alpha.21+) — empirically verified
+    ["https://api.parasail.io/v1", true],                         // Parasail (alpha.21+) — empirically verified
     ["https://api.together.xyz/v1", false],                       // Together — unverified
     ["https://api.fireworks.ai/inference/v1", false],             // Fireworks — unverified
     ["https://api.clarifai.com/v2/ext/openai/v1", false],         // Clarifai — unverified
@@ -352,5 +354,174 @@ describe("autoDetectStrictResponseFormat", () => {
   it("matches when baseURL contains api.groq.com (substring, not exact-match)", () => {
     expect(autoDetectStrictResponseFormat("https://api.groq.com/openai/v1")).toBe(true);
     expect(autoDetectStrictResponseFormat("https://api.groq.com/v1")).toBe(true);
+  });
+
+  it("matches when baseURL contains api.deepinfra.com (alpha.21+)", () => {
+    expect(autoDetectStrictResponseFormat("https://api.deepinfra.com/v1/openai")).toBe(true);
+    expect(autoDetectStrictResponseFormat("https://api.deepinfra.com/v1/openai/chat/completions")).toBe(true);
+  });
+
+  it("matches when baseURL contains api.parasail.io (alpha.21+)", () => {
+    expect(autoDetectStrictResponseFormat("https://api.parasail.io/v1")).toBe(true);
+    expect(autoDetectStrictResponseFormat("https://api.parasail.io/")).toBe(true);
+  });
+});
+
+/**
+ * Per-call `strict?: boolean` opt-out / opt-in (alpha.21+).
+ *
+ * `GenerateStructuredOptions.strict` overrides the adapter-level
+ * `useStrictResponseFormat` for a single call. Precedence:
+ *   1. options.strict (per-call; highest)
+ *   2. ctx.useStrictResponseFormat (adapter-level, set at construction or
+ *      auto-detected from baseURL)
+ *
+ * Empirical motivation in ADW 04-Structured-Output-Reliability.md +
+ * llm-ports#46. The use case is a registry with one adapter alias per
+ * provider where a single caller knows the schema shape (closed → strict,
+ * `z.record(...)` → json_object) and wants to override per-call.
+ */
+describe("per-call strict?: boolean override (alpha.21+)", () => {
+  beforeEach(() => {
+    resetMocks();
+  });
+
+  it("strict: true on a json_object-default adapter switches that call to json_schema", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    // Adapter constructed with strict OFF (or unset against an unverified
+    // baseURL). Simulating an unverified compat provider.
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      baseURL: "https://api.together.xyz/v1",
+      useStrictResponseFormat: false,
+      pricingOverrides: { "test-model": { inputPer1M: 1, outputPer1M: 1 } },
+    });
+    const port = adapter.createLLMPort("test-model", "test");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+      schemaName: "test-schema",
+      strict: true,
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    expect(callArgs.response_format?.type).toBe("json_schema");
+  });
+
+  it("strict: false on a strict-default adapter (OpenAI native) drops to json_object for that call", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    // OpenAI native — strict is auto-detected as true. Per-call false
+    // forces json_object for this call.
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      pricingOverrides: { "gpt-5-nano": { inputPer1M: 0.05, outputPer1M: 0.2 } },
+    });
+    const port = adapter.createLLMPort("gpt-5-nano", "openai");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+      strict: false,
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    expect(callArgs.response_format?.type).toBe("json_object");
+  });
+
+  it("strict: undefined preserves the adapter's default (no behavior change)", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"x":1}',
+        promptTokens: 5,
+        completionTokens: 3,
+      }),
+    );
+
+    // OpenAI native (strict default true), no per-call override.
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      pricingOverrides: { "gpt-5-nano": { inputPer1M: 0.05, outputPer1M: 0.2 } },
+    });
+    const port = adapter.createLLMPort("gpt-5-nano", "openai");
+
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "x is 1",
+      schema: z.object({ x: z.number() }),
+      // strict deliberately not set
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format?: { type: string };
+    };
+    // Adapter default wins: OpenAI native is strict-on by auto-detect.
+    expect(callArgs.response_format?.type).toBe("json_schema");
+  });
+
+  it("per-call strict: true triggers the same nested additionalProperties: false treatment as adapter-level strict", async () => {
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: '{"user":{"name":"x","address":{"city":"y"}}}',
+        promptTokens: 5,
+        completionTokens: 10,
+      }),
+    );
+
+    const adapter = createOpenAIAdapter({
+      apiKey: "test",
+      baseURL: "https://api.together.xyz/v1",
+      useStrictResponseFormat: false,
+      pricingOverrides: { "test-model": { inputPer1M: 1, outputPer1M: 1 } },
+    });
+    const port = adapter.createLLMPort("test-model", "test");
+
+    const schema = z.object({
+      user: z.object({
+        name: z.string(),
+        address: z.object({ city: z.string() }),
+      }),
+    });
+    await port.generateStructured({
+      taskType: "test",
+      prompt: "Build a user.",
+      schema,
+      strict: true,
+    });
+
+    const callArgs = mockChatCompletionsCreate.mock.calls[0]![0] as {
+      response_format: {
+        json_schema: {
+          schema: {
+            additionalProperties: boolean;
+            properties: { user: { additionalProperties: boolean; properties: { address: { additionalProperties: boolean } } } };
+          };
+        };
+      };
+    };
+    const root = callArgs.response_format.json_schema.schema;
+    expect(root.additionalProperties).toBe(false);
+    expect(root.properties.user.additionalProperties).toBe(false);
+    expect(root.properties.user.properties.address.additionalProperties).toBe(false);
   });
 });

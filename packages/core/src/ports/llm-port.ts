@@ -305,6 +305,25 @@ export interface GenerateStructuredOptions<T> {
    * (alpha.20+)
    */
   budgetScope?: BudgetScopeRef;
+  /**
+   * Per-call override for strict-schema response_format mode. (alpha.21+)
+   *
+   *   - `true`  → force strict `response_format: { type: "json_schema", strict: true }`
+   *   - `false` → force classic `response_format: { type: "json_object" }`
+   *   - undefined → use the adapter's existing default (auto-detected per baseURL
+   *     allowlist, or whatever `useStrictResponseFormat` was set to at construction)
+   *
+   * Adapters that do not implement strict mode (or whose backing provider
+   * doesn't support it) MUST silently ignore this hint rather than throw.
+   *
+   * Use case: a registry has one adapter alias per provider, but a single
+   * caller knows the schema for THIS call carries `z.record(...)` (open
+   * dictionary, strict-incompatible) and wants to drop to `json_object` for
+   * this call; or the caller knows the schema is closed-shape and wants to
+   * force strict to eliminate retry tails on cheap-tier providers where the
+   * adapter's auto-detect defaulted to `json_object`. See llm-ports#46.
+   */
+  strict?: boolean;
 }
 
 export interface StreamTextOptions {
@@ -352,6 +371,11 @@ export interface StreamStructuredOptions<T> {
   providerExtras?: Record<string, unknown>;
   /** Provider-neutral cache configuration. Shape locked in alpha.19. */
   cacheControl?: CacheControl;
+  /**
+   * Per-call override for strict-schema response_format mode. (alpha.21+)
+   * Same semantics as on `GenerateStructuredOptions`. See that field's docstring.
+   */
+  strict?: boolean;
   /**
    * Per-call scope hint. When set, the Registry hashes (scope, scopeId)
    * into the gating storage key so configured caps apply per-scope rather

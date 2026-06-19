@@ -2,7 +2,7 @@
  * OpenAI model pricing (USD per 1M tokens).
  *
  * Source: https://openai.com/api/pricing/
- * Last verified: 2026-04-10 by @baabakk
+ * Last verified: 2026-06-18 by @baabakk
  *
  * Update process: edit this file, bump the "Last verified" date, open a PR
  * with the source URL referenced. Changeset patch bump on adapter-openai.
@@ -14,7 +14,8 @@
  * Note: This same adapter serves OpenAI-compatible providers (Groq, Together
  * AI, Fireworks, DeepInfra, Perplexity, Cerebras, LiteLLM proxy, etc.) via
  * the `baseURL` option. Those providers have their own pricing — supply it
- * via `pricingOverrides`.
+ * via `pricingOverrides`, OR rely on the curated bundled entries below for
+ * the compat models the team has actively verified (alpha.21+ section).
  */
 
 import type { ModelPricing } from "@llm-ports/core";
@@ -90,6 +91,30 @@ export const OPENAI_PRICING: Record<string, ModelPricing> = {
     inputPer1M: 0,
     outputPer1M: 0,
     embeddingPer1M: 0.13,
+  },
+
+  // ─── Curated compat-provider entries (alpha.21+) ────────────────────
+  //
+  // These three models are bundled because they're in active production
+  // use against the verified-OK provider matrix and shipping their rates
+  // here means consumers don't have to maintain a parallel pricingOverrides
+  // table for them. Source per #48. No cacheReadPer1M because neither
+  // DeepInfra nor Parasail publish a discounted cache-read tier.
+
+  // DeepInfra — verified 2026-06-18 via https://deepinfra.com/deepseek-ai/DeepSeek-V4-Flash
+  "deepseek-ai/DeepSeek-V4-Flash": {
+    inputPer1M: 0.10,
+    outputPer1M: 0.20,
+  },
+  // DeepInfra — verified 2026-06-18 via https://deepinfra.com/google/gemma-4-31B-it
+  "google/gemma-4-31B-it": {
+    inputPer1M: 0.10,
+    outputPer1M: 0.20,
+  },
+  // Parasail — verified 2026-06-18 via https://parasail.io/pricing
+  "XiaomiMiMo/MiMo-V2.5": {
+    inputPer1M: 0.14,
+    outputPer1M: 0.28,
   },
 };
 
