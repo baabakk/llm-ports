@@ -293,8 +293,32 @@ const groq = createOpenAIAdapter({
 | `baseURL` contains `api.cerebras.ai` | Cerebras silently ignores classic `json_object` mode on gpt-oss / Qwen3.6 tiers — strict mode is the only reliable path |
 | `baseURL` contains `api.groq.com` | Groq verified to support strict `response_format: json_schema` with constrained decoding (per Groq docs, May 2026) |
 | `baseURL` contains `api.sambanova.ai` (alpha.15+) | Empirically verified 2026-05-27 — MiniMax-M2.7 with strict mode forced on jumped from 0/10 → 10/10 schema-valid on a nested production scoring schema |
+| `baseURL` contains `api.deepinfra.com` (alpha.21+) | Empirically verified 2026-06-18 — deepseek-flash dropped from 2/8 validation retries to 0/8, gemma-31b from 8/8 to 0/8, with strict mode (ADW LLM Provider Test Report) |
+| `baseURL` contains `api.parasail.io` (alpha.21+) | Empirically verified 2026-06-18 — mimo-parasail (MiMo-V2.5) dropped from 3/8 validation retries to 0/8 with strict mode (same ADW sweep) |
 
 For other compat providers (Together AI, Fireworks AI, Clarifai, LiteLLM proxy), the option **stays opt-in** — set `useStrictResponseFormat: true` explicitly once you've verified the provider's strict-mode support.
+
+**Per-call override (alpha.21+).** Both `generateStructured` and `streamStructured` accept a per-call `strict?: boolean` on `GenerateStructuredOptions` / `StreamStructuredOptions`. Precedence: per-call (`options.strict`) > adapter-level (`useStrictResponseFormat`) > auto-detect. The 5 structured-output capability factories (`createClassifier`, `createScorer`, `createExtractor`, `createAnalyzer`, `createPlanner`) forward the field.
+
+Use case: a single adapter alias per provider, but the caller knows the schema shape — closed-shape schemas force strict on, `z.record(...)`-bearing schemas force strict off, regardless of the adapter's default.
+
+```ts
+// Closed-shape schema: force strict on (default for OpenAI native already)
+await port.generateStructured({
+  taskType: "triage",
+  prompt: "Categorize this message",
+  schema: ClosedShape,
+  strict: true,
+});
+
+// z.record schema: force json_object off the strict-default OpenAI native
+await port.generateStructured({
+  taskType: "tpm-intake",
+  prompt: "Intake the TPM contract",
+  schema: SchemaWithZRecord,
+  strict: false,
+});
+```
 
 **Schema conversion.** Zod schemas are converted via `zod-to-json-schema` (`target: "openAi"`, `$refStrategy: "none"`), then post-processed to add `additionalProperties: false` on every nested object — a hard requirement of strict mode the SDK does not auto-inject.
 
@@ -339,7 +363,19 @@ const adapter = createOpenAIAdapter({
 | `text-embedding-3-small` | n/a | n/a | $0.02 (per 1M input tokens) |
 | `text-embedding-3-large` | n/a | n/a | $0.13 |
 
-Source: openai.com/pricing. Verified 2026-04-10.
+Source: openai.com/pricing. Verified 2026-06-18.
+
+### Curated compat-provider entries (alpha.21+)
+
+Three OpenAI-compatible models from DeepInfra and Parasail bundled directly so consumers don't need a parallel `pricingOverrides` table for them. Neither provider publishes a discounted cache-read tier; the `cacheReadPer1M` field is intentionally omitted.
+
+| Model | Provider | Input/1M | Output/1M |
+|-------|----------|---------:|----------:|
+| `deepseek-ai/DeepSeek-V4-Flash` | DeepInfra | $0.10 | $0.20 |
+| `google/gemma-4-31B-it` | DeepInfra | $0.10 | $0.20 |
+| `XiaomiMiMo/MiMo-V2.5` | Parasail | $0.14 | $0.28 |
+
+Verified 2026-06-18 against [deepinfra.com](https://deepinfra.com/) + [parasail.io/pricing](https://parasail.io/pricing). Source: llm-ports#48.
 
 ## Supported features
 

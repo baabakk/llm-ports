@@ -135,6 +135,67 @@ Failure cases:
 
 The retry-with-feedback prompt names the specific issues so the model can target the fix.
 
+## Per-call strict-mode override (alpha.21+)
+
+The OpenAI adapter has two structured-output modes: classic `response_format: json_object` (valid JSON, no schema enforcement; recovered via `retry-with-feedback` if a field is missing) and strict `response_format: json_schema` (provider-enforced schema; missing fields impossible). Auto-detection at the adapter level decides per `baseURL` ([OpenAI native / Cerebras / Groq / SambaNova / DeepInfra / Parasail default to strict](/adapters/openai#auto-detection-alpha-14)).
+
+`GenerateStructuredOptions.strict?: boolean` (and the same field on `StreamStructuredOptions`) overrides the adapter-level decision for a single call. Precedence:
+
+1. `options.strict` (per-call; highest)
+2. adapter-level `useStrictResponseFormat` (set at adapter construction)
+3. `autoDetectStrictResponseFormat(baseURL)` default (applied to step 2 if step 2 was unset)
+
+Adapters that don't implement strict mode silently ignore the field (no exception).
+
+**Use case.** A registry with one adapter alias per provider needs to flip strict on/off per call based on the schema shape:
+
+- **Closed-shape schemas** (every field required or `.optional()`, no `z.record(...)`) can use strict mode. They benefit from zero retry-with-feedback rounds on schema drift.
+- **Open-shape schemas** (`z.record(...)` for dynamic-key dictionaries) are incompatible with strict mode's `additionalProperties: false` requirement. They must fall back to `json_object` + `retry-with-feedback`.
+
+```ts
+// Closed-shape: ask for strict regardless of adapter default.
+await port.generateStructured({
+  taskType: "triage",
+  prompt: "Categorize this message",
+  schema: ClosedShape,
+  strict: true,
+});
+
+// z.record-bearing schema: drop to json_object even on a strict-default adapter.
+await port.generateStructured({
+  taskType: "tpm-intake",
+  prompt: "Intake the TPM contract",
+  schema: SchemaWithZRecord,
+  strict: false,
+});
+```
+
+The 5 structured-output capability factories (`createClassifier`, `createScorer`, `createExtractor`, `createAnalyzer`, `createPlanner`) forward `strict?` from their per-call input shapes.
+
+## `onRetry` observability
+
+Adapters expose an `onRetry` hook (alpha.17+) that fires whenever they decide to retry mid-call. The hook is observability-only; throwing from it doesn't cancel the retry.
+
+```ts
+const adapter = createOpenAIAdapter({
+  apiKey: process.env.OPENAI_API_KEY!,
+  onRetry: (e) => {
+    // e.reason ∈ "transient-auth" | "capability-fallback" | "reasoning-starvation" | "validation-feedback"
+    myLogger.warn(`adapter retry: ${e.reason}`, e);
+  },
+});
+```
+
+For validation-feedback retries specifically:
+
+```ts
+if (e.reason === "validation-feedback") {
+  myMetrics.validationRetries.inc({ model: e.modelId, provider: e.providerAlias });
+}
+```
+
+For Registry-level observability hooks (`onCost`, `onTokenUsage`, `onFallback`, `onCacheHit`), see the [Observability hooks](/concepts/observability) concept page.
+
 ## Caveats
 
 - **Validation retries cost money.** Each retry is a full API call. Track `validationAttempts` in production to detect schema-model mismatches that consistently retry.
@@ -146,3 +207,4 @@ The retry-with-feedback prompt names the specific issues so the model can target
 
 - [`createClassifier` capability →](/capabilities/classifier) — uses validation strategies internally
 - [`createExtractor` capability →](/capabilities/extractor) — same
+- [Observability hooks →](/concepts/observability) — Registry-level OTel-aligned hooks for cost, tokens, fallback, cache hits

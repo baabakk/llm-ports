@@ -64,6 +64,7 @@ export default defineConfig({
             { text: "Content Blocks", link: "/concepts/content-blocks" },
             { text: "Cache Control", link: "/concepts/cache" },
             { text: "Validation Strategies", link: "/concepts/validation-strategies" },
+            { text: "Observability Hooks", link: "/concepts/observability" },
           ],
         },
         {
@@ -115,6 +116,7 @@ export default defineConfig({
             { text: "From LangChain.js (planned)", link: "/migration/from-langchain" },
             { text: "alpha.18 → alpha.19 (BREAKING)", link: "/migration/alpha-18-to-alpha-19" },
             { text: "alpha.19 → alpha.20 (TS-level)", link: "/migration/alpha-19-to-alpha-20" },
+            { text: "alpha.20 → alpha.21 (additive)", link: "/migration/alpha-20-to-alpha-21" },
           ],
         },
         {
