@@ -97,6 +97,37 @@ describe("Catalog + learner use normalized model IDs (alpha.22+)", () => {
     expect(getEffectiveCapabilities("some-provider/MiniMax-M2.7", undefined).reasoningModel).toBe(true);
   });
 
+  it("seedKnownConstraints matches Xiaomi MiMo (DISTINCT from MiniMax) by canonical name", () => {
+    // Parasail serves `XiaomiMiMo/MiMo-V2.5`; ADW saw a starved structured-
+    // output call against this model 2026-06-19. Post-alpha.22 + this
+    // catalog entry, the pre-seed applies the reasoning budget multiplier
+    // on call 1 instead of waiting for the runtime-detected first-call penalty.
+    seedKnownConstraints("XiaomiMiMo/MiMo-V2.5");
+    expect(getEffectiveCapabilities("XiaomiMiMo/MiMo-V2.5", undefined).reasoningModel).toBe(true);
+    // And the canonical form reads back the same.
+    expect(getEffectiveCapabilities("MiMo-V2.5", undefined).reasoningModel).toBe(true);
+  });
+
+  it("MiMo pattern is distinct from MiniMax (no cross-match)", () => {
+    // Sanity: the two catalog entries must not collide. MiMo-V2.5 must NOT
+    // match the MiniMax-M2.7 pattern, and vice versa.
+    _resetLearnedConstraints();
+    seedKnownConstraints("MiMo-V2.5");
+    const mimoCaps = getEffectiveCapabilities("MiMo-V2.5", undefined);
+    expect(mimoCaps.reasoningModel).toBe(true);
+
+    _resetLearnedConstraints();
+    seedKnownConstraints("MiniMax-M2.7");
+    const miniMaxCaps = getEffectiveCapabilities("MiniMax-M2.7", undefined);
+    expect(miniMaxCaps.reasoningModel).toBe(true);
+
+    // Names that LOOK related but aren't in either family should not match.
+    _resetLearnedConstraints();
+    seedKnownConstraints("Mimosa-V1");
+    const unrelated = getEffectiveCapabilities("Mimosa-V1", undefined);
+    expect(unrelated.reasoningModel).toBeFalsy();
+  });
+
   it("non-reasoning models stay non-reasoning regardless of prefix", () => {
     // gpt-4o-mini is not in the catalog; it shouldn't be falsely flagged.
     // The learner stores only positive constraints; absence means "not

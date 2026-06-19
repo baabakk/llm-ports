@@ -125,6 +125,14 @@ export const KNOWN_REASONING_MODELS: readonly KnownModelConstraint[] = [
   { pattern: /^qwen3[._-]?6/i, constraints: { reasoningModel: true } },
   // MiniMax M2.7 reasoning (SambaNova: MiniMax-M2.7).
   { pattern: /^minimax[-_]?m2[._]7/i, constraints: { reasoningModel: true } },
+  // Xiaomi MiMo reasoning lineup — DISTINCT from MiniMax despite the name
+  // similarity. Parasail serves the canonical id `XiaomiMiMo/MiMo-V2.5`;
+  // post-alpha.22 normalization that becomes `MiMo-V2.5`. Added 2026-06-19
+  // after ADW production observation: mimo-parasail starved on a structured-
+  // output call (rescue fired via runtime detection, not catalog pre-seed,
+  // so the first call ate the latency). Pre-seeding lets the budget
+  // multiplier apply on call 1.
+  { pattern: /^mimo[-_]?v\d/i, constraints: { reasoningModel: true } },
 ];
 
 /** Seed the learner with this adapter's known-reasoning catalog for a model. */
