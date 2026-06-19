@@ -118,19 +118,47 @@ Bundled pricing does NOT cover compat-provider models (Groq, Together AI, Firewo
 
 ## Known reasoning models (auto-handled)
 
-Reasoning models consume output tokens on hidden chain-of-thought before producing visible text. The adapter detects this on first call (empty visible text + `finish_reason=length` + a reasoning signal in the response) and retries once with the budget expanded by a headroom multiplier.
+Reasoning models consume output tokens on hidden chain-of-thought before producing visible text. The adapter detects this and retries once with the budget expanded by a headroom multiplier.
 
-`KNOWN_REASONING_MODELS` is a static catalog that pre-seeds the cache at port creation so the first call against a known reasoning model already uses the expanded budget — no wasted round-trip:
+**Two detection layers (alpha.22+):**
 
-| Pattern | Provider example |
+1. **Runtime detection (correctness path).** On every successful response, the adapter inspects three reasoning signals and marks the model as reasoning if any is present:
+   - `usage.completion_tokens_details.reasoning_tokens > 0` (OpenAI o-series, gpt-5-nano)
+   - `choices[0].message.reasoning` populated (Cerebras gpt-oss-* serving)
+   - `choices[0].message.reasoning_content` populated (DeepInfra harmony serving; alpha.22)
+
+   And the starvation rescue fires when visible output is empty (no `content`, no executable `tool_calls`) AND a reasoning signal is present AND `finish_reason` is either `length` or `stop`. The `stop`-also-counts relaxation in alpha.22 catches the DeepInfra harmony case where providers return `stop` despite the model not having finished.
+
+2. **Static catalog (optimization).** `KNOWN_REASONING_MODELS` pre-seeds the cache at port creation so the first call against a known model already uses the expanded budget — skipping the wasted round-trip. **As of alpha.22 the catalog is matched against the *normalized* model ID** (the canonical name after stripping any `<owner>/` prefix), so namespaced provider IDs match the same canonical patterns:
+
+| Pattern (against canonical name) | Matches |
 |---|---|
 | `o1*` / `o3*` / `o4*` | OpenAI native |
 | `gpt-5-nano*` | OpenAI native |
-| `gpt-oss-*` | Cerebras (`baseURL=https://api.cerebras.ai/v1`) |
-| `qwen3[._-]?6*` | Clarifai (canonical ID `Qwen3_6-35B-A3B-FP8`) |
-| `minimax[-_]?m2[._]7*` | SambaNova (canonical ID `MiniMax-M2.7`) |
+| `gpt-oss-*` | Cerebras `gpt-oss-120b`, DeepInfra `openai/gpt-oss-120b`, Groq `openai/gpt-oss-120b`, any future namespaced variant |
+| `qwen3[._-]?6*` | Clarifai `Qwen3_6-35B-A3B-FP8`, any future namespaced Qwen3.6 variant |
+| `minimax[-_]?m2[._]7*` | SambaNova `MiniMax-M2.7`, any future namespaced variant |
+| `mimo[-_]?v\d*` | Parasail `XiaomiMiMo/MiMo-V2.5`, any future MiMo-V version (alpha.22+) |
+
+The architectural payoff of normalization: the same canonical model served by two providers (Cerebras's `gpt-oss-120b` and DeepInfra's `openai/gpt-oss-120b`) shares learned state. A constraint learned at runtime for one is visible to the other.
 
 Unknown reasoning models still get caught by runtime learning on first call; the catalog only saves the first-call round-trip. User-supplied `pricingOverrides[modelId].capabilities.reasoningModel` always wins.
+
+### Known limitation: DeepInfra gpt-oss harmony tool-use (alpha.22)
+
+DeepInfra serves gpt-oss in OpenAI's harmony format where tool-call intent lands in `message.reasoning_content` rather than `message.tool_calls`. **The adapter does NOT parse the harmony channel for tool calls.** Concretely:
+
+- The `runAgent` response parser ([`fromOpenAIAssistantMessage` in `src/content.ts`](https://github.com/baabakk/llm-ports/blob/main/packages/adapter-openai/src/content.ts#L221-L247)) reads tool calls only from the standard `message.tool_calls` field, never from `message.reasoning_content`.
+- When DeepInfra emits harmony-format tool intent in `reasoning_content`, that intent is invisible to the loop — the assistant message is parsed as having empty content and no executable tool calls.
+
+What alpha.22 DOES change for this case is observability + a rescue retry:
+- The model is correctly identified as reasoning (via the alpha.22 model-ID normalization).
+- The reasoning-budget multiplier applies on call 1 (no first-call starvation penalty).
+- The starvation rescue fires when content is empty + `reasoning_content` is populated + `finish_reason` is `stop`. The retry gives the model one more chance to emit standard `tool_calls`. If the model emits standard fields on retry, the loop converges; if it lands the intent in `reasoning_content` again, the loop still terminates without executing the tool.
+
+**For tool-use workloads against gpt-oss, route to Cerebras** (where the harmony channels are translated into standard `tool_calls` by the provider's serving layer). Empirical observation (ADW, 2026-06-19): Cerebras `gpt-oss-120b` writes 5 files in the multi-turn build loop; DeepInfra `openai/gpt-oss-120b` writes 0.
+
+The harmony-channel tool-call parser is a research-first follow-up tracked for a future release.
 
 ```typescript
 import { createOpenAIAdapter } from "@llm-ports/adapter-openai";

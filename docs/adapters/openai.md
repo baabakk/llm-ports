@@ -437,25 +437,34 @@ Other adapters ignore the field — Anthropic and Ollama don't have an equivalen
 
 ## Reasoning models (auto-handled)
 
-Reasoning models — OpenAI's `o3`, `o3-mini`, `gpt-5-nano`, plus compat-provider reasoning models like Cerebras `gpt-oss-120b` — burn tokens on internal chain-of-thought before producing visible output. A naive call with `maxOutputTokens: 20` against `gpt-5-nano` reliably returns empty text and `finish_reason=length` because the budget got consumed by reasoning.
+Reasoning models — OpenAI's `o3`, `o3-mini`, `gpt-5-nano`, plus compat-provider reasoning models like Cerebras `gpt-oss-120b` and DeepInfra `openai/gpt-oss-120b` — burn tokens on internal chain-of-thought before producing visible output. A naive call with `maxOutputTokens: 20` against `gpt-5-nano` reliably returns empty text and `finish_reason=length` because the budget got consumed by reasoning.
 
 **The OpenAI adapter handles this automatically**, with no configuration:
 
-1. **Detection.** The adapter inspects each response for two reasoning signals: `usage.completion_tokens_details.reasoning_tokens > 0` (OpenAI o-series, gpt-5-nano shape) or a populated `message.reasoning` string field (Cerebras gpt-oss shape). Either signal marks the model as a reasoning model in a process-wide cache.
-2. **Auto-retry on starvation.** If a response shows the starvation signature (`text === ""` + `finish_reason === "length"` + reasoning signal), the adapter retries the call once with `max_completion_tokens` multiplied by a headroom factor (default 10×). The retry typically succeeds with visible output.
+1. **Detection (alpha.22+).** The adapter inspects each response for three reasoning signals: `usage.completion_tokens_details.reasoning_tokens > 0` (OpenAI o-series, gpt-5-nano), a populated `message.reasoning` string field (Cerebras gpt-oss-*), or a populated `message.reasoning_content` field (DeepInfra harmony serving). Any of the three marks the model as reasoning in a process-wide cache.
+2. **Auto-retry on starvation (alpha.22+).** If a response shows the starvation signature (empty visible output AND no executable `tool_calls` AND reasoning signal AND `finish_reason` is `length` or `stop`), the adapter retries the call once with `max_completion_tokens` multiplied by a headroom factor (default 10×). The retry typically succeeds with visible output. The `stop`-also-counts relaxation in alpha.22 catches the DeepInfra harmony case where providers return `stop` despite the model not having finished.
 3. **Subsequent calls skip discovery.** Once a model is marked reasoning in the cache, every later call to that model uses the multiplier up front — no wasted first-attempt round-trip.
 
 The default headroom multiplier (10×) is calibrated against o-series reasoning intensity. You can override per-model via `pricingOverrides[modelId].capabilities.reasoningHeadroomMultiplier`.
 
-> **First-call cost.** The first call to an unknown reasoning model in a given process pays one wasted round-trip (the starved attempt) before the cache learns the constraint. The adapter ships a `KNOWN_REASONING_MODELS` static catalog that pre-seeds the cache for well-known reasoning lineups so the wasted round-trip is skipped. Models the catalog already knows about (as of `0.1.0-alpha.4`):
+> **First-call cost.** The first call to an unknown reasoning model in a given process pays one wasted round-trip (the starved attempt) before the cache learns the constraint. The adapter ships a `KNOWN_REASONING_MODELS` static catalog that pre-seeds the cache for well-known reasoning lineups so the wasted round-trip is skipped. **As of alpha.22 the catalog is matched against the *normalized* model ID** (canonical name after stripping any `<owner>/` prefix), so namespaced provider IDs hit the same anchored patterns. Models the catalog knows about:
 >
 > - OpenAI o-series (`o1*`, `o3*`, `o4*`)
 > - OpenAI `gpt-5-nano*`
-> - Cerebras `gpt-oss-*` (via `baseURL=https://api.cerebras.ai/v1`)
-> - Clarifai `Qwen3_6-*` (via `baseURL=https://api.clarifai.com/v2/ext/openai/v1`)
-> - SambaNova `MiniMax-M2.7` (via `baseURL=https://api.sambanova.ai/v1`)
+> - `gpt-oss-*` (Cerebras `gpt-oss-120b`, DeepInfra `openai/gpt-oss-120b`, Groq `openai/gpt-oss-120b`, any future namespaced variant)
+> - `qwen3.6*` (Clarifai `Qwen3_6-35B-A3B-FP8`, any future namespaced Qwen3.6 variant)
+> - `minimax-m2.7*` (SambaNova `MiniMax-M2.7`, any future namespaced variant)
+> - `mimo-v*` (Parasail `XiaomiMiMo/MiMo-V2.5`, any future MiMo-V version — alpha.22+)
 >
 > For other reasoning models the adapter doesn't know yet, runtime learning still catches the constraint on first call. To skip even that one wasted round-trip, set `pricingOverrides[modelId].capabilities.reasoningModel = true`. Tracked at [TD-LLMP-03](https://github.com/baabakk/llm-ports/blob/main/TECH-DEBT.md#td-llmp-03).
+
+### Known limitation: DeepInfra gpt-oss harmony tool-use (alpha.22)
+
+DeepInfra serves gpt-oss in OpenAI's harmony format where tool-call intent lands in `message.reasoning_content` rather than `message.tool_calls`. **The adapter does NOT parse the harmony channel for tool calls.** Concretely: [`fromOpenAIAssistantMessage` in `packages/adapter-openai/src/content.ts:221-247`](https://github.com/baabakk/llm-ports/blob/main/packages/adapter-openai/src/content.ts#L221-L247) reads tool calls only from `message.tool_calls`, never from `message.reasoning_content`. When DeepInfra emits tool intent in the reasoning channel, it's invisible to `runAgent`.
+
+What alpha.22 changes for this case is observability + a rescue retry chance: the model is correctly identified as reasoning (via normalization), the budget multiplier applies on call 1, and the starvation rescue fires when content is empty + `reasoning_content` is populated. The retry gives the model one more chance to emit standard `tool_calls`. If it lands the intent in `reasoning_content` again on retry, the loop still terminates without executing the tool.
+
+**For tool-use workloads against gpt-oss, route to Cerebras** (where the provider's serving layer translates harmony channels into standard `tool_calls`). Empirical observation (ADW, 2026-06-19): Cerebras `gpt-oss-120b` writes 5 files in a multi-turn build loop; DeepInfra `openai/gpt-oss-120b` writes 0. The harmony-channel tool-call parser is a research-first follow-up tracked for a future release.
 
 The adapter also handles two other transient OpenAI quirks transparently:
 
