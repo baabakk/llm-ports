@@ -117,6 +117,7 @@ export default defineConfig({
             { text: "alpha.18 → alpha.19 (BREAKING)", link: "/migration/alpha-18-to-alpha-19" },
             { text: "alpha.19 → alpha.20 (TS-level)", link: "/migration/alpha-19-to-alpha-20" },
             { text: "alpha.20 → alpha.21 (additive)", link: "/migration/alpha-20-to-alpha-21" },
+            { text: "alpha.21 → alpha.22 (additive)", link: "/migration/alpha-21-to-alpha-22" },
           ],
         },
         {
