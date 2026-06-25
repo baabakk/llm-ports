@@ -152,6 +152,23 @@ interface ValidationRetryEvent {
 
 Stream methods (`streamText`, `streamStructured`) do not emit `onCost` / `onTokenUsage` yet because streamed cost surfaces piecemeal as the stream completes. Streamed-cost emission is the alpha.22 follow-up.
 
+## Per-attempt timeout (alpha.23+)
+
+Independent of the hooks above but related — `RegistryOptions.perAttemptTimeoutMs` wraps every provider attempt inside `walkChain` with an `AbortController` + timer:
+
+```ts
+const registry = createRegistryFromEnv({
+  // ...existing options...
+  perAttemptTimeoutMs: 30000,  // 30s cap per provider attempt
+});
+```
+
+On timeout, the abort propagates to the adapter's HTTP client; the adapter throws `ProviderUnavailableError`; the Registry's `shouldFallback` catches it and walks to the next provider with a fresh timer. **Per-attempt, not chain-wide** — each provider gets its own budget.
+
+When the chain advances due to a timeout, `onFallback` fires with `cause: "provider-error"` (the timeout-induced `ProviderUnavailableError` is the trigger). Caller-supplied `signal` composes with the timeout — both fire the same wrapped controller; the shorter trigger wins.
+
+This is the ergonomic wrapper for the AbortSignal infrastructure that already existed on the port surface (alpha.6+). Particularly useful for routing around reasoning models that grind on hidden chain-of-thought without erroring.
+
 ## Error swallowing
 
 Every hook is fire-and-forget. Sync hooks that throw, async hooks that reject — the Registry swallows the failure and continues the inference call. Observability instrumentation can never break inference.

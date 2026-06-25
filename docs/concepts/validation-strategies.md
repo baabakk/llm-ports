@@ -174,23 +174,47 @@ The 5 structured-output capability factories (`createClassifier`, `createScorer`
 
 ## `onRetry` observability
 
-Adapters expose an `onRetry` hook (alpha.17+) that fires whenever they decide to retry mid-call. The hook is observability-only; throwing from it doesn't cancel the retry.
+Adapters expose an `onRetry` hook (alpha.17+) that fires whenever they decide to retry mid-call OR successfully recover output that the standard response path missed. The hook is observability-only; throwing from it doesn't cancel the retry.
 
 ```ts
 const adapter = createOpenAIAdapter({
   apiKey: process.env.OPENAI_API_KEY!,
   onRetry: (e) => {
-    // e.reason ∈ "transient-auth" | "capability-fallback" | "reasoning-starvation" | "validation-feedback"
+    // e.reason ∈ "transient-auth" | "capability-fallback" | "reasoning-starvation" |
+    //            "validation-feedback" | "harmony-tool-call-extracted" |
+    //            "zero-tool-call-prose-retry"
     myLogger.warn(`adapter retry: ${e.reason}`, e);
   },
 });
 ```
 
-For validation-feedback retries specifically:
+### Retry reason discriminators
+
+| Reason | When it fires | Recovery action |
+|---|---|---|
+| `transient-auth` | OpenAI sk-proj-* burst-protection 401 (key is valid; transient) | Backoff + retry, up to `transientAuthRetries` (default 2) |
+| `capability-fallback` | Model rejected a parameter (temperature, json_object, system message) | Drop the offending param, retry once, remember for future calls |
+| `reasoning-starvation` | Empty visible output + reasoning signal + finish_reason `length`/`stop` | Retry once with the headroom-multiplier-expanded budget |
+| `validation-feedback` | Structured output failed Zod validation | Retry with the validation issues fed back to the model, up to `maxAttempts` |
+| `harmony-tool-call-extracted` (alpha.23+) | Empty `tool_calls` but `reasoning_content` contained a parseable harmony tool call | **No retry** — the harmony tool call was extracted and hoisted into the executable path. Observability only |
+| `zero-tool-call-prose-retry` (alpha.23+) | Prose content + empty `tool_calls` + request had tools array + no prior tool-result message in conversation | Retry once with a corrective system message asking the model to use the standard tool_calls format |
+
+For specific filters:
 
 ```ts
 if (e.reason === "validation-feedback") {
   myMetrics.validationRetries.inc({ model: e.modelId, provider: e.providerAlias });
+}
+if (e.reason === "harmony-tool-call-extracted") {
+  // The model emitted a tool call in the wrong channel; we recovered it.
+  // Useful for spotting providers that don't translate harmony into standard tool_calls.
+  myMetrics.harmonyRescues.inc({ model: e.modelId, provider: e.providerAlias });
+}
+if (e.reason === "zero-tool-call-prose-retry") {
+  // The model emitted prose instead of calling a tool; rescue retry fired.
+  // Track this rate per (model, prompt-class) to identify which combinations
+  // need orchestration-level guards (e.g., "planned ≠ written" checks).
+  myMetrics.proseRescues.inc({ model: e.modelId, provider: e.providerAlias });
 }
 ```
 

@@ -460,18 +460,48 @@ The default headroom multiplier (10×) is calibrated against o-series reasoning 
 
 ### Known limitation: DeepInfra gpt-oss harmony tool-use (alpha.22)
 
-DeepInfra serves gpt-oss in OpenAI's harmony format where tool-call intent lands in `message.reasoning_content` rather than `message.tool_calls`. **The adapter does NOT parse the harmony channel for tool calls.** Concretely: [`fromOpenAIAssistantMessage` in `packages/adapter-openai/src/content.ts:221-247`](https://github.com/baabakk/llm-ports/blob/main/packages/adapter-openai/src/content.ts#L221-L247) reads tool calls only from `message.tool_calls`, never from `message.reasoning_content`. When DeepInfra emits tool intent in the reasoning channel, it's invisible to `runAgent`.
+### Updated for alpha.23 — harmony tool-call extraction now works
 
-What alpha.22 changes for this case is observability + a rescue retry chance: the model is correctly identified as reasoning (via normalization), the budget multiplier applies on call 1, and the starvation rescue fires when content is empty + `reasoning_content` is populated. The retry gives the model one more chance to emit standard `tool_calls`. If it lands the intent in `reasoning_content` again on retry, the loop still terminates without executing the tool.
+DeepInfra serves gpt-oss in OpenAI's harmony format where tool-call intent lands in `message.reasoning_content` rather than `message.tool_calls`. **As of alpha.23 the adapter extracts harmony tool calls automatically.**
 
-**For tool-use workloads against gpt-oss, route to Cerebras** (where the provider's serving layer translates harmony channels into standard `tool_calls`). Empirical observation (ADW, 2026-06-19): Cerebras `gpt-oss-120b` writes 5 files in a multi-turn build loop; DeepInfra `openai/gpt-oss-120b` writes 0. The harmony-channel tool-call parser is a research-first follow-up tracked for a future release.
+When the standard `tool_calls` array is empty AND `reasoning_content` contains a parseable harmony tool call (matched against the `<|channel|>commentary|tool to=functions.NAME<|message|>{...}` pattern), the call is hoisted into the executable path with zero extra LLM calls. The `parseHarmonyToolCalls` helper is also exported:
+
+```ts
+import { parseHarmonyToolCalls } from "@llm-ports/adapter-openai";
+
+const calls = parseHarmonyToolCalls(reasoningContent);
+// returns OpenAIToolCall[] or null when no parseable harmony tool call is found
+```
+
+The parser returns null gracefully on prose chain-of-thought, bare JSON without a tool name (e.g., the empirical `{"path":"","depth":3}` probe case), or malformed JSON. The [zero-tool-call corrective rescue](#zero-tool-call-corrective-rescue-alpha-23) then handles the prose-only path.
+
+Emits `onRetry` with reason `"harmony-tool-call-extracted"` on success (observability only; no retry actually happens).
+
+### Zero-tool-call corrective rescue (alpha.23+)
+
+When the model returns a clean completion (`finish_reason: "stop"` or `"length"`) with prose content, empty `tool_calls`, and the request had a tools array — the adapter retries once with a corrective system message: *"Your previous response did not include a tool call. Tools are available — call them via the standard tool_calls array. Do not describe what you would do; do it."*
+
+Single-shot retry. Five discriminators prevent over-firing:
+- No tools in request → text response is the correct shape → skip
+- `tool_calls` populated → standard success → skip
+- Empty content → [reasoning starvation case](#reasoning-models-auto-handled) → skip
+- `reasoning_content` populated → harmony case (handled by extraction above) → skip
+- Conversation includes a `role: "tool"` message → model is summarizing tool results, not failing to call a tool → skip
+
+Closes the empirical mimo-parasail case from ADW's 2026-06-19 diagnostic where the model returned ~69 tokens of "I would do this..." prose with zero tool_calls.
+
+Emits `onRetry` with reason `"zero-tool-call-prose-retry"` for observability. If the rescue retry also returns prose-only, the loop terminates as `completed` — the rescue is single-shot and the consumer's orchestration is responsible for handling persistent under-production (see [Known limitation: under-production](#under-production-still-orchestration-territory) below).
+
+### Under-production (still orchestration territory)
+
+If the model makes some tool calls then "completes" with the planned manifest incomplete (e.g., reads files but never writes them), that pattern is NOT addressed at the adapter layer. The adapter sees a clean multi-call completion; only the orchestration knows the planned manifest. Build a "planned ≠ written" guard at the workflow layer; the adapter cannot do this for you.
 
 The adapter also handles two other transient OpenAI quirks transparently:
 
 - **Capability rejection.** Some models reject custom `temperature`, `response_format: { type: "json_object" }`, or a separate `system` message. The adapter catches the `unsupported_value` error, learns the constraint, retries with the offending parameter dropped, and remembers it for the rest of the process.
 - **Project-key burst protection (sk-proj-* keys).** New OpenAI project keys briefly return 401 "Incorrect API key" under burst protection — even when the key is valid. The adapter retries with exponential backoff (default 500ms / 1500ms / 4500ms), but only if a prior request on the same client succeeded (so a real bad key doesn't get masked). Configurable via the `transientAuthRetries` and `transientAuthBackoffMs` options.
 
-All three retry kinds (plus `validation-feedback` retries inside `generateStructured`) fire the `onRetry` hook shipped in `0.1.0-alpha.1` — pass an `OnRetry` callback at adapter construction time to observe them. See [`examples/with-onretry/`](https://github.com/baabakk/llm-ports/tree/main/examples/with-onretry) for a worked example wiring the hook to a console logger and a metrics sink.
+All retry kinds — `transient-auth`, `capability-fallback`, `reasoning-starvation`, `validation-feedback`, plus the alpha.23-added `harmony-tool-call-extracted` and `zero-tool-call-prose-retry` — fire the `onRetry` hook shipped in `0.1.0-alpha.1`. Pass an `OnRetry` callback at adapter construction time to observe them; see [Validation Strategies → onRetry observability](/concepts/validation-strategies#onretry-observability) for the full discriminator table and [`examples/with-onretry/`](https://github.com/baabakk/llm-ports/tree/main/examples/with-onretry) for a worked example wiring the hook to a console logger and a metrics sink.
 
 ## Cancellation
 

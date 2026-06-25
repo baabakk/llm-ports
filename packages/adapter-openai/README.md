@@ -160,6 +160,31 @@ What alpha.22 DOES change for this case is observability + a rescue retry:
 
 The harmony-channel tool-call parser is a research-first follow-up tracked for a future release.
 
+### Update for alpha.23: harmony extraction now works
+
+The harmony-channel tool-call parser shipped in alpha.23. When `tool_calls` is empty AND `reasoning_content` contains a parseable harmony tool call (the DeepInfra-served gpt-oss case), the adapter extracts and executes it. **Zero extra LLM calls.** No code change required — the improvement applies to any `runAgent` call automatically.
+
+The parser is also exported for direct use:
+
+```ts
+import { parseHarmonyToolCalls } from "@llm-ports/adapter-openai";
+
+// Extract one or more tool calls from a harmony-formatted reasoning_content.
+// Returns null when no parseable harmony tool call is found (prose, bare JSON
+// without a tool name, malformed, etc.).
+const calls = parseHarmonyToolCalls(reasoningContent);
+```
+
+Emits `onRetry` with reason `"harmony-tool-call-extracted"` on success (observability only; no retry actually happens).
+
+### Tool-use prose rescue (alpha.23+)
+
+When the model returns a clean completion (`finish_reason: "stop"` or `"length"`) with prose content, empty `tool_calls`, and the request had a tools array, the adapter retries once with a corrective system message asking the model to use the standard `tool_calls` format. Single-shot retry. Five discriminators prevent over-firing (no tools, populated tool_calls, empty content, populated reasoning_content, prior tool-result message in conversation).
+
+Empirically the mimo-parasail case from ADW's 2026-06-19 diagnostic where the model returned ~69 tokens of "I would do this..." prose with zero tool_calls. Post-alpha.23, the rescue gives the model one corrective shot.
+
+Emits `onRetry` with reason `"zero-tool-call-prose-retry"` for observability.
+
 ```typescript
 import { createOpenAIAdapter } from "@llm-ports/adapter-openai";
 
