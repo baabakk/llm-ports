@@ -116,9 +116,32 @@ Bundled pricing does NOT cover compat-provider models (Groq, Together AI, Firewo
 
 `text`, `image` (base64 → data URI; URL passthrough), `audio` (base64 wav/mp3 only), `tool_use`, `tool_result`. Throws `ContentBlockUnsupportedError` for unsupported variants.
 
-## Known reasoning models (auto-handled)
+## Capability detection — three-tier architecture (alpha.24+)
 
 Reasoning models consume output tokens on hidden chain-of-thought before producing visible text. The adapter detects this and retries once with the budget expanded by a headroom multiplier.
+
+**The detection mechanism has three tiers** (see [Capability Detection](https://github.com/baabakk/llm-ports/blob/main/docs/concepts/capability-detection.md) for the full design):
+
+1. **Runtime detection (alpha.22+)** — universal correctness path. Every successful response is inspected for four CoT field shapes (`usage.completion_tokens_details.reasoning_tokens`, `message.reasoning`, `message.reasoning_content`, inline `<think>`). Catches every reasoning model with zero maintenance.
+2. **Behavioral fingerprint cache (alpha.24+)** — opt-in cross-process optimization. `createOpenAIAdapter({ fingerprintCache })` skips the first-call discovery penalty.
+3. **Static catalog (`KNOWN_REASONING_MODELS`, FROZEN)** — cheap shortcut for the stable well-known cases. Closed to new entries.
+
+### Behavioral fingerprint cache
+
+```ts
+import { createOpenAIAdapter, FileFingerprintCache } from "@llm-ports/adapter-openai";
+
+// Long-running worker: persist across restarts
+const adapter = createOpenAIAdapter({
+  apiKey: process.env.DEEPINFRA_API_KEY!,
+  baseURL: "https://api.deepinfra.com/v1/openai",
+  fingerprintCache: new FileFingerprintCache("~/.llm-ports/fingerprints.json"),
+});
+```
+
+Bundled backends: `InMemoryFingerprintCache` (dev/tests; lifetime is the current process), `FileFingerprintCache` (atomic JSON; survives restarts). Bring-your-own backend (Redis, S3, KV) via the `FingerprintCacheBackend` interface. Standalone helper `fingerprintModel()` for CI warm-starts.
+
+
 
 **Two detection layers (alpha.22+):**
 
