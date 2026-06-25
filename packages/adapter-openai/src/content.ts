@@ -212,15 +212,97 @@ function extractTextFromBlocks(blocks: ContentBlock[]): string {
     .join("\n");
 }
 
+// ─── Harmony tool-call extraction (alpha.23+) ────────────────────────
+//
+// gpt-oss-* models from OpenAI use the "harmony" output format where a tool
+// call is encoded as a structured channel:
+//
+//   <|channel|>commentary to=functions.write_file<|constrain|>json<|message|>
+//   {"path":"x.ts","content":"..."}
+//
+// Some providers (Cerebras, Groq) translate harmony channels into the
+// standard `tool_calls` array on the response before sending it back. Others
+// (DeepInfra at the time of writing) pass the raw harmony channel through as
+// `message.reasoning_content`, leaving `tool_calls` empty. Without
+// extraction, runAgent terminates the agentic loop on what looks like an
+// empty assistant turn.
+//
+// This parser handles the "raw harmony" case by extracting one or more
+// tool calls from a reasoning_content string. It returns null in three cases:
+//   - reasoning_content is empty or missing
+//   - reasoning_content does not contain any parseable harmony tool call
+//     (just chain-of-thought prose, or a bare JSON fragment with no tool
+//     name — the latter is the case the alpha.23 zero-tool-call rescue
+//     handles via a corrective retry instead)
+//   - the matched JSON arguments are unparseable
+//
+// Returning null lets the caller fall through to the zero-tool-call rescue
+// path (ASK 2 in alpha.23), so this parser is the surgical fast path: when
+// the model emitted a complete tool call but in the wrong channel, hoist
+// it; otherwise stay out of the way.
+//
+// See llm-ports#46 / discussion #50, and ADW's 2026-06-19 diagnostic
+// transcript for the empirical evidence motivating this addition.
+
+/**
+ * Best-effort parse of one or more tool calls out of a harmony-formatted
+ * reasoning_content string. Returns null when no parseable harmony tool
+ * call is found (so the caller can fall through to corrective rescue).
+ */
+export function parseHarmonyToolCalls(
+  reasoningContent: string | null | undefined,
+): OpenAIToolCall[] | null {
+  if (!reasoningContent || reasoningContent.length === 0) return null;
+
+  // Match: <|channel|>commentary|tool ... to=functions.NAME [<|constrain|>json] <|message|>{...JSON...}
+  //
+  // The non-greedy `[\s\S]*?` between the tool name and `<|message|>` allows
+  // for an optional `<|constrain|>json` segment per the harmony spec (some
+  // providers pass it through, others don't). The lookahead at the end
+  // bounds the JSON before the next harmony marker or end-of-string. Tool
+  // name is restricted to identifier characters to avoid false matches
+  // inside JSON bodies.
+  const HARMONY_TOOL_PATTERN =
+    /<\|channel\|>(?:commentary|tool)[\s\S]*?to=functions\.([A-Za-z_][A-Za-z0-9_]*)[\s\S]*?<\|message\|>(\{[\s\S]*?\})(?=<\||$)/g;
+
+  const calls: OpenAIToolCall[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = HARMONY_TOOL_PATTERN.exec(reasoningContent)) !== null) {
+    const toolName = match[1]!;
+    const argsJson = match[2]!;
+    // Validate the JSON before synthesizing the tool_call so we don't pass
+    // along garbage that would fail downstream when the consumer's tool
+    // executor tries to parse it.
+    try {
+      JSON.parse(argsJson);
+    } catch {
+      continue;
+    }
+    calls.push({
+      id: `harmony-${Math.random().toString(36).slice(2, 14)}`,
+      type: "function",
+      function: { name: toolName, arguments: argsJson },
+    });
+  }
+
+  return calls.length > 0 ? calls : null;
+}
+
 // ─── Incoming: OpenAI assistant message → ContentBlock[] ─────────────
 
 /**
  * Convert an OpenAI assistant response (`message.content` + `message.tool_calls`)
  * back into a llm-ports ContentBlock[].
+ *
+ * Alpha.23+: accepts an optional `reasoning_content` field. When `tool_calls`
+ * is empty/missing and `reasoning_content` contains harmony-formatted tool
+ * calls (DeepInfra-style gpt-oss serving), the harmony tool calls are
+ * extracted and merged into the result. See `parseHarmonyToolCalls`.
  */
 export function fromOpenAIAssistantMessage(message: {
   content: string | null | OpenAIContentPart[];
   tool_calls?: OpenAIToolCall[];
+  reasoning_content?: string | null;
 }): ContentBlock[] {
   const blocks: ContentBlock[] = [];
   if (typeof message.content === "string" && message.content.length > 0) {
@@ -242,8 +324,18 @@ export function fromOpenAIAssistantMessage(message: {
       // an `input_audio` content part. Skip until a real use case shows.
     }
   }
-  if (message.tool_calls) {
-    for (const tc of message.tool_calls) {
+  // Alpha.23+: when standard tool_calls is empty/missing AND a non-empty
+  // reasoning_content is present, try the harmony extraction path. This
+  // recovers tool calls emitted by DeepInfra-served gpt-oss into the
+  // reasoning channel rather than the standard tool_calls array. Falls
+  // through silently when no harmony tool calls are parseable, leaving
+  // the zero-tool-call rescue (ASK 2) to handle the prose-only case.
+  const standardToolCalls = message.tool_calls && message.tool_calls.length > 0
+    ? message.tool_calls
+    : (parseHarmonyToolCalls(message.reasoning_content) ?? undefined);
+
+  if (standardToolCalls) {
+    for (const tc of standardToolCalls) {
       let parsed: unknown;
       try {
         parsed = JSON.parse(tc.function.arguments);

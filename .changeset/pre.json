@@ -47,6 +47,8 @@
     "alpha-21-core-strict-and-observability",
     "alpha-22-adapter-google-httpoptions",
     "alpha-22-adapter-openai-reasoning-architecture",
+    "alpha-23-adapter-openai-tool-use-fixes",
+    "alpha-23-core-per-attempt-timeout",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",

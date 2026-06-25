@@ -1,5 +1,12 @@
 # @llm-ports/adapter-anthropic
 
+## 0.1.0-alpha.23
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.23
+
 ## 0.1.0-alpha.21
 
 ### Patch Changes

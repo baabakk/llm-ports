@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-migrate-from-vercel-ai",
-  "version": "0.1.0-alpha.22",
+  "version": "0.1.0-alpha.23",
   "private": true,
   "description": "Migration paths for users on Vercel AI SDK: (a) wrap existing code with no rewrite, (b) progressive port to llm-ports' typed registry. Both paths add fallback chains, USD cost gating, and capability factories without touching most call sites.",
   "type": "module",

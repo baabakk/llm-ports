@@ -50,6 +50,7 @@ import {
 import { OPENAI_PRICING } from "./pricing.js";
 import {
   fromOpenAIAssistantMessage,
+  parseHarmonyToolCalls,
   toOpenAIMessages,
   toOpenAIUserContent,
   type OpenAIMessage,
@@ -612,6 +613,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               message: {
                 content: string | null;
                 tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+                reasoning_content?: string | null;
               };
             }>;
             usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
@@ -624,18 +626,40 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             terminationReason = "completed";
             break;
           }
+          // Alpha.23+: harmony tool-call extraction. When the standard
+          // tool_calls array is empty AND a non-empty reasoning_content is
+          // present, try to parse harmony-encoded tool calls out of it. The
+          // parser returns null when no parseable harmony call is found;
+          // otherwise it returns synthesized tool_calls entries that the
+          // loop executes the same way as standard ones.
+          let effectiveToolCalls = aMsg.tool_calls ?? [];
+          if (effectiveToolCalls.length === 0 && aMsg.reasoning_content) {
+            const extracted = parseHarmonyToolCalls(aMsg.reasoning_content);
+            if (extracted && extracted.length > 0) {
+              effectiveToolCalls = extracted as typeof effectiveToolCalls;
+              emitRetry(ctx, {
+                reason: "harmony-tool-call-extracted",
+                attempt: 0,
+                modelId: lastModelId,
+                providerAlias: alias,
+                delayMs: 0,
+              });
+            }
+          }
+
           // Append the assistant message to the conversation
           conversation.push({
             role: "assistant",
             content: fromOpenAIAssistantMessage({
               content: aMsg.content,
-              ...(aMsg.tool_calls ? { tool_calls: aMsg.tool_calls as never } : {}),
+              ...(effectiveToolCalls.length > 0 ? { tool_calls: effectiveToolCalls as never } : {}),
+              ...(aMsg.reasoning_content !== undefined ? { reasoning_content: aMsg.reasoning_content } : {}),
             }),
           });
 
           finalText = aMsg.content ?? "";
 
-          const calls = aMsg.tool_calls ?? [];
+          const calls = effectiveToolCalls;
           if (calls.length === 0) {
             terminationReason = "completed";
             break;
@@ -1092,6 +1116,81 @@ function reasoningStarvedResponse(response: unknown, req: LogicalChatRequest): b
 }
 
 /**
+ * Detect the "model emitted prose, didn't call any tool" pattern. (alpha.23+)
+ *
+ * Empirical motivation: ADW 2026-06-19 — mimo-parasail in the multi-team
+ * agentic build loop returned `finish_reason: "stop"` with ~69 tokens of
+ * prose, zero `tool_calls`, no `reasoning_content`. The agentic loop saw
+ * no executable output and terminated as "completed" — false success.
+ *
+ * Predicate: there were tools available in the request AND the response
+ * was a clean completion (length or stop) with no tool_calls AND there
+ * was visible prose content. The model SHOULD have called a tool but
+ * answered with text instead.
+ *
+ * Discriminators that prevent false positives:
+ *   - tool_calls populated → model actually called something; not this case
+ *   - no tools in request → text response is legitimate
+ *   - finish_reason is `tool_calls` → standard tool-use success path
+ *   - empty content → likely reasoning starvation, not prose response
+ *     (handled by reasoningStarvedResponse instead)
+ *   - reasoning_content populated AND tool_calls empty → harmony case,
+ *     handled by ASK 1 extraction before this predicate is checked
+ *
+ * When true, the caller mirrors the reasoning-starvation rescue: retry once
+ * with a corrective system message asking the model to use the standard
+ * `tool_calls` format rather than describing its intent in prose.
+ */
+function zeroToolCallProseResponse(response: unknown, req: LogicalChatRequest): boolean {
+  if (!response || typeof response !== "object") return false;
+  // The request must have included a tools array. Without tools, a prose
+  // response is the only correct response shape.
+  if (!Array.isArray(req.tools) || req.tools.length === 0) return false;
+  // Don't rescue when the conversation already includes tool results. The
+  // model may legitimately be summarizing tool execution output rather than
+  // failing to call a tool. This discriminator scopes the rescue to the
+  // "model failed to use tools on its first agentic turn" case rather than
+  // firing on every subsequent loop iteration where the model is wrapping up.
+  // In a runAgent loop, tool results come back as role: "tool" messages.
+  const hasToolResults = req.messages.some((m) => m.role === "tool");
+  if (hasToolResults) return false;
+  const r = response as {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: Array<unknown> | null;
+        reasoning_content?: string | null;
+      };
+      finish_reason?: string;
+    }>;
+  };
+  const choice = r.choices?.[0];
+  const text = choice?.message?.content ?? "";
+  const finishReason = choice?.finish_reason;
+  const toolCalls = choice?.message?.tool_calls;
+  // ASK 1 extracts harmony calls before this predicate runs in runAgent, but
+  // executeChatRequest doesn't have that context — be defensive and skip when
+  // reasoning_content looks harmony-shaped to avoid double-firing. The starvation
+  // rescue (reasoningStarvedResponse) handles non-harmony reasoning emissions.
+  const reasoningContent = choice?.message?.reasoning_content;
+  if (typeof reasoningContent === "string" && reasoningContent.length > 0) {
+    return false;
+  }
+  // Tool calls populated → success path, not prose
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) return false;
+  // No visible prose → covered by reasoning starvation, not this
+  if (text.length === 0) return false;
+  // Must be a clean completion (length or stop), not an error
+  const finishStop = finishReason === "stop" || finishReason === "length";
+  if (!finishStop) return false;
+  // Don't rescue on finish_reason=tool_calls — that's the standard success path
+  // (the OpenAI spec uses `tool_calls` as a finish_reason variant; if it's
+  // present, the model intended tool use). Already excluded by the tool_calls
+  // population check above, but explicit guard for clarity.
+  return true;
+}
+
+/**
  * True if this error is OpenAI's project-key burst-protection 401 (transient,
  * key is valid) rather than a real auth failure. Distinguishable only when a
  * prior request on the same client already succeeded — otherwise indistinguishable
@@ -1220,6 +1319,49 @@ async function executeChatRequest(
         });
         try {
           const retried = await attempt();
+          ctx.hasSucceeded.value = true;
+          learnFromResponse(req.modelId, retried);
+          return { response: retried, modelId: req.modelId };
+        } catch (retryErr) {
+          throw wrapProviderError(alias, retryErr);
+        }
+      }
+
+      // ASK 2 (alpha.23+): the model emitted prose without calling any tool
+      // despite the request providing a tools array. Retry once with a
+      // corrective system message asking it to use the standard tool_calls
+      // format. Single-shot; if the retry also responds with prose-only,
+      // return that response and let the consumer's orchestration handle it.
+      if (zeroToolCallProseResponse(response, req)) {
+        emitRetry(ctx, {
+          reason: "zero-tool-call-prose-retry",
+          attempt: 0,
+          modelId: req.modelId,
+          providerAlias: alias,
+          delayMs: 0,
+        });
+        try {
+          // Build a corrective system message and prepend it to the messages
+          // array for the retry. Modifying req.messages in place would leak
+          // into the calling code's view of the request; shallow-clone instead.
+          const correctiveMessage = {
+            role: "system" as const,
+            content:
+              "Your previous response did not include a tool call. Tools are " +
+              "available — call them via the standard tool_calls array to " +
+              "perform the work. Do not describe what you would do; do it.",
+          };
+          const retryReq: LogicalChatRequest = {
+            ...req,
+            messages: [...req.messages, correctiveMessage],
+          };
+          const retryAttempt = async (): Promise<unknown> => {
+            const caps = readCaps(retryReq.modelId, pricing);
+            const sdkReq = materializeRequest(retryReq, caps);
+            const reqOpts = retryReq.signal ? { signal: retryReq.signal } : undefined;
+            return await client.chat.completions.create(sdkReq as never, reqOpts);
+          };
+          const retried = await retryAttempt();
           ctx.hasSucceeded.value = true;
           learnFromResponse(req.modelId, retried);
           return { response: retried, modelId: req.modelId };

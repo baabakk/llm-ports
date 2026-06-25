@@ -141,6 +141,33 @@ export interface RegistryOptions {
    * spans and metrics in a downstream OTel pipeline.
    */
   observability?: ObservabilityHooks;
+  /**
+   * Per-attempt timeout, in milliseconds. When set, every provider attempt
+   * within `walkChain` is wrapped in an `AbortController` that fires after
+   * this many milliseconds. The abort propagates to the adapter's HTTP
+   * client; the adapter throws `ProviderUnavailableError`; the Registry's
+   * `shouldFallback` predicate catches it and walks to the next provider
+   * with a fresh timer.
+   *
+   * Use case: a reasoning model that grinds on hidden chain-of-thought can
+   * otherwise hang for minutes before the AbortSignal is the only escape.
+   * Set a tight per-attempt cap (e.g. 30000) and let the chain fall back to
+   * a fast non-reasoning provider after the cap fires. Per-attempt, not
+   * chain-wide — each provider gets its own budget.
+   *
+   * Composes with a caller-supplied `signal` on the call options: BOTH the
+   * timeout and the caller's abort fire the same wrapped controller. The
+   * shorter trigger wins.
+   *
+   * Default: undefined (no timeout). When set, applies to `generateText`,
+   * `generateStructured`, and `runAgent` walkChain attempts. Stream methods
+   * use the same timeout for stream-creation only (not mid-stream — once a
+   * stream opens, mid-stream timeout is a per-chunk policy that lives in
+   * the consumer's `for await`).
+   *
+   * Added in 0.1.0-alpha.23.
+   */
+  perAttemptTimeoutMs?: number;
 }
 
 // ─── Selection result ────────────────────────────────────────────────
@@ -168,6 +195,8 @@ export class Registry {
   public readonly shouldFallback: (err: unknown) => boolean;
   /** OTel-aligned observability hooks, set at construction. Read by `walkChain` + `RegistryPort`. */
   public readonly observability: ObservabilityHooks;
+  /** Per-attempt timeout in ms, applied by `walkChain` to each provider attempt. (alpha.23+) */
+  public readonly perAttemptTimeoutMs: number | undefined;
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -180,6 +209,7 @@ export class Registry {
     this.pricingOverrides = opts.pricingOverrides ?? {};
     this.shouldFallback = resolveRuntimeFallback(opts.runtimeFallback);
     this.observability = opts.observability ?? {};
+    this.perAttemptTimeoutMs = opts.perAttemptTimeoutMs;
     this.validateConfig();
   }
 
@@ -735,7 +765,12 @@ class RegistryPort implements LLMPort {
       this.registry,
       options.taskType,
       options.priority,
-      (sel) => sel.port!.generateText(options),
+      (sel) =>
+        withPerAttemptTimeout(
+          this.registry.perAttemptTimeoutMs,
+          options.signal,
+          (signal) => sel.port!.generateText(signal ? { ...options, signal } : options),
+        ),
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
       options.budgetScope,
@@ -752,7 +787,12 @@ class RegistryPort implements LLMPort {
       this.registry,
       options.taskType,
       options.priority,
-      (sel) => sel.port!.generateStructured(options),
+      (sel) =>
+        withPerAttemptTimeout(
+          this.registry.perAttemptTimeoutMs,
+          options.signal,
+          (signal) => sel.port!.generateStructured(signal ? { ...options, signal } : options),
+        ),
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
       options.budgetScope,
@@ -816,7 +856,12 @@ class RegistryPort implements LLMPort {
       this.registry,
       options.taskType,
       options.priority,
-      (sel) => sel.port!.runAgent(options),
+      (sel) =>
+        withPerAttemptTimeout(
+          this.registry.perAttemptTimeoutMs,
+          options.signal,
+          (signal) => sel.port!.runAgent(signal ? { ...options, signal } : options),
+        ),
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
       options.forceProviderAlias,
       options.budgetScope,
@@ -824,6 +869,47 @@ class RegistryPort implements LLMPort {
     );
     this.emitResultEvents(result, "runAgent", options.taskType, options.budgetScope);
     return result;
+  }
+}
+
+/**
+ * Per-attempt timeout helper (alpha.23+).
+ *
+ * Composes a per-call timeout with a user-supplied AbortSignal. Both fire
+ * the same wrapped controller; the shorter trigger wins. Called fresh per
+ * provider attempt inside `walkChain` so each provider gets its own budget.
+ *
+ * When `timeoutMs` is undefined AND there's no user signal, the wrapper is
+ * a pass-through (no AbortController created).
+ */
+async function withPerAttemptTimeout<R>(
+  timeoutMs: number | undefined,
+  userSignal: AbortSignal | undefined,
+  fn: (signal: AbortSignal | undefined) => Promise<R>,
+): Promise<R> {
+  if (timeoutMs === undefined && !userSignal) {
+    return fn(undefined);
+  }
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutMs !== undefined) {
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+  }
+  let userListener: (() => void) | undefined;
+  if (userSignal) {
+    // If user signal already aborted, forward immediately.
+    if (userSignal.aborted) {
+      controller.abort();
+    } else {
+      userListener = () => controller.abort();
+      userSignal.addEventListener("abort", userListener, { once: true });
+    }
+  }
+  try {
+    return await fn(controller.signal);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (userListener && userSignal) userSignal.removeEventListener("abort", userListener);
   }
 }
 

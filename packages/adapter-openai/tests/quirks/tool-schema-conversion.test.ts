@@ -28,7 +28,11 @@ describe("#1 — Zod tool input schemas are converted to real JSON Schema", () =
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
-    mockChatCompletionsCreate.mockResolvedValueOnce(
+    // mockResolvedValue (not Once) so ASK 2's zero-tool-call rescue (alpha.23+)
+    // gets a response on its corrective-retry leg without needing test-specific
+    // setup. The test asserts the request shape (call 0); the rescue's
+    // additional call doesn't affect schema-conversion correctness.
+    mockChatCompletionsCreate.mockResolvedValue(
       buildOpenAIChatResponse({
         text: "done",
         promptTokens: 10,
@@ -55,7 +59,8 @@ describe("#1 — Zod tool input schemas are converted to real JSON Schema", () =
       maxOutputTokens: 50,
     });
 
-    expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(1);
+    // ASK 2's rescue (alpha.23+) may add a corrective-retry call; the request
+    // shape we're verifying is on call[0] regardless. Don't constrain count.
     const req = mockChatCompletionsCreate.mock.calls[0]?.[0] as {
       tools: Array<{
         type: "function";
@@ -99,7 +104,11 @@ describe("#1 — Zod tool input schemas are converted to real JSON Schema", () =
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
-    mockChatCompletionsCreate.mockResolvedValueOnce(
+    // mockResolvedValue (not Once) so ASK 2's zero-tool-call rescue (alpha.23+)
+    // gets a response on its corrective-retry leg without needing test-specific
+    // setup. The test asserts the request shape (call 0); the rescue's
+    // additional call doesn't affect schema-conversion correctness.
+    mockChatCompletionsCreate.mockResolvedValue(
       buildOpenAIChatResponse({
         text: "done",
         promptTokens: 10,
@@ -154,7 +163,11 @@ describe("#1 — Zod tool input schemas are converted to real JSON Schema", () =
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
-    mockChatCompletionsCreate.mockResolvedValueOnce(
+    // mockResolvedValue (not Once) so ASK 2's zero-tool-call rescue (alpha.23+)
+    // gets a response on its corrective-retry leg without needing test-specific
+    // setup. The test asserts the request shape (call 0); the rescue's
+    // additional call doesn't affect schema-conversion correctness.
+    mockChatCompletionsCreate.mockResolvedValue(
       buildOpenAIChatResponse({
         text: "done",
         promptTokens: 10,

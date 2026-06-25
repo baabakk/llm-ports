@@ -276,7 +276,13 @@ describe("Group F: tool-use edges", () => {
     const adapter = createOpenAIAdapter({ apiKey: "test" });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
-    mockChatCompletionsCreate.mockResolvedValueOnce(
+    // mockResolvedValue (not Once) because ASK 2's zero-tool-call rescue
+    // (alpha.23+) fires when the model emits prose with tools available. The
+    // rescue retry inside executeChatRequest consumes a second response. Both
+    // responses are identical prose; the assertions below verify that runAgent
+    // still terminates as completed after the rescue (the rescue is internal
+    // to executeChatRequest, so stepsTaken remains 1).
+    mockChatCompletionsCreate.mockResolvedValue(
       buildOpenAIChatResponse({
         text: "done immediately",
         promptTokens: 10,

@@ -25,7 +25,21 @@ export type RetryReason =
   /** Reasoning model spent its whole budget on hidden tokens. Retry with expanded budget. */
   | "reasoning-starvation"
   /** Structured-output response failed schema validation; retry with corrective feedback. */
-  | "validation-feedback";
+  | "validation-feedback"
+  /**
+   * Tool call was emitted in the harmony reasoning channel (`message.reasoning_content`)
+   * rather than the standard `message.tool_calls` array. The adapter extracted the
+   * harmony tool call and hoisted it into the executable path. No retry was performed
+   * — this is observability only, signaling that the response shape was non-standard
+   * but recoverable. (alpha.23+)
+   */
+  | "harmony-tool-call-extracted"
+  /**
+   * Model emitted prose without making any tool calls, despite the request providing
+   * a tools array. Retry with a corrective system message asking the model to use
+   * the standard `tool_calls` array. Single-shot retry. (alpha.23+)
+   */
+  | "zero-tool-call-prose-retry";
 
 /** What the adapter passes to `onRetry` each time it retries. */
 export interface RetryEvent {
