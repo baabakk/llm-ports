@@ -218,6 +218,84 @@ export function emitCacheHit(hook: OnCacheHit | undefined, event: CacheHitEvent)
 }
 
 /**
+ * Derive a validation-retry event from an adapter-level `OnRetry` event.
+ * (alpha.24+)
+ *
+ * The Registry-level `onValidationRetry` hook fires only for the
+ * `validation-feedback` retry reason (structured-output schema mismatch).
+ * Pass the result of this helper as the adapter's `onRetry` so each
+ * adapter's retry events flow through to the Registry's observability
+ * hooks AND any user-supplied adapter-level callback.
+ *
+ * @example
+ *   import { createOpenAIAdapter } from "@llm-ports/adapter-openai";
+ *   import { createRegistryFromEnv, deriveValidationRetryFromAdapterRetry } from "@llm-ports/core";
+ *
+ *   const registry = createRegistryFromEnv({
+ *     // ...
+ *     observability: {
+ *       onValidationRetry: (e) => myMetrics.validationRetries.inc({ model: e.modelId }),
+ *     },
+ *   });
+ *
+ *   const adapter = createOpenAIAdapter({
+ *     apiKey: process.env.OPENAI_API_KEY!,
+ *     onRetry: deriveValidationRetryFromAdapterRetry(registry, {
+ *       userOnRetry: (e) => myLogger.warn("retry", e), // chain optional
+ *     }),
+ *   });
+ *
+ * **Caveats.** The adapter-level `RetryEvent` doesn't carry `maxAttempts`
+ * or `operation`, so this helper:
+ *   - Sets `maxAttempts` to `event.attempt + 1` (best-known lower bound)
+ *   - Defaults `operation` to `"generateStructured"` (validation-feedback
+ *     only fires from structured-output paths, so this is correct in
+ *     practice)
+ *   - Sets `cause` to `"schema-mismatch"` unconditionally (the adapter
+ *     doesn't distinguish parse errors from schema errors today)
+ *
+ * If the user supplies an `OperationOverride`, that wins.
+ */
+export function deriveValidationRetryFromAdapterRetry(
+  registry: { observability: ObservabilityHooks },
+  opts?: {
+    /** Chain a user-supplied adapter-level onRetry. Errors swallowed. */
+    userOnRetry?: (event: import("./retry.js").RetryEvent) => void | Promise<void>;
+    /** Override the operation discriminator. Default `"generateStructured"`. */
+    operation?: "generateStructured" | "streamStructured";
+  },
+): (event: import("./retry.js").RetryEvent) => void {
+  const op = opts?.operation ?? "generateStructured";
+  return (event) => {
+    // Pass through to the user's adapter-level callback first, regardless of
+    // reason. Errors swallowed to match the standard `onRetry` contract.
+    if (opts?.userOnRetry) {
+      try {
+        const result = opts.userOnRetry(event);
+        if (result && typeof (result as Promise<void>).then === "function") {
+          (result as Promise<void>).catch(() => {/* swallow */});
+        }
+      } catch {
+        /* swallow */
+      }
+    }
+    // Only forward validation-feedback events to the Registry-level hook.
+    if (event.reason !== "validation-feedback") return;
+    const hook = registry.observability.onValidationRetry;
+    if (!hook) return;
+    emitValidationRetry(hook, {
+      attempt: event.attempt,
+      maxAttempts: event.attempt + 1,
+      modelId: event.modelId,
+      providerAlias: event.providerAlias,
+      cause: "schema-mismatch",
+      operation: op,
+      ...(event.cause !== undefined ? { issues: event.cause } : {}),
+    });
+  };
+}
+
+/**
  * Compute cache-hit metadata from a TokenUsage. Returns null when the usage
  * has no cache hit to emit (cachedInputTokens missing or 0). Adapters call
  * this after a successful call to determine whether to emit `onCacheHit`.

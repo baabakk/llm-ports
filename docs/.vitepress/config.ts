@@ -65,6 +65,7 @@ export default defineConfig({
             { text: "Cache Control", link: "/concepts/cache" },
             { text: "Validation Strategies", link: "/concepts/validation-strategies" },
             { text: "Observability Hooks", link: "/concepts/observability" },
+            { text: "Capability Detection", link: "/concepts/capability-detection" },
           ],
         },
         {
@@ -119,6 +120,7 @@ export default defineConfig({
             { text: "alpha.20 → alpha.21 (additive)", link: "/migration/alpha-20-to-alpha-21" },
             { text: "alpha.21 → alpha.22 (additive)", link: "/migration/alpha-21-to-alpha-22" },
             { text: "alpha.22 → alpha.23 (additive)", link: "/migration/alpha-22-to-alpha-23" },
+            { text: "alpha.23 → alpha.24 (additive)", link: "/migration/alpha-23-to-alpha-24" },
           ],
         },
         {

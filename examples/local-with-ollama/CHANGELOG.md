@@ -1,5 +1,14 @@
 # @llm-ports/example-local-with-ollama
 
+## 0.1.0-alpha.24
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.24
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.24
+  - @llm-ports/adapter-ollama@0.1.0-alpha.24
+
 ## 0.1.0-alpha.23
 
 ### Patch Changes

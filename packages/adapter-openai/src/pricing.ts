@@ -116,6 +116,32 @@ export const OPENAI_PRICING: Record<string, ModelPricing> = {
     inputPer1M: 0.14,
     outputPer1M: 0.28,
   },
+
+  // ─── Cerebras entries (alpha.24+) ─────────────────────────────────────
+  //
+  // Added 2026-06-24 after empirical research (see
+  // docs/research/reasoning-models-survey-2026-06.md). Cerebras's public
+  // catalog has shrunk to two production models as of June 2026; both are
+  // bundled here so users routing to Cerebras don't need pricingOverrides.
+
+  // Cerebras — gpt-oss-120b. Pricing verified 2026-06-24 via
+  // https://inference-docs.cerebras.ai/models/openai-oss (primary)
+  // and corroborated by Morph + Artificial Analysis (third-party).
+  // No documented cache-read tier; prompt caching is a listed capability
+  // but no separate cached_input rate is published.
+  "gpt-oss-120b": {
+    inputPer1M: 0.35,
+    outputPer1M: 0.75,
+  },
+  // Cerebras — zai-glm-4.7. Pricing per Morph + Artificial Analysis
+  // (third-party only; Cerebras's model page redirects pricing to a
+  // generic page rather than displaying the per-token rate). MEDIUM
+  // confidence — verify directly against Cerebras invoicing before
+  // relying on these numbers in cost-sensitive routing.
+  "zai-glm-4.7": {
+    inputPer1M: 2.25,
+    outputPer1M: 2.75,
+  },
 };
 
 export function lookupOpenAIPricing(modelId: string): ModelPricing | undefined {

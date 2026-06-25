@@ -46,6 +46,25 @@ describe("Bundled compat-provider pricing (alpha.21+)", () => {
     });
   });
 
+  describe("Cerebras entries (alpha.24+; verified 2026-06-24 via research survey)", () => {
+    it("has an entry for gpt-oss-120b with the published rate (HIGH confidence)", () => {
+      const entry = OPENAI_PRICING["gpt-oss-120b"];
+      expect(entry).toBeDefined();
+      expect(entry!.inputPer1M).toBe(0.35);
+      expect(entry!.outputPer1M).toBe(0.75);
+      // No documented cache-read tier on Cerebras for this model
+      expect(entry!.cacheReadPer1M).toBeUndefined();
+    });
+
+    it("has an entry for zai-glm-4.7 with the third-party rate (MEDIUM confidence)", () => {
+      const entry = OPENAI_PRICING["zai-glm-4.7"];
+      expect(entry).toBeDefined();
+      expect(entry!.inputPer1M).toBe(2.25);
+      expect(entry!.outputPer1M).toBe(2.75);
+      expect(entry!.cacheReadPer1M).toBeUndefined();
+    });
+  });
+
   describe("lookupOpenAIPricing covers the new entries", () => {
     it("looks up DeepSeek-V4-Flash by exact model id", () => {
       expect(lookupOpenAIPricing("deepseek-ai/DeepSeek-V4-Flash")).toEqual({

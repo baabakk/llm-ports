@@ -1,5 +1,16 @@
 # @llm-ports/example-multi-provider
 
+## 0.1.0-alpha.24
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+  - @llm-ports/adapter-openai@0.1.0-alpha.24
+  - @llm-ports/core@0.1.0-alpha.24
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.24
+  - @llm-ports/capabilities@0.1.0-alpha.24
+
 ## 0.1.0-alpha.23
 
 ### Patch Changes

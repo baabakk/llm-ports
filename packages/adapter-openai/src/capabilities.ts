@@ -96,13 +96,41 @@ export function _resetLearnedConstraints(): void {
 // ─── Static catalog of known reasoning models ────────────────────────
 
 /**
- * Models we already know exhibit reasoning behavior (hidden chain-of-thought
- * consuming output budget). Pre-seeds the learner so the first call against
- * these models skips the "starve, learn, retry with multiplier" round-trip.
+ * **OPTIMIZATION SHORTCUT — NOT load-bearing for correctness (alpha.24+).**
  *
- * The runtime `learnFromResponse` path catches new reasoning models anyway
- * by inspecting `usage.completion_tokens_details.reasoning_tokens` and
- * `choices[0].message.reasoning`. This catalog only saves the first call.
+ * Pre-seeds the learner so the first call against a catalog-matched model
+ * skips the discovery round-trip (reasoning starvation + learn-and-retry).
+ * Without this catalog, the very first call to a reasoning model pays one
+ * wasted round-trip; subsequent calls in the same process are fine.
+ *
+ * **The catalog is a perf shortcut, NOT the correctness path.** Runtime
+ * detection (alpha.22+) catches every reasoning model by inspecting:
+ *   - `usage.completion_tokens_details.reasoning_tokens` (OpenAI native)
+ *   - `choices[0].message.reasoning` (Cerebras-style: Cerebras, Groq, SambaNova)
+ *   - `choices[0].message.reasoning_content` (vLLM-style: DeepInfra, Parasail)
+ *   - inline `<think>...</think>` in `choices[0].message.content` (legacy R1)
+ *
+ * Behavioral fingerprinting (alpha.24+) lets users skip even the first-call
+ * penalty by caching observed shapes across processes — see
+ * `FingerprintCacheBackend` in fingerprint.ts and the
+ * `createOpenAIAdapter({ fingerprintCache })` option.
+ *
+ * **The catalog is FROZEN.** New reasoning models discovered in production
+ * are NOT added here. New entries would be one more piece of code that
+ * goes stale on its own schedule. The empirical survey at
+ * `docs/research/reasoning-models-survey-2026-06.md` enumerated ~30+
+ * reasoning models across 5 OpenAI-compat providers — maintaining regex
+ * entries for all of them is exactly the unsustainable burden the
+ * fingerprint cache solves.
+ *
+ * **Existing entries stay.** The well-known cases below (OpenAI o-series,
+ * gpt-5-nano, gpt-oss family, Qwen3.6, MiniMax-M2.7, Xiaomi MiMo) are
+ * production-grade and remove a pointless round-trip for the common case.
+ * They're cheap to keep and their patterns are stable.
+ *
+ * **For all the cases below + everything else:** runtime detection
+ * (correctness) + fingerprint cache (optimization) is the architecture.
+ * See `docs/concepts/capability-detection.md` for the three-tier design.
  *
  * Patterns are case-insensitive and tolerate underscore-vs-hyphen +
  * dot-vs-underscore variation, since OpenAI-compat providers normalize

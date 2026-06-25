@@ -60,9 +60,16 @@ import {
   isJsonModeRejection,
   isSystemMessageRejection,
   isTemperatureRejection,
+  normalizeModelId,
   rememberConstraint,
   seedKnownConstraints,
 } from "./capabilities.js";
+import {
+  buildFingerprintKey,
+  inspectResponseForFingerprint,
+  type FingerprintCacheBackend,
+  type ModelFingerprint,
+} from "./fingerprint.js";
 
 // ─── Adapter options ─────────────────────────────────────────────────
 
@@ -183,6 +190,33 @@ export interface OpenAIAdapterOptions {
    * validation-feedback (structured output failed schema; retry with feedback).
    */
   onRetry?: OnRetry;
+  /**
+   * Behavioral fingerprint cache (alpha.24+). When supplied, the adapter
+   * seeds the capability learner from this cache before each call and
+   * writes back the observed fingerprint after each successful call. This
+   * skips the first-call discovery penalty for known models AND avoids
+   * the static catalog being load-bearing for novel reasoning models.
+   *
+   * The cache is keyed by `(baseURL, modelId)`. Different providers serving
+   * the same canonical model get separate entries (correctly — they may
+   * expose different response shapes for the same weights). The same model
+   * served by the same provider across multiple processes shares state when
+   * the cache backend persists.
+   *
+   * Two bundled backends:
+   *   - `InMemoryFingerprintCache` — Map; lifetime is the current process.
+   *     Useful for dev, tests, short workers.
+   *   - `FileFingerprintCache(path)` — atomic JSON file. Useful for
+   *     long-running workers and CI warm-starts.
+   *
+   * Bring your own backend (Redis, S3, etc.) by implementing
+   * `FingerprintCacheBackend`.
+   *
+   * Default: undefined (no cache). Static catalog + runtime detection
+   * (alpha.22) handle correctness without fingerprinting; the fingerprint
+   * cache is purely an optimization to skip the first-call penalty.
+   */
+  fingerprintCache?: FingerprintCacheBackend;
 }
 
 // ─── Internal context ────────────────────────────────────────────────
@@ -206,6 +240,10 @@ interface AdapterContext {
   useStrictResponseFormat: boolean;
   /** Observability hook for transient retries. Optional; no-op when unset. */
   onRetry?: OnRetry;
+  /** Behavioral fingerprint cache (alpha.24+). Optional. */
+  fingerprintCache?: FingerprintCacheBackend;
+  /** Adapter's configured baseURL — used for fingerprint cache key construction. */
+  baseURL: string | undefined;
 }
 
 /**
@@ -307,7 +345,9 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
     useStrictResponseFormat:
       opts.useStrictResponseFormat ?? autoDetectStrictResponseFormat(opts.baseURL),
+    baseURL: opts.baseURL,
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
+    ...(opts.fingerprintCache ? { fingerprintCache: opts.fingerprintCache } : {}),
   };
 
   return {
@@ -318,13 +358,90 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
   };
 }
 
+/**
+ * Apply a cached fingerprint to the capability learner (alpha.24+).
+ *
+ * Called once when the fingerprint cache yields a hit for the (baseURL,
+ * modelId) tuple. Translates the recorded `reasoningField` into the
+ * `reasoningModel: true` constraint the learner consumes.
+ */
+function seedFromFingerprint(modelId: string, fp: ModelFingerprint): void {
+  if (fp.reasoningModel) {
+    rememberConstraint(modelId, { reasoningModel: true });
+  }
+  // Non-reasoning fingerprints are also informative — they tell us NOT to
+  // apply the headroom multiplier. The learner today only stores positive
+  // constraints, so we don't write a negative; the absence-as-default
+  // behavior preserves correctness.
+}
+
+/**
+ * Persist a fingerprint observation to the cache (alpha.24+).
+ *
+ * Fire-and-forget: writes back asynchronously without blocking the inflight
+ * call. Cache backend errors are swallowed — a failed write is observability
+ * loss, not a correctness issue (next process startup will just re-discover).
+ */
+function writeFingerprint(
+  cache: FingerprintCacheBackend,
+  baseURL: string | undefined,
+  modelId: string,
+  response: unknown,
+): void {
+  const shape = inspectResponseForFingerprint(response);
+  // Don't cache "no signal" verdicts. They could be a non-reasoning prompt
+  // against a reasoning model (e.g., "what's 2+2" against gpt-oss-120b at
+  // reasoning_effort: "none"). Wait for an observation that tells us
+  // something definitive.
+  if (!shape.reasoningModel) return;
+  const fp: ModelFingerprint = {
+    modelId: normalizeModelId(modelId),
+    baseURL: baseURL ?? "openai-native",
+    reasoningModel: shape.reasoningModel,
+    ...(shape.reasoningField ? { reasoningField: shape.reasoningField } : {}),
+    fingerprintedAt: new Date().toISOString(),
+    schemaVersion: 1,
+  };
+  const key = buildFingerprintKey(baseURL, modelId);
+  // Fire-and-forget; backend errors silently dropped.
+  Promise.resolve(cache.set(key, fp)).catch(() => {
+    /* swallow — fingerprint write is observability, not correctness */
+  });
+}
+
 // ─── LLMPort implementation ──────────────────────────────────────────
 
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
   // Seed known-reasoning catalog so first calls on o-series / gpt-5-nano /
-  // gpt-oss / Qwen3.6 / MiniMax-M2.7 skip the starvation-retry round-trip.
+  // gpt-oss / Qwen3.6 / MiniMax-M2.7 / MiMo-V skip the first-call penalty.
+  // The catalog is a shortcut, not a correctness layer — runtime detection
+  // (alpha.22) handles models the catalog doesn't know, and behavioral
+  // fingerprinting (alpha.24) handles them without the wasted first call
+  // when a cache is configured.
   seedKnownConstraints(modelId);
+
+  // Behavioral fingerprint cache (alpha.24+): if a cache is configured AND
+  // contains a fingerprint for this (baseURL, modelId) tuple, seed the
+  // learner from it. This skips the first-call discovery for models the
+  // catalog doesn't know but that have been previously fingerprinted
+  // (either via the standalone `fingerprintModel()` helper or by an
+  // earlier call against this cache).
+  //
+  // Fire-and-forget on the read side: don't block port construction on a
+  // potentially-slow cache backend (Redis, S3 reads). The next call against
+  // an unseeded model just pays the usual first-call learning penalty
+  // (already handled by runtime detection); not a correctness issue.
+  if (ctx.fingerprintCache) {
+    const key = buildFingerprintKey(ctx.baseURL, modelId);
+    Promise.resolve(ctx.fingerprintCache.get(key))
+      .then((fp) => {
+        if (fp) seedFromFingerprint(modelId, fp);
+      })
+      .catch(() => {
+        /* swallow — fingerprint cache read is best-effort */
+      });
+  }
 
   // Validate image content blocks at the adapter boundary. Throws typed
   // ImageTooLargeError or InvalidImageUrlError if a base64 image exceeds
@@ -1304,6 +1421,12 @@ async function executeChatRequest(
       const response = await attempt();
       ctx.hasSucceeded.value = true;
       learnFromResponse(req.modelId, response);
+      // Behavioral fingerprint write (alpha.24+): inspect every successful
+      // response and persist a fingerprint when one is derivable. Free
+      // observability — no extra probe call required.
+      if (ctx.fingerprintCache) {
+        writeFingerprint(ctx.fingerprintCache, ctx.baseURL, req.modelId, response);
+      }
 
       // If the response shows the model spent all its budget on reasoning and
       // produced no visible text, retry once with the now-learned reasoning

@@ -1,5 +1,14 @@
 # @llm-ports/example-extract-from-pdf
 
+## 0.1.0-alpha.24
+
+### Patch Changes
+
+- Updated dependencies
+  - @llm-ports/core@0.1.0-alpha.24
+  - @llm-ports/adapter-anthropic@0.1.0-alpha.24
+  - @llm-ports/capabilities@0.1.0-alpha.24
+
 ## 0.1.0-alpha.23
 
 ### Patch Changes

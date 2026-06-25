@@ -167,6 +167,7 @@ export type {
 } from "./observability.js";
 export {
   deriveCacheHit,
+  deriveValidationRetryFromAdapterRetry,
   emitCacheHit,
   emitCost,
   emitFallback,

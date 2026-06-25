@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/capabilities",
-  "version": "0.1.0-alpha.23",
+  "version": "0.1.0-alpha.24",
   "description": "Reusable cognitive operation factories for llm-ports: classify, score, draft, summarize, extract, plan, analyze. Configure once at definition time, call many times.",
   "license": "MIT",
   "author": "Babak Abbaschian",

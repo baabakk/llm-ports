@@ -27,4 +27,15 @@ export {
   type OpenAIAdapterOptions,
 } from "./adapter.js";
 export { OPENAI_PRICING, lookupOpenAIPricing } from "./pricing.js";
-export { KNOWN_REASONING_MODELS } from "./capabilities.js";
+export { KNOWN_REASONING_MODELS, normalizeModelId } from "./capabilities.js";
+export { parseHarmonyToolCalls } from "./content.js";
+// Behavioral fingerprinting (alpha.24+)
+export {
+  buildFingerprintKey,
+  fingerprintModel,
+  FileFingerprintCache,
+  InMemoryFingerprintCache,
+  inspectResponseForFingerprint,
+  type FingerprintCacheBackend,
+  type ModelFingerprint,
+} from "./fingerprint.js";
