@@ -118,6 +118,7 @@ export default defineConfig({
             { text: "alpha.19 → alpha.20 (TS-level)", link: "/migration/alpha-19-to-alpha-20" },
             { text: "alpha.20 → alpha.21 (additive)", link: "/migration/alpha-20-to-alpha-21" },
             { text: "alpha.21 → alpha.22 (additive)", link: "/migration/alpha-21-to-alpha-22" },
+            { text: "alpha.22 → alpha.23 (additive)", link: "/migration/alpha-22-to-alpha-23" },
           ],
         },
         {
