@@ -140,17 +140,79 @@ interface ValidationRetryEvent {
 }
 ```
 
-## Coverage in alpha.21
+## Coverage (as of alpha.25)
 
 | Hook | Emitted? | Where it fires |
 |---|---|---|
-| `onCost` | ✅ | Every successful `generateText` / `generateStructured` / `runAgent` |
-| `onTokenUsage` | ✅ | Every successful `generateText` / `generateStructured` / `runAgent` |
+| `onCost` | ✅ | Every successful `generateText` / `generateStructured` / `runAgent` and at natural stream completion for `streamText` / `streamStructured` (alpha.25+) |
+| `onTokenUsage` | ✅ | Same as `onCost` |
 | `onCacheHit` | ✅ | When the response reports `cacheReadTokens > 0` |
 | `onFallback` | ✅ (cause: `provider-error`) | When the Registry's `walkChain` advances from one alias to the next |
-| `onValidationRetry` | Type only | Use adapter `onRetry` + filter for now |
+| `onValidationRetry` | ✅ (alpha.24+) | Registry-level emission via `deriveValidationRetryFromAdapterRetry` bridging the adapter's `onRetry` |
 
-Stream methods (`streamText`, `streamStructured`) do not emit `onCost` / `onTokenUsage` yet because streamed cost surfaces piecemeal as the stream completes. Streamed-cost emission is the alpha.22 follow-up.
+Streamed cost surfacing (alpha.25) emits `onCost` + `onTokenUsage` **once per stream** at natural completion; mid-stream errors and consumer-cancelled streams do NOT emit (matches the non-streaming "cost recorded only on success" contract). Enabled by default in `adapter-openai` via `stream_options: { include_usage: true }`; opt out per adapter with `streamUsage: false` if a compat provider rejects the field.
+
+## `refs` field on events (alpha.25+)
+
+Every observability event carries an optional `refs?: Record<string, ArtifactRef>` field, threaded verbatim from the call options. Use this to attribute events to versioned artifacts (prompts, scaffolds, policies, experiment variants) or attribution tags (tenant, project, session):
+
+```ts
+const result = await port.generateStructured({
+  taskType: "extract",
+  prompt: userInput,
+  schema: MySchema,
+  refs: {
+    prompt:  { key: "extractor-v3", version: 3, hash: "sha256:..." },
+    tenant:  { key: "acme-corp" },
+    session: { key: "sess-abc123" },
+  },
+});
+
+// ...on the observability side:
+const registry = createRegistryFromEnv({
+  observability: {
+    onCost: (e) => {
+      metrics.costByPrompt.record(e.totalUsd, {
+        promptKey:     e.refs?.prompt?.key,
+        promptVersion: e.refs?.prompt?.version,
+        tenant:        e.refs?.tenant?.key,
+      });
+    },
+  },
+});
+```
+
+**Non-goals:** refs are not validated, not sent to the model, not persisted, not read by adapters. Pure consumer-owned trace metadata. See the [alpha.24-to-alpha.25 migration guide](/migration/alpha-24-to-alpha-25) for the full contract.
+
+## Aggressive fallback preset (alpha.25+)
+
+`RegistryOptions.runtimeFallback: "aggressive"` bundles the opinionated classifier three consumers rebuilt by hand (BEPA Plan 29, HomeSignal, SalesCoach Plan 30). Walks the chain on `RateLimitError`, `EmptyResponseError`, `ContextWindowExceededError`, `BadRequestError` matching credit-exhaustion body patterns, and raw 5xx status codes — in addition to the default `ProviderUnavailableError`. Does NOT walk on `AuthenticationError`, generic malformed `BadRequestError`, or budget-exhaustion.
+
+```ts
+import { createRegistryFromEnv } from "@llm-ports/core";
+
+const registry = createRegistryFromEnv({
+  adapters: { /* ... */ },
+  runtimeFallback: "aggressive",  // alpha.25+, LP-REQ-01
+  observability: {
+    onFallback: (e) => {
+      // Fires when a rate-limit / credit-exhaustion / empty-response / 5xx
+      // caused the chain to walk. cause: "provider-error"; reason: the error.
+      metrics.chainWalks.inc({ cause: e.cause, from: e.fromAlias, to: e.toAlias });
+    },
+  },
+});
+```
+
+For finer control the object form still wins; the classifier is exported so consumers can compose:
+
+```ts
+import { aggressiveShouldFallback } from "@llm-ports/core";
+
+runtimeFallback: {
+  shouldFallback: (e) => aggressiveShouldFallback(e) || myCustomCondition(e),
+},
+```
 
 ## Per-attempt timeout (alpha.23+)
 

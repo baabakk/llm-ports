@@ -51,6 +51,7 @@
     "alpha-23-core-per-attempt-timeout",
     "alpha-24-adapter-openai",
     "alpha-24-core",
+    "alpha-25-observability-hardening",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",

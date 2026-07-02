@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-local-with-ollama",
-  "version": "0.1.0-alpha.24",
+  "version": "0.1.0-alpha.25",
   "private": true,
   "description": "Local-first LLM dev loop with @llm-ports/adapter-ollama. Health check, auto-pull, generateText + generateStructured locally. Includes an optional cloud fallback chain that flips on one env var so the same code runs offline (Ollama) and online (Anthropic).",
   "type": "module",

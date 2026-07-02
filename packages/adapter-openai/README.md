@@ -100,8 +100,8 @@ Bundled pricing does NOT cover compat-provider models (Groq, Together AI, Firewo
 |---------|--------|
 | `generateText` | ✓ |
 | `generateStructured` (Zod schemas) | ✓ (uses native `response_format: json_object` + `retry-with-feedback`) |
-| `streamText` | ✓ |
-| `streamStructured` (partial JSON) | ✓ (best-effort partial parse) |
+| `streamText` | ✓ (alpha.25+: emits `onCost` + `onTokenUsage` at natural completion) |
+| `streamStructured` (partial JSON) | ✓ (best-effort partial parse; alpha.25+: same streamed cost surface) |
 | `runAgent` (multi-turn tool use) | ✓ |
 | `generateEmbedding` / `generateEmbeddings` | ✓ (text-embedding-3-small / -large) |
 | Vision input — base64 images | ✓ (data URI) |
@@ -140,6 +140,40 @@ const adapter = createOpenAIAdapter({
 ```
 
 Bundled backends: `InMemoryFingerprintCache` (dev/tests; lifetime is the current process), `FileFingerprintCache` (atomic JSON; survives restarts). Bring-your-own backend (Redis, S3, KV) via the `FingerprintCacheBackend` interface. Standalone helper `fingerprintModel()` for CI warm-starts.
+
+## Streamed cost surfacing (alpha.25+)
+
+`streamText` and `streamStructured` now emit `onCost` + `onTokenUsage` observability events at natural stream completion, matching the non-streaming contract. Enabled by default via `stream_options: { include_usage: true }` on the SDK request.
+
+```ts
+const adapter = createOpenAIAdapter({
+  apiKey: process.env.OPENAI_API_KEY!,
+  // streamUsage: true is the default — no code change required
+});
+
+// The Registry's observability hook now fires once per stream on completion:
+const registry = createRegistryFromEnv({
+  adapters: { openai: adapter },
+  observability: {
+    onCost: (e) => {
+      // e.operation is "streamText" or "streamStructured" for streamed calls
+      metrics.streamCost.observe(e.totalUsd, { model: e.modelId });
+    },
+  },
+});
+
+for await (const chunk of registry.getPort().streamText({
+  taskType: "chat",
+  prompt: "hello",
+})) {
+  ui.append(chunk);
+}
+// onCost + onTokenUsage fired once at completion.
+```
+
+**Opt-out for compat providers that reject the field:** `createOpenAIAdapter({ streamUsage: false })`. Stream itself still works; only the post-completion `onCost` / `onTokenUsage` events are suppressed for that adapter instance.
+
+Mid-stream errors and consumer-cancelled streams (via `AbortSignal`) do NOT emit — matches the "cost recorded only on success" contract.
 
 
 

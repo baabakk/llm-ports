@@ -18,6 +18,7 @@ import {
   extractJSON,
   failValidation,
   mergeTokenUsage,
+  readStreamCompleteCallback,
   stringifyContentBlocks,
   throwIfAborted,
   tryParsePartialJSON,
@@ -27,6 +28,7 @@ import {
   type BatchEmbeddingOptions,
   type BatchEmbeddingResult,
   type ContentBlock,
+  type CostUsage,
   type MessageContent,
   type EmbeddingOptions,
   type EmbeddingResult,
@@ -191,6 +193,18 @@ export interface OpenAIAdapterOptions {
    */
   onRetry?: OnRetry;
   /**
+   * Streamed cost surfacing (alpha.25+). When `true` (default), the adapter
+   * adds `stream_options: { include_usage: true }` to streaming requests so
+   * the provider returns a final chunk with usage counts, which the adapter
+   * uses to compute cost and fire the Registry's stream-complete callback.
+   *
+   * Set to `false` when the underlying compat provider rejects the
+   * `stream_options` field. The stream itself still works; only the
+   * post-completion `onCost` / `onTokenUsage` events are suppressed for
+   * that provider (matches alpha.24 behavior).
+   */
+  streamUsage?: boolean;
+  /**
    * Behavioral fingerprint cache (alpha.24+). When supplied, the adapter
    * seeds the capability learner from this cache before each call and
    * writes back the observed fingerprint after each successful call. This
@@ -244,6 +258,8 @@ interface AdapterContext {
   fingerprintCache?: FingerprintCacheBackend;
   /** Adapter's configured baseURL — used for fingerprint cache key construction. */
   baseURL: string | undefined;
+  /** Enable streamed cost surfacing via `stream_options: { include_usage: true }`. Defaults to true. (alpha.25+) */
+  streamUsage: boolean;
 }
 
 /**
@@ -346,6 +362,7 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     useStrictResponseFormat:
       opts.useStrictResponseFormat ?? autoDetectStrictResponseFormat(opts.baseURL),
     baseURL: opts.baseURL,
+    streamUsage: opts.streamUsage ?? true,
     ...(opts.onRetry ? { onRetry: opts.onRetry } : {}),
     ...(opts.fingerprintCache ? { fingerprintCache: opts.fingerprintCache } : {}),
   };
@@ -630,6 +647,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         role: "user",
         content: toOpenAIUserContent(options.prompt),
       };
+      const streamStart = Date.now();
+      const streamCompleteCallback = readStreamCompleteCallback(options);
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
         messages: [userMsg],
@@ -640,12 +659,35 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
         ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
         stream: true,
+        streamUsage: ctx.streamUsage,
       });
+      let finalUsageChunk: OpenAIStreamChunk | undefined;
       for await (const chunk of stream) {
+        // Alpha.25+: watch for the final usage-only chunk (choices=[] + usage
+        // populated) that `stream_options: { include_usage: true }` produces.
+        // The final chunk usually has no delta, so we intercept and stash it
+        // for post-loop cost emission instead of yielding.
+        if (chunk.usage && (!chunk.choices || chunk.choices.length === 0)) {
+          finalUsageChunk = chunk;
+          continue;
+        }
         const delta = chunk.choices[0]?.delta?.content;
         if (typeof delta === "string" && delta.length > 0) {
           yield delta;
         }
+      }
+      // Natural completion: fire the Registry-attached stream-complete
+      // callback with usage + cost. Mid-stream errors and consumer aborts
+      // bypass this block (the for-await throws upward instead).
+      if (streamCompleteCallback && finalUsageChunk?.usage) {
+        emitStreamComplete({
+          usage: finalUsageChunk.usage,
+          modelId,
+          providerAlias: alias,
+          pricing,
+          streamStart,
+          callback: streamCompleteCallback,
+        });
       }
     },
 
@@ -662,6 +704,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             schema: buildStrictJsonSchema(options.schema),
           }
         : undefined;
+      const streamStart = Date.now();
+      const streamCompleteCallback = readStreamCompleteCallback(options);
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
         messages: [
@@ -678,14 +722,31 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ...(options.providerExtras ? { providerExtras: options.providerExtras } : {}),
         ...(strictResponseSchema ? { strictResponseSchema } : { jsonMode: true }),
         stream: true,
+        streamUsage: ctx.streamUsage,
       });
       let buffer = "";
+      let finalUsageChunk: OpenAIStreamChunk | undefined;
       for await (const chunk of stream) {
+        // Alpha.25+: intercept the final usage-only chunk (see streamText).
+        if (chunk.usage && (!chunk.choices || chunk.choices.length === 0)) {
+          finalUsageChunk = chunk;
+          continue;
+        }
         const delta = chunk.choices[0]?.delta?.content;
         if (typeof delta !== "string") continue;
         buffer += delta;
         const partial = tryParsePartialJSON(buffer) as Partial<T> | null;
         if (partial !== null) yield partial;
+      }
+      if (streamCompleteCallback && finalUsageChunk?.usage) {
+        emitStreamComplete({
+          usage: finalUsageChunk.usage,
+          modelId,
+          providerAlias: alias,
+          pricing,
+          streamStart,
+          callback: streamCompleteCallback,
+        });
       }
     },
 
@@ -963,6 +1024,14 @@ interface LogicalChatRequest {
   strictResponseSchema?: { name: string; schema: Record<string, unknown> };
   /** Stream the response or not. */
   stream: boolean;
+  /**
+   * When streaming, add `stream_options: { include_usage: true }` to the
+   * request so the provider sends a final chunk with a usage summary.
+   * Enables the alpha.25+ streamed cost surfacing path. Set to `false` on
+   * compat providers that reject the field (rare). Ignored when
+   * `stream: false`. (alpha.25+)
+   */
+  streamUsage?: boolean;
   /** Tools when this is an agent step. */
   tools?: ReturnType<typeof toOpenAITools>;
   /** Mid-flight cancellation: threaded as the 2nd arg to client.chat.completions.create. */
@@ -1032,6 +1101,15 @@ function materializeRequest(
     messages,
     stream: req.stream,
   };
+  // Streamed cost surfacing (alpha.25+). When the caller requested streaming
+  // AND opted into usage inclusion, ask the provider to emit a final chunk
+  // with prompt/completion token counts. OpenAI natively supports this;
+  // compat providers that don't implement it either ignore the field or
+  // reject at stream-creation time (in which case `streamUsage: false` is
+  // the escape hatch for callers to opt out).
+  if (req.stream && req.streamUsage) {
+    out["stream_options"] = { include_usage: true };
+  }
   // Temperature: only set if user requested AND model accepts it
   if (req.temperature !== undefined && !caps.temperatureLocked) {
     out["temperature"] = req.temperature;
@@ -1531,6 +1609,22 @@ async function executeChatRequest(
 }
 
 /**
+ * Chunk shape from a streaming chat completion. `choices` is empty on the
+ * final `include_usage: true` chunk; `usage` is populated only on the final
+ * chunk when streamUsage was requested.
+ */
+interface OpenAIStreamChunk {
+  choices: Array<{ delta?: { content?: string } }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
+}
+
+/**
  * Execute a streaming chat completion with capability awareness AND
  * transient-401 resilience. Mirrors executeChatRequest but returns the SDK's
  * async iterable. Both retry kinds (capability rejection, transient 401)
@@ -1543,9 +1637,9 @@ async function executeChatStream(
   alias: string,
   pricing: ModelPricing,
   req: LogicalChatRequest,
-): Promise<AsyncIterable<{ choices: Array<{ delta?: { content?: string } }> }>> {
+): Promise<AsyncIterable<OpenAIStreamChunk>> {
   const streamReq = { ...req, stream: true };
-  const attempt = async (): Promise<AsyncIterable<{ choices: Array<{ delta?: { content?: string } }> }>> => {
+  const attempt = async (): Promise<AsyncIterable<OpenAIStreamChunk>> => {
     const caps = readCaps(streamReq.modelId, pricing);
     const sdkReq = materializeRequest(streamReq, caps);
     const reqOpts = streamReq.signal ? { signal: streamReq.signal } : undefined;
@@ -1558,7 +1652,7 @@ async function executeChatStream(
   // eslint-disable-next-line no-constant-condition -- intentional retry loop; exits via return/throw/break
   while (true) {
     try {
-      const stream = await attempt();
+      const stream: AsyncIterable<OpenAIStreamChunk> = await attempt();
       ctx.hasSucceeded.value = true;
       return stream;
     } catch (err) {
@@ -1617,6 +1711,47 @@ function parseUsage(response: {
     ...(cached !== undefined && cached > 0 ? { cacheReadTokens: cached } : {}),
     ...(reasoning !== undefined && reasoning > 0 ? { reasoningTokens: reasoning } : {}),
   };
+}
+
+/**
+ * Fire the Registry-attached stream-complete callback with usage + cost
+ * derived from the final `include_usage: true` chunk. (alpha.25+)
+ *
+ * Called at natural stream completion by `streamText` and `streamStructured`.
+ * Mid-stream errors and consumer aborts bypass this path; no cost or
+ * observability events are emitted on failure paths (matches the alpha.24
+ * non-streaming contract of "cost recorded only on success").
+ *
+ * Errors from the callback are NOT caught here — the callback contract
+ * (via {@link readStreamCompleteCallback}) already documents that the
+ * Registry-side callback wraps its own emit calls fire-and-forget. If a
+ * future consumer of the callback wants error isolation, that's their
+ * responsibility.
+ */
+function emitStreamComplete(args: {
+  usage: NonNullable<OpenAIStreamChunk["usage"]>;
+  modelId: string;
+  providerAlias: string;
+  pricing: ModelPricing;
+  streamStart: number;
+  callback: (meta: {
+    usage: TokenUsage;
+    cost: CostUsage;
+    modelId: string;
+    providerAlias: string;
+    latencyMs: number;
+  }) => void;
+}): void {
+  const usage = parseUsage({ usage: args.usage });
+  const cost = computeChatCost(usage, args.pricing);
+  const latencyMs = Date.now() - args.streamStart;
+  args.callback({
+    usage,
+    cost,
+    modelId: args.modelId,
+    providerAlias: args.providerAlias,
+    latencyMs,
+  });
 }
 
 interface OpenAITool {

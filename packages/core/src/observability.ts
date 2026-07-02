@@ -33,7 +33,7 @@
  * OnRetry doesn't observe.
  */
 
-import type { TokenUsage, CostUsage } from "./ports/llm-port.js";
+import type { ArtifactRef, TokenUsage, CostUsage } from "./ports/llm-port.js";
 import type { BudgetScopeRef } from "./budget/types.js";
 
 /** Cause of a Registry-level fallback advancement. */
@@ -82,6 +82,8 @@ export interface CostEvent {
   taskType?: string;
   /** Optional scope hint passed by the caller for downstream attribution. */
   budgetScope?: BudgetScopeRef;
+  /** Consumer-owned artifact reference tags passed on the call options; verbatim on the event. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 /** OnTokenUsage event: per-call token counts (raw, before cost monetization). */
@@ -97,6 +99,8 @@ export interface TokenUsageEvent {
   operation: CostEvent["operation"];
   taskType?: string;
   budgetScope?: BudgetScopeRef;
+  /** Consumer-owned artifact reference tags passed on the call options; verbatim on the event. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 /** OnFallback event: chain advanced to the next provider. */
@@ -113,6 +117,8 @@ export interface FallbackEvent {
   taskType?: string;
   /** The error or signal that triggered the advancement, when applicable. */
   reason?: unknown;
+  /** Consumer-owned artifact reference tags passed on the call options; verbatim on the event. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 /** OnValidationRetry event: retry-with-feedback round-trip on structured output. */
@@ -129,6 +135,8 @@ export interface ValidationRetryEvent {
   issues?: unknown;
   /** Operation kind. */
   operation: "generateStructured" | "streamStructured";
+  /** Consumer-owned artifact reference tags passed on the call options; verbatim on the event. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 /** OnCacheHit event: provider reported cached prompt tokens. */
@@ -145,6 +153,8 @@ export interface CacheHitEvent {
   providerAlias: string;
   operation: CostEvent["operation"];
   taskType?: string;
+  /** Consumer-owned artifact reference tags passed on the call options; verbatim on the event. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 // ─── Hook function types ─────────────────────────────────────────────
@@ -293,6 +303,77 @@ export function deriveValidationRetryFromAdapterRetry(
       ...(event.cause !== undefined ? { issues: event.cause } : {}),
     });
   };
+}
+
+// ─── Streamed cost surfacing (alpha.25+) ─────────────────────────────
+
+/**
+ * Internal contract between the Registry and an adapter for surfacing
+ * stream-completion metadata (usage + cost + timing) back to the Registry's
+ * observability hooks. (alpha.25+)
+ *
+ * The Registry attaches a `StreamCompleteCallback` to the options object
+ * via `STREAM_COMPLETE_CALLBACK_KEY` before dispatching to the adapter. The
+ * adapter reads it and calls it ONCE with the final metadata when the stream
+ * completes naturally. The Registry then emits `onCost` + `onTokenUsage`
+ * from the callback body, preserving `refs` and all other observability
+ * plumbing.
+ *
+ * Semantics enforced by callers:
+ *   - The callback is called AT MOST ONCE per call.
+ *   - It is called only on natural stream completion. Mid-stream errors,
+ *     consumer-cancelled streams, and empty streams do NOT invoke it.
+ *   - Adapters that don't implement stream metadata (older adapter builds
+ *     mixed with new core) just don't call the callback; the Registry
+ *     falls back to zero-cost-recording behavior (matches alpha.24 for
+ *     stream methods).
+ *
+ * This is an internal contract, not a public consumer API. Consumers set
+ * observability hooks at Registry construction; the Symbol-keyed callback
+ * is Registry-internal plumbing.
+ */
+export const STREAM_COMPLETE_CALLBACK_KEY = Symbol.for(
+  "llm-ports.streamCompleteCallback",
+);
+
+/** Payload the adapter passes when firing the stream-complete callback. */
+export interface StreamCompleteMetadata {
+  usage: TokenUsage;
+  cost: CostUsage;
+  modelId: string;
+  providerAlias: string;
+  latencyMs: number;
+}
+
+/** Signature of the Registry-attached stream-complete callback. */
+export type StreamCompleteCallback = (meta: StreamCompleteMetadata) => void;
+
+/**
+ * Read the Registry-attached stream-complete callback from a call options
+ * object. Adapters call this to retrieve the callback before entering their
+ * stream loop; if a callback is present, the adapter fires it on natural
+ * completion. Type-safe wrapper around the Symbol-keyed access.
+ */
+export function readStreamCompleteCallback(
+  options: object | undefined,
+): StreamCompleteCallback | undefined {
+  if (!options) return undefined;
+  const key = STREAM_COMPLETE_CALLBACK_KEY;
+  const value = (options as Record<symbol, unknown>)[key];
+  return typeof value === "function" ? (value as StreamCompleteCallback) : undefined;
+}
+
+/**
+ * Attach a stream-complete callback to a call options object. The Registry
+ * calls this before dispatching a stream call to an adapter that supports
+ * completion metadata. Returns the mutated options (same reference).
+ */
+export function attachStreamCompleteCallback<T extends object>(
+  options: T,
+  callback: StreamCompleteCallback,
+): T {
+  (options as Record<symbol, unknown>)[STREAM_COMPLETE_CALLBACK_KEY] = callback;
+  return options;
 }
 
 /**

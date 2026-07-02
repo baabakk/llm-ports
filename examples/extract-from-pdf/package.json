@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/example-extract-from-pdf",
-  "version": "0.1.0-alpha.24",
+  "version": "0.1.0-alpha.25",
   "private": true,
   "description": "Document extraction example: text from a (mock) OCR'd invoice → fully-typed structured object via Zod schema. Demonstrates generateStructured, validation-retry-with-feedback, and the extractor capability factory.",
   "type": "module",

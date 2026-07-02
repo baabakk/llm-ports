@@ -15,6 +15,7 @@
 
 import type {
   AgentResult,
+  ArtifactRef,
   GenerateStructuredOptions,
   GenerateStructuredResult,
   GenerateTextOptions,
@@ -25,12 +26,14 @@ import type {
   StreamTextOptions,
 } from "../ports/llm-port.js";
 import {
+  attachStreamCompleteCallback,
   deriveCacheHit,
   emitCacheHit,
   emitCost,
   emitFallback,
   emitTokenUsage,
   type ObservabilityHooks,
+  type StreamCompleteCallback,
 } from "../observability.js";
 import type {
   BatchEmbeddingOptions,
@@ -51,6 +54,7 @@ import {
   type ValidationStrategy,
 } from "../validation.js";
 import {
+  aggressiveShouldFallback,
   ConfigError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
@@ -109,9 +113,18 @@ export interface RegistryOptions {
    * handle them).
    *
    * Added in `0.1.0-alpha.7`.
+   *
+   * The `"aggressive"` preset was added in `0.1.0-alpha.25` (LP-REQ-01).
+   * It bundles the opinionated classifier three consumers had rebuilt by
+   * hand (BEPA Plan 29, HomeSignal, SalesCoach Plan 30). See
+   * {@link aggressiveShouldFallback} for the full matrix; the summary is
+   * "walk on RateLimitError, EmptyResponseError, ContextWindowExceededError,
+   * BadRequestError with credit-exhaustion body patterns, and raw 5xx status
+   * codes — in addition to the default ProviderUnavailableError".
    */
   runtimeFallback?:
     | "default" // walk on ProviderUnavailableError
+    | "aggressive" // walk on any provider-side signal (alpha.25+, LP-REQ-01)
     | "none" // disable; caller handles errors
     | { shouldFallback: (err: unknown) => boolean };
   /**
@@ -634,6 +647,7 @@ async function walkChain<R>(
     | "streamText"
     | "streamStructured"
     | "runAgent" = "generateText",
+  refs?: Record<string, ArtifactRef>,
 ): Promise<R> {
   // forceProviderAlias short-circuit: bypass task routing entirely. Single-
   // element chain. Runtime fallback does NOT engage — caller explicitly asked
@@ -670,6 +684,7 @@ async function walkChain<R>(
         operation,
         taskType,
         reason: lastErr,
+        ...(refs ? { refs } : {}),
       });
     }
     try {
@@ -710,9 +725,10 @@ class RegistryPort implements LLMPort {
    */
   private emitResultEvents(
     result: { cost: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
-    operation: "generateText" | "generateStructured" | "runAgent" | "embed" | "rerank",
+    operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "runAgent" | "embed" | "rerank",
     taskType: string | undefined,
     budgetScope?: BudgetScopeRef,
+    refs?: Record<string, ArtifactRef>,
   ): void {
     const hooks = this.registry.observability;
     if (hooks.onCost) {
@@ -726,6 +742,7 @@ class RegistryPort implements LLMPort {
         operation,
         ...(taskType ? { taskType } : {}),
         ...(budgetScope ? { budgetScope } : {}),
+        ...(refs ? { refs } : {}),
       });
     }
     if (hooks.onTokenUsage) {
@@ -741,6 +758,7 @@ class RegistryPort implements LLMPort {
         operation,
         ...(taskType ? { taskType } : {}),
         ...(budgetScope ? { budgetScope } : {}),
+        ...(refs ? { refs } : {}),
       });
     }
     if (hooks.onCacheHit) {
@@ -755,6 +773,7 @@ class RegistryPort implements LLMPort {
           providerAlias: result.providerAlias,
           operation,
           ...(taskType ? { taskType } : {}),
+          ...(refs ? { refs } : {}),
         });
       }
     }
@@ -775,8 +794,15 @@ class RegistryPort implements LLMPort {
       options.forceProviderAlias,
       options.budgetScope,
       "generateText",
+      options.refs,
     );
-    this.emitResultEvents(result, "generateText", options.taskType, options.budgetScope);
+    this.emitResultEvents(
+      result,
+      "generateText",
+      options.taskType,
+      options.budgetScope,
+      options.refs,
+    );
     return result;
   }
 
@@ -797,9 +823,56 @@ class RegistryPort implements LLMPort {
       options.forceProviderAlias,
       options.budgetScope,
       "generateStructured",
+      options.refs,
     );
-    this.emitResultEvents(result, "generateStructured", options.taskType, options.budgetScope);
+    this.emitResultEvents(
+      result,
+      "generateStructured",
+      options.taskType,
+      options.budgetScope,
+      options.refs,
+    );
     return result;
+  }
+
+  /**
+   * Build a stream-complete callback that (a) emits `onCost` + `onTokenUsage`
+   * + `onCacheHit` from the completion metadata the adapter surfaces, and
+   * (b) records the streamed cost against the budget backend. (alpha.25+)
+   *
+   * The callback is attached to the caller's options object via
+   * {@link attachStreamCompleteCallback}; the adapter reads it and fires
+   * once at natural completion. Mid-stream errors and consumer aborts do
+   * NOT fire the callback, so no cost or observability events are emitted
+   * on failure paths (consistent with the alpha.24 non-streaming contract).
+   */
+  private buildStreamCompleteCallback(
+    operation: "streamText" | "streamStructured",
+    taskType: string | undefined,
+    budgetScope: BudgetScopeRef | undefined,
+    refs: Record<string, ArtifactRef> | undefined,
+  ): StreamCompleteCallback {
+    const registry = this.registry;
+    return (meta) => {
+      // 1. Emit observability events.
+      this.emitResultEvents(
+        { cost: meta.cost, usage: meta.usage, modelId: meta.modelId, providerAlias: meta.providerAlias },
+        operation,
+        taskType,
+        budgetScope,
+        refs,
+      );
+      // 2. Record streamed cost against the budget backend (fire-and-forget;
+      //    same swallow-error contract as the observability emits above).
+      const key = registry.scopedKey(meta.providerAlias, budgetScope);
+      Promise.resolve()
+        .then(() => registry.cost.recordCost(key, meta.cost.totalUSD))
+        .catch(() => {
+          // Budget backend errors on the streamed-cost path are not fatal
+          // to the caller; the stream already yielded. Observability hooks
+          // will still fire above.
+        });
+    };
   }
 
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
@@ -810,31 +883,46 @@ class RegistryPort implements LLMPort {
     // through whatever stream opened successfully. Mid-stream errors
     // propagate as-is to the consumer; users handle them with a try/catch
     // inside the for-await. Document this limit in the cancellation guide.
+    const completeCallback = this.buildStreamCompleteCallback(
+      "streamText",
+      options.taskType,
+      options.budgetScope,
+      options.refs,
+    );
+    const optionsWithCallback = attachStreamCompleteCallback({ ...options }, completeCallback);
     const startStream = async (sel: ModelSelection): Promise<AsyncIterable<string>> => {
-      // walkChain records the request after startStream resolves; pre-record
-      // is intentional only for streaming since the cost isn't observed.
-      return sel.port!.streamText(options);
+      return sel.port!.streamText(optionsWithCallback);
     };
     const stream = await walkChain(
       this.registry,
       options.taskType,
       options.priority,
       startStream,
-      // No cost to record at stream-creation; streaming costs surface as the
-      // stream completes, and the existing v0.1 contract doesn't record per-chunk.
+      // No cost recording here — the stream-complete callback records cost
+      // when the stream naturally finishes. This preserves the alpha.7
+      // "no cost at stream-creation" behavior while adding the alpha.25
+      // "cost at stream-completion" surface.
       async () => {
         /* noop */
       },
       options.forceProviderAlias,
       options.budgetScope,
       "streamText",
+      options.refs,
     );
     yield* stream;
   }
 
   async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+    const completeCallback = this.buildStreamCompleteCallback(
+      "streamStructured",
+      options.taskType,
+      options.budgetScope,
+      options.refs,
+    );
+    const optionsWithCallback = attachStreamCompleteCallback({ ...options }, completeCallback);
     const startStream = async (sel: ModelSelection): Promise<AsyncIterable<Partial<T>>> => {
-      return sel.port!.streamStructured(options);
+      return sel.port!.streamStructured(optionsWithCallback);
     };
     const stream = await walkChain(
       this.registry,
@@ -847,6 +935,7 @@ class RegistryPort implements LLMPort {
       options.forceProviderAlias,
       options.budgetScope,
       "streamStructured",
+      options.refs,
     );
     yield* stream;
   }
@@ -866,8 +955,15 @@ class RegistryPort implements LLMPort {
       options.forceProviderAlias,
       options.budgetScope,
       "runAgent",
+      options.refs,
     );
-    this.emitResultEvents(result, "runAgent", options.taskType, options.budgetScope);
+    this.emitResultEvents(
+      result,
+      "runAgent",
+      options.taskType,
+      options.budgetScope,
+      options.refs,
+    );
     return result;
   }
 }
@@ -952,6 +1048,8 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
  * the registry uses to decide whether to walk the chain on an error.
  *
  *   - `"default"` (or undefined): walk on `ProviderUnavailableError` only.
+ *   - `"aggressive"` (alpha.25+, LP-REQ-01): walk on any provider-side
+ *     signal via {@link aggressiveShouldFallback}.
  *   - `"none"`: never walk — preserves v0.1 behavior.
  *   - `{ shouldFallback }`: caller-supplied predicate.
  */
@@ -959,6 +1057,7 @@ function resolveRuntimeFallback(
   opt: RegistryOptions["runtimeFallback"],
 ): (err: unknown) => boolean {
   if (opt === "none") return () => false;
+  if (opt === "aggressive") return aggressiveShouldFallback;
   if (opt && typeof opt === "object" && "shouldFallback" in opt) {
     return opt.shouldFallback;
   }

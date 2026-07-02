@@ -429,3 +429,111 @@ export const errorMatchers = {
     !(e instanceof AuthenticationError),
   all: (e: unknown): boolean => e instanceof LLMPortError,
 };
+
+// ─── Aggressive fallback classifier (alpha.25+, LP-REQ-01) ────────────
+
+/**
+ * Body-pattern list for credit-exhaustion / account-issue 400s. Matched
+ * case-insensitively against `error.message` on a `BadRequestError`.
+ * Expanded conservatively: the intent is "the account cannot serve ANY
+ * call right now"; genuinely malformed requests (invalid parameter,
+ * schema failure) fail identically on every provider and MUST NOT walk
+ * the chain.
+ *
+ * Exported so consumers who want to extend this list (uncommon) or run
+ * the same matcher outside the fallback path can reuse the canonical
+ * regex set.
+ */
+export const AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS: readonly RegExp[] = [
+  /credit balance is too low/i,
+  /insufficient (funds|credit|quota|balance)/i,
+  /account (disabled|suspended|deactivated|closed)/i,
+  /billing/i,
+  /exceeded your current quota/i,
+  /out of credits/i,
+  /payment required/i,
+  /organization has been (deactivated|disabled)/i,
+];
+
+/**
+ * The opinionated classifier bundled with `RegistryOptions.runtimeFallback:
+ * "aggressive"`. Walks the provider chain on any provider-side signal that
+ * means "try a different provider" — not just the narrow default of
+ * `ProviderUnavailableError`.
+ *
+ * Bundled empirically after BEPA (Plan 29), HomeSignal, and SalesCoach
+ * (Plan 30 §R2 + §5.4) each rebuilt the same classifier by hand. The
+ * common thread: the default `runtimeFallback: "default"` only walks on
+ * `ProviderUnavailableError`, which let credit-exhaustion 400s and
+ * empty-response 200s abort the chain in production and caused hours-long
+ * outages before the consumer patched their own classifier.
+ *
+ * Walks on:
+ *   1. `ProviderUnavailableError` — the default (5xx, network, generic).
+ *   2. `RateLimitError` — try the next provider immediately, don't wait
+ *      out the retry-after backoff on this one.
+ *   3. `EmptyResponseError` — the adapter's own retries gave up; a
+ *      different provider may not exhibit the pattern.
+ *   4. `ContextWindowExceededError` — this provider can't handle the
+ *      input; try a provider with a larger window.
+ *   5. `BadRequestError` matching credit-exhaustion / account body
+ *      patterns (see {@link AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS}).
+ *   6. Any raw error with `status >= 500` (defensive for adapters that
+ *      don't wrap 5xx as `ProviderUnavailableError`).
+ *
+ * Does NOT walk on:
+ *   - `AuthenticationError` (401/403 — credential needs to be fixed).
+ *   - Generic `BadRequestError` (malformed request — would fail everywhere).
+ *   - `ContentPolicyViolationError` (content-filter — separate concern).
+ *   - `BudgetExceededError` / `SessionBudgetExceededError` (port-internal
+ *     gating; walking would defeat the gate).
+ *   - `NoProvidersAvailableError` (chain-level; nothing more to try).
+ *   - Errors that aren't `LLMPortError` and don't look like a 5xx.
+ *
+ * Composability: consumers who want everything this classifier does PLUS
+ * one extra condition can wrap it inline (`(e) => aggressiveShouldFallback(e)
+ * || myExtraCheck(e)`). Consumers who want to disable one of these
+ * categories can wrap and short-circuit similarly.
+ */
+export function aggressiveShouldFallback(err: unknown): boolean {
+  // 1. Existing default (ProviderUnavailableError; covers 5xx via SDK wrap
+  //    and any other unknown-provider-error surface).
+  if (err instanceof ProviderUnavailableError) return true;
+
+  // 2. Rate limits — try the next provider rather than waiting out backoff.
+  if (err instanceof RateLimitError) return true;
+
+  // 3. Empty responses after starvation retries gave up.
+  if (err instanceof EmptyResponseError) return true;
+
+  // 4. Context window exceeded — try a larger-window provider.
+  if (err instanceof ContextWindowExceededError) return true;
+
+  // 5. Credit exhaustion / account-issue 400s. Match against the message
+  //    body patterns; genuine malformed-request 400s don't match and
+  //    correctly do NOT walk the chain.
+  if (err instanceof BadRequestError) {
+    // ContextWindowExceededError already handled in (4). This branch is
+    // for the OTHER BadRequestError shapes.
+    if (err instanceof ContextWindowExceededError) return true;
+    const message = String((err as Error).message ?? "");
+    for (const pattern of AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS) {
+      if (pattern.test(message)) return true;
+    }
+    return false;
+  }
+
+  // 6. Raw 5xx (defensive check for adapters that don't wrap 5xx as
+  //    ProviderUnavailableError). Guards against duck-typed status fields.
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    typeof (err as { status: unknown }).status === "number" &&
+    (err as { status: number }).status >= 500
+  ) {
+    return true;
+  }
+
+  return false;
+}

@@ -28,6 +28,39 @@ export type TaskType = string;
 /** Priority tier. 0 = critical (bypasses budget gating); 3 = low. */
 export type LLMPriority = 0 | 1 | 2 | 3;
 
+// ─── Artifact references (alpha.25+) ──────────────────────────────────
+
+/**
+ * A caller-owned identifier for a versioned or identifiable artifact that
+ * should be attributed to this call: a prompt, a scaffold, a policy, a tool
+ * schema, a cost-attribution tag, an experiment variant, a session id, a
+ * tenant, whatever the consumer versions or tracks.
+ *
+ * Every field is optional. Callers set the ones that make sense for their
+ * artifact identity. Common conventions the ecosystem is converging on:
+ *   - `key`     — human-readable canonical name (`"team-dev.materialize"`)
+ *   - `version` — integer, semver, git SHA, timestamp — whatever the
+ *                 consumer's versioning scheme uses
+ *   - `hash`    — content hash for tamper-evidence (`sha256` recommended)
+ *   - `meta`    — free-form bag for consumer-specific attribution
+ *
+ * llm-ports does NOT enforce shape, vocabulary, or content. Refs are
+ * consumer-owned trace metadata that flow through to observability events
+ * unchanged.
+ *
+ * Added in `0.1.0-alpha.25`.
+ */
+export interface ArtifactRef {
+  /** Human-readable identifier — the artifact's canonical name. Optional. */
+  key?: string;
+  /** Version — integer, semver, git SHA, timestamp, whatever the consumer uses. */
+  version?: string | number;
+  /** Content hash for tamper-evidence and correlation. sha256 recommended but not enforced. */
+  hash?: string;
+  /** Free-form metadata for consumer-specific attribution. */
+  meta?: Record<string, unknown>;
+}
+
 // ─── Message and tool primitives ──────────────────────────────────────
 
 export type MessageRole = "system" | "user" | "assistant" | "tool";
@@ -276,6 +309,28 @@ export interface GenerateTextOptions {
    * (alpha.20+)
    */
   budgetScope?: BudgetScopeRef;
+  /**
+   * Reference tags flowing through to observability events. (alpha.25+)
+   *
+   * Consumer-owned, keyed map of ArtifactRefs — each ref describes an
+   * artifact whose identity should be attributed to this call: a prompt,
+   * a scaffold, a policy, a tool schema, a cost-attribution tag, an
+   * experiment variant, a session id — anything the consumer versions,
+   * tags, or wants stamped onto trace.
+   *
+   * Refs are observability-only:
+   *   - They flow through to the `refs` field on onCost / onTokenUsage /
+   *     onFallback / onCacheHit / onValidationRetry events.
+   *   - NOT sent to the model.
+   *   - NOT persisted anywhere by the library.
+   *   - NOT validated (empty object is legal; missing keys are legal).
+   *
+   * llm-ports enforces no vocabulary — consumer picks the keys. Common
+   * conventions the ecosystem is converging on: `prompt`, `scaffold`,
+   * `policy`, `tool_schema`, `model_config`, `experiment`, `session`,
+   * `tenant`, `env`, `deploy`.
+   */
+  refs?: Record<string, ArtifactRef>;
 }
 
 export interface GenerateStructuredOptions<T> {
@@ -324,6 +379,8 @@ export interface GenerateStructuredOptions<T> {
    * adapter's auto-detect defaulted to `json_object`. See llm-ports#46.
    */
   strict?: boolean;
+  /** Consumer-owned artifact reference tags flowing through to observability events. See `GenerateTextOptions.refs`. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 export interface StreamTextOptions {
@@ -350,6 +407,8 @@ export interface StreamTextOptions {
    * (alpha.20+)
    */
   budgetScope?: BudgetScopeRef;
+  /** Consumer-owned artifact reference tags flowing through to observability events. See `GenerateTextOptions.refs`. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 export interface StreamStructuredOptions<T> {
@@ -383,6 +442,8 @@ export interface StreamStructuredOptions<T> {
    * (alpha.20+)
    */
   budgetScope?: BudgetScopeRef;
+  /** Consumer-owned artifact reference tags flowing through to observability events. See `GenerateTextOptions.refs`. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 export interface RunAgentOptions {
@@ -411,6 +472,8 @@ export interface RunAgentOptions {
    * (alpha.20+)
    */
   budgetScope?: BudgetScopeRef;
+  /** Consumer-owned artifact reference tags flowing through to observability events. See `GenerateTextOptions.refs`. (alpha.25+) */
+  refs?: Record<string, ArtifactRef>;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────

@@ -10,6 +10,7 @@
 // ─── Ports ───────────────────────────────────────────────────────────
 export type {
   AgentResult,
+  ArtifactRef,
   CacheControl,
   CostUsage,
   GenerateStructuredOptions,
@@ -118,6 +119,8 @@ export {
 
 // ─── Errors ──────────────────────────────────────────────────────────
 export {
+  AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS,
+  aggressiveShouldFallback,
   AuthenticationError,
   BadRequestError,
   BudgetExceededError,
@@ -165,7 +168,12 @@ export type {
   ValidationRetryCause,
   ValidationRetryEvent,
 } from "./observability.js";
+export type {
+  StreamCompleteCallback,
+  StreamCompleteMetadata,
+} from "./observability.js";
 export {
+  attachStreamCompleteCallback,
   deriveCacheHit,
   deriveValidationRetryFromAdapterRetry,
   emitCacheHit,
@@ -173,6 +181,8 @@ export {
   emitFallback,
   emitTokenUsage,
   emitValidationRetry,
+  readStreamCompleteCallback,
+  STREAM_COMPLETE_CALLBACK_KEY,
 } from "./observability.js";
 
 // ─── Capability learning (shared across adapters) ────────────────────
