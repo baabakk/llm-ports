@@ -56,9 +56,15 @@ import {
 import {
   aggressiveShouldFallback,
   ConfigError,
+  EmptyMessagesError,
+  MessagesConflictError,
+  MessagesRequiredError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
 } from "../errors.js";
+import { createWarningState, warnDeprecatedLegacyInput, type WarningState } from "../utils/deprecation.js";
+import { toMessages } from "../utils/to-messages.js";
+import type { LLMMessage } from "../ports/llm-port.js";
 import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
 import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
@@ -181,6 +187,28 @@ export interface RegistryOptions {
    * Added in 0.1.0-alpha.23.
    */
   perAttemptTimeoutMs?: number;
+  /**
+   * When true, suppress the alpha.26+ deprecation warnings that fire when a
+   * call uses the legacy `{instructions, prompt}` shape instead of the
+   * canonical `messages: LLMMessage[]`. The legacy path still works during
+   * the alpha.26 window; suppression is a per-Registry opt-out for
+   * consumers who have read the migration guide and are working through
+   * the migration incrementally.
+   *
+   * Removed in alpha.27, when the legacy fields go with it.
+   *
+   * Added in 0.1.0-alpha.26.
+   */
+  suppressDeprecationWarnings?: boolean;
+  /**
+   * Optional replacement for the deprecation warning's default emitter
+   * (`console.warn`). Consumers wanting structured logging can supply a
+   * function that receives the fully-formatted warning message. Removed
+   * in alpha.27.
+   *
+   * Added in 0.1.0-alpha.26.
+   */
+  deprecationWarningHandler?: (message: string) => void;
 }
 
 // ─── Selection result ────────────────────────────────────────────────
@@ -210,6 +238,8 @@ export class Registry {
   public readonly observability: ObservabilityHooks;
   /** Per-attempt timeout in ms, applied by `walkChain` to each provider attempt. (alpha.23+) */
   public readonly perAttemptTimeoutMs: number | undefined;
+  /** Deprecation-warning dedup state for the alpha.26+ legacy `{instructions, prompt}` path. */
+  public readonly warningState: WarningState;
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -223,6 +253,10 @@ export class Registry {
     this.shouldFallback = resolveRuntimeFallback(opts.runtimeFallback);
     this.observability = opts.observability ?? {};
     this.perAttemptTimeoutMs = opts.perAttemptTimeoutMs;
+    this.warningState = createWarningState({
+      suppressed: opts.suppressDeprecationWarnings ?? false,
+      ...(opts.deprecationWarningHandler ? { handler: opts.deprecationWarningHandler } : {}),
+    });
     this.validateConfig();
   }
 
@@ -713,6 +747,106 @@ async function walkChain<R>(
   throw new NoProvidersAvailableError(taskType, attempted, reasons);
 }
 
+/**
+ * Normalize the alpha.25/alpha.26 dual-shape input into a `messages`
+ * array + a "messages-canonical" options bag ready for adapter dispatch.
+ * (alpha.26+)
+ *
+ * Semantics:
+ *   - If `opts.messages` is set AND non-empty, use it verbatim. Also
+ *     throws `MessagesConflictError` if any legacy field is co-set —
+ *     ambiguity is a caller bug.
+ *   - If `opts.messages` is set but empty, throws `EmptyMessagesError`.
+ *   - If `opts.messages` is unset and `opts.prompt` is set, synthesize
+ *     `messages = toMessages(instructions, prompt)`, emit the deduplicated
+ *     deprecation warning, and dispatch.
+ *   - If both are missing, throws `MessagesRequiredError`.
+ *
+ * Returns the resolved `messages` array. Callers replace the original
+ * `messages` field on options with this value before adapter dispatch;
+ * the legacy `instructions`/`prompt` fields stay on the options bag for
+ * backwards-compat adapter reads during the alpha.26 window.
+ */
+function normalizeMessagesOnOptions(
+  registry: Registry,
+  method: "generateText" | "generateStructured" | "streamText" | "streamStructured",
+  opts: {
+    messages?: LLMMessage[];
+    instructions?: string;
+    prompt?: unknown;
+  },
+): LLMMessage[] {
+  if (opts.messages !== undefined) {
+    if (opts.instructions !== undefined || opts.prompt !== undefined) {
+      const fields = [
+        opts.instructions !== undefined ? "instructions" : undefined,
+        opts.prompt !== undefined ? "prompt" : undefined,
+      ].filter((f): f is string => !!f);
+      throw new MessagesConflictError(method, fields);
+    }
+    if (opts.messages.length === 0) throw new EmptyMessagesError(method);
+    return opts.messages;
+  }
+  if (opts.prompt === undefined) throw new MessagesRequiredError(method);
+  warnDeprecatedLegacyInput(registry.warningState, method);
+  return toMessages(opts.instructions, opts.prompt as never);
+}
+
+/**
+ * Alpha.26 dual-population: after synthesizing the canonical `messages`
+ * array from either shape, ALSO populate the legacy `instructions` /
+ * `prompt` fields so adapters that haven't yet been updated to consume
+ * `messages` continue to work.
+ *
+ * Extraction rules:
+ *   - `instructions`: concatenation of leading contiguous system-role
+ *     messages (`\n\n` separator). Undefined if there are none.
+ *   - `prompt`: content of the LAST user-role message in the array. For
+ *     multi-turn conversations, this drops the intermediate turns — an
+ *     honest degradation for legacy-shape adapters. Full multi-turn
+ *     support ships in patch releases per adapter.
+ *
+ * The Registry attaches both the canonical and the legacy fields to the
+ * options bag before adapter dispatch. Adapter-openai reads `messages`
+ * (Registry-normalized) preferentially. Other adapters read the legacy
+ * fields. Both paths remain functional through alpha.26.
+ */
+function populateLegacyFieldsFromMessages(
+  messages: LLMMessage[],
+): { instructions: string | undefined; prompt: unknown } {
+  const leadingSystem: string[] = [];
+  let i = 0;
+  while (i < messages.length && messages[i]!.role === "system") {
+    const content = messages[i]!.content;
+    if (typeof content === "string") {
+      leadingSystem.push(content);
+    } else {
+      const textFragments: string[] = [];
+      let hasNonText = false;
+      for (const block of content) {
+        if ((block as { type: string }).type === "text") {
+          textFragments.push((block as { text: string }).text);
+        } else {
+          hasNonText = true;
+        }
+      }
+      if (hasNonText) break;
+      leadingSystem.push(textFragments.join(""));
+    }
+    i++;
+  }
+  const instructions = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
+  // Find the last user-role message for the legacy `prompt` shape.
+  let lastUserContent: unknown = "";
+  for (let j = messages.length - 1; j >= 0; j--) {
+    if (messages[j]!.role === "user") {
+      lastUserContent = messages[j]!.content;
+      break;
+    }
+  }
+  return { instructions, prompt: lastUserContent };
+}
+
 class RegistryPort implements LLMPort {
   constructor(private readonly registry: Registry) {}
 
@@ -780,28 +914,31 @@ class RegistryPort implements LLMPort {
   }
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
+    const messages = normalizeMessagesOnOptions(this.registry, "generateText", options);
+    const legacyFields = populateLegacyFieldsFromMessages(messages);
+    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
     const result = await walkChain(
       this.registry,
-      options.taskType,
-      options.priority,
+      normalizedOptions.taskType,
+      normalizedOptions.priority,
       (sel) =>
         withPerAttemptTimeout(
           this.registry.perAttemptTimeoutMs,
-          options.signal,
-          (signal) => sel.port!.generateText(signal ? { ...options, signal } : options),
+          normalizedOptions.signal,
+          (signal) => sel.port!.generateText(signal ? { ...normalizedOptions, signal } : normalizedOptions),
         ),
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
-      options.forceProviderAlias,
-      options.budgetScope,
+      normalizedOptions.forceProviderAlias,
+      normalizedOptions.budgetScope,
       "generateText",
-      options.refs,
+      normalizedOptions.refs,
     );
     this.emitResultEvents(
       result,
       "generateText",
-      options.taskType,
-      options.budgetScope,
-      options.refs,
+      normalizedOptions.taskType,
+      normalizedOptions.budgetScope,
+      normalizedOptions.refs,
     );
     return result;
   }
@@ -809,28 +946,31 @@ class RegistryPort implements LLMPort {
   async generateStructured<T>(
     options: GenerateStructuredOptions<T>,
   ): Promise<GenerateStructuredResult<T>> {
+    const messages = normalizeMessagesOnOptions(this.registry, "generateStructured", options);
+    const legacyFields = populateLegacyFieldsFromMessages(messages);
+    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
     const result = await walkChain(
       this.registry,
-      options.taskType,
-      options.priority,
+      normalizedOptions.taskType,
+      normalizedOptions.priority,
       (sel) =>
         withPerAttemptTimeout(
           this.registry.perAttemptTimeoutMs,
-          options.signal,
-          (signal) => sel.port!.generateStructured(signal ? { ...options, signal } : options),
+          normalizedOptions.signal,
+          (signal) => sel.port!.generateStructured(signal ? { ...normalizedOptions, signal } : normalizedOptions),
         ),
       (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
-      options.forceProviderAlias,
-      options.budgetScope,
+      normalizedOptions.forceProviderAlias,
+      normalizedOptions.budgetScope,
       "generateStructured",
-      options.refs,
+      normalizedOptions.refs,
     );
     this.emitResultEvents(
       result,
       "generateStructured",
-      options.taskType,
-      options.budgetScope,
-      options.refs,
+      normalizedOptions.taskType,
+      normalizedOptions.budgetScope,
+      normalizedOptions.refs,
     );
     return result;
   }
@@ -876,6 +1016,9 @@ class RegistryPort implements LLMPort {
   }
 
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
+    const messages = normalizeMessagesOnOptions(this.registry, "streamText", options);
+    const legacyFields = populateLegacyFieldsFromMessages(messages);
+    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
     // Streaming runtime fallback is more nuanced — once we start yielding
     // chunks, switching providers mid-stream would emit a confusing mix.
     // For alpha.7 we walk the chain on the INITIAL `streamText()` call
@@ -885,18 +1028,18 @@ class RegistryPort implements LLMPort {
     // inside the for-await. Document this limit in the cancellation guide.
     const completeCallback = this.buildStreamCompleteCallback(
       "streamText",
-      options.taskType,
-      options.budgetScope,
-      options.refs,
+      normalizedOptions.taskType,
+      normalizedOptions.budgetScope,
+      normalizedOptions.refs,
     );
-    const optionsWithCallback = attachStreamCompleteCallback({ ...options }, completeCallback);
+    const optionsWithCallback = attachStreamCompleteCallback({ ...normalizedOptions }, completeCallback);
     const startStream = async (sel: ModelSelection): Promise<AsyncIterable<string>> => {
       return sel.port!.streamText(optionsWithCallback);
     };
     const stream = await walkChain(
       this.registry,
-      options.taskType,
-      options.priority,
+      normalizedOptions.taskType,
+      normalizedOptions.priority,
       startStream,
       // No cost recording here — the stream-complete callback records cost
       // when the stream naturally finishes. This preserves the alpha.7
@@ -905,37 +1048,40 @@ class RegistryPort implements LLMPort {
       async () => {
         /* noop */
       },
-      options.forceProviderAlias,
-      options.budgetScope,
+      normalizedOptions.forceProviderAlias,
+      normalizedOptions.budgetScope,
       "streamText",
-      options.refs,
+      normalizedOptions.refs,
     );
     yield* stream;
   }
 
   async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+    const messages = normalizeMessagesOnOptions(this.registry, "streamStructured", options);
+    const legacyFields = populateLegacyFieldsFromMessages(messages);
+    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
     const completeCallback = this.buildStreamCompleteCallback(
       "streamStructured",
-      options.taskType,
-      options.budgetScope,
-      options.refs,
+      normalizedOptions.taskType,
+      normalizedOptions.budgetScope,
+      normalizedOptions.refs,
     );
-    const optionsWithCallback = attachStreamCompleteCallback({ ...options }, completeCallback);
+    const optionsWithCallback = attachStreamCompleteCallback({ ...normalizedOptions }, completeCallback);
     const startStream = async (sel: ModelSelection): Promise<AsyncIterable<Partial<T>>> => {
       return sel.port!.streamStructured(optionsWithCallback);
     };
     const stream = await walkChain(
       this.registry,
-      options.taskType,
-      options.priority,
+      normalizedOptions.taskType,
+      normalizedOptions.priority,
       startStream,
       async () => {
         /* noop */
       },
-      options.forceProviderAlias,
-      options.budgetScope,
+      normalizedOptions.forceProviderAlias,
+      normalizedOptions.budgetScope,
       "streamStructured",
-      options.refs,
+      normalizedOptions.refs,
     );
     yield* stream;
   }

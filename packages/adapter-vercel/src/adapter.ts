@@ -262,20 +262,20 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       try {
         // alpha.8: when the prompt has non-text blocks (image / audio), route
         // through Vercel's `messages` API with structured parts so the
         // multimodal payload actually reaches the underlying provider. For
         // text-only prompts, keep the simpler `prompt: string` path.
-        const multimodal = hasMultimodalContent(options.prompt);
+        const multimodal = hasMultimodalContent(options.prompt!);
         const result = await generateWithStarvationRetry(ctx, alias, modelId, {
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
           ...(multimodal
-            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt) as never }] }
-            : { prompt: stringifyContentBlocks(options.prompt) }),
+            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt!) as never }] }
+            : { prompt: stringifyContentBlocks(options.prompt!) }),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -298,7 +298,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -319,15 +319,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           // them as structured parts + append the JSON instruction as a
           // final text part. For text-only, keep the simpler prompt-string
           // path with the instruction concatenated.
-          const multimodal = hasMultimodalContent(options.prompt);
-          const userPromptString = `${stringifyContentBlocks(options.prompt)}\n\n${jsonInstruction}`;
+          const multimodal = hasMultimodalContent(options.prompt!);
+          const userPromptString = `${stringifyContentBlocks(options.prompt!)}\n\n${jsonInstruction}`;
           const messagesShape = multimodal
             ? {
                 messages: [
                   {
                     role: "user" as const,
                     content: [
-                      ...toVercelParts(options.prompt),
+                      ...toVercelParts(options.prompt!),
                       { type: "text" as const, text: `\n\n${jsonInstruction}` },
                     ] as never,
                   },
@@ -406,15 +406,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
-        const multimodal = hasMultimodalContent(options.prompt);
+        const multimodal = hasMultimodalContent(options.prompt!);
         const stream = streamText({
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),
           ...(multimodal
-            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt) as never }] }
-            : { prompt: stringifyContentBlocks(options.prompt) }),
+            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt!) as never }] }
+            : { prompt: stringifyContentBlocks(options.prompt!) }),
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -429,9 +429,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
-        const multimodal = hasMultimodalContent(options.prompt);
+        const multimodal = hasMultimodalContent(options.prompt!);
         const jsonHint = "\n\nReply with a single JSON object only. Stream the JSON progressively.";
         const messagesShape = multimodal
           ? {
@@ -439,13 +439,13 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                 {
                   role: "user" as const,
                   content: [
-                    ...toVercelParts(options.prompt),
+                    ...toVercelParts(options.prompt!),
                     { type: "text" as const, text: jsonHint },
                   ] as never,
                 },
               ],
             }
-          : { prompt: `${stringifyContentBlocks(options.prompt)}${jsonHint}` };
+          : { prompt: `${stringifyContentBlocks(options.prompt!)}${jsonHint}` };
         const stream = streamText({
           model,
           ...(options.instructions !== undefined ? { system: options.instructions } : {}),

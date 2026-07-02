@@ -354,6 +354,62 @@ export class ConfigError extends LLMPortError {
   }
 }
 
+// ─── alpha.26 messages-input errors ──────────────────────────────────
+
+/**
+ * Thrown at Registry entry when a call is dispatched with neither `messages`
+ * nor the legacy `prompt` set. Exactly one of the two must be supplied.
+ * (alpha.26+)
+ */
+export class MessagesRequiredError extends LLMPortError {
+  public override readonly name: string = "MessagesRequiredError";
+  constructor(public readonly method: string) {
+    super(
+      `${method}: neither 'messages' nor 'prompt' was supplied. Use 'messages: LLMMessage[]' (recommended) or the legacy 'prompt' field.`,
+    );
+  }
+}
+
+/**
+ * Thrown at Registry entry when `messages` is supplied but empty. Every
+ * provider requires at least one message. (alpha.26+)
+ */
+export class EmptyMessagesError extends LLMPortError {
+  public override readonly name: string = "EmptyMessagesError";
+  constructor(public readonly method: string) {
+    super(`${method}: 'messages' array is empty. At least one message is required.`);
+  }
+}
+
+/**
+ * Thrown by the `toMessages` helper when called without a `prompt`. The
+ * helper is designed to migrate the legacy `{instructions, prompt}` shape;
+ * calling it with no prompt is a caller bug. (alpha.26+)
+ */
+export class PromptRequiredError extends LLMPortError {
+  public override readonly name: string = "PromptRequiredError";
+  constructor() {
+    super(
+      "toMessages: 'prompt' is required. Use 'sys()' + 'usr()' or object literals for other shapes.",
+    );
+  }
+}
+
+/**
+ * Thrown at Registry entry when a caller mixes the alpha.26 canonical
+ * `messages` shape with the deprecated `{instructions, prompt}` shape.
+ * Ambiguity is a caller bug worth surfacing. Post-alpha.27 (which removes
+ * the deprecated fields) this error is unreachable. (alpha.26+)
+ */
+export class MessagesConflictError extends LLMPortError {
+  public override readonly name: string = "MessagesConflictError";
+  constructor(public readonly method: string, public readonly conflictingFields: readonly string[]) {
+    super(
+      `${method}: cannot mix 'messages' with the deprecated legacy fields (${conflictingFields.join(", ")}). Use 'messages' alone.`,
+    );
+  }
+}
+
 /**
  * Thrown by adapters when an image content block exceeds the provider's
  * per-image byte limit. Caught at the adapter boundary BEFORE the SDK call,

@@ -244,7 +244,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       try {
         await ensurePulled(ctx, modelId);
@@ -254,7 +254,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         }
         messages.push(
           ...toOllamaMessages([
-            { role: "user", content: options.prompt },
+            { role: "user", content: options.prompt! },
           ]),
         );
 
@@ -286,7 +286,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -306,8 +306,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             messages.push({ role: "system", content: options.instructions });
           }
           const userText = correctionPrompt
-            ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
-            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only.`;
+            ? `${stringifyContentBlocks(options.prompt!)}\n\n${correctionPrompt}`
+            : `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only.`;
           messages.push({ role: "user", content: userText });
 
           const response = await ctx.client.chat({
@@ -376,7 +376,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
         await ensurePulled(ctx, modelId);
         const messages: OllamaMessage[] = [];
@@ -384,7 +384,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           messages.push({ role: "system", content: options.instructions });
         }
         messages.push(
-          ...toOllamaMessages([{ role: "user", content: options.prompt }]),
+          ...toOllamaMessages([{ role: "user", content: options.prompt! }]),
         );
         const stream = await ctx.client.chat({
           model: modelId,
@@ -407,7 +407,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
         await ensurePulled(ctx, modelId);
         const messages: OllamaMessage[] = [];
@@ -416,7 +416,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         }
         messages.push({
           role: "user",
-          content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+          content: `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
         });
         const stream = await ctx.client.chat({
           model: modelId,

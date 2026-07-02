@@ -57,6 +57,7 @@ import {
   toOpenAIUserContent,
   type OpenAIMessage,
 } from "./content.js";
+import type { LLMMessage } from "@llm-ports/core";
 import {
   getEffectiveCapabilities,
   isJsonModeRejection,
@@ -428,6 +429,83 @@ function writeFingerprint(
 
 // ─── LLMPort implementation ──────────────────────────────────────────
 
+/**
+ * Resolve the canonical `messages` + `instructions` pair from the alpha.26
+ * dual-shape call options. The Registry normalizes `{ instructions, prompt }`
+ * into `messages` before dispatch, so in practice this helper mostly reads
+ * `options.messages`. When called directly (bypassing the Registry, e.g.
+ * consumer holds a raw port), it also honors the legacy fields.
+ *
+ * Semantics:
+ *   - If `options.messages` is set (Registry-normalized path), extract the
+ *     LEADING contiguous system-role messages into a concatenated
+ *     `instructions` string (Anthropic + Google adapters use a separate
+ *     system field; the OpenAI shape keeps system inline but the adapter
+ *     centralizes the transform for consistency). Remaining messages become
+ *     OpenAI-shape messages.
+ *   - Non-contiguous system messages (system in the middle of a
+ *     conversation) are passed through inline unchanged — OpenAI supports
+ *     mid-conversation system messages natively as boundary markers.
+ *   - If `options.messages` is unset, fall back to the pre-alpha.26 shape:
+ *     `[{role: "user", content: toOpenAIUserContent(options.prompt)}]`
+ *     plus `options.instructions` (added in 0.1.0-alpha.26).
+ */
+function resolveMessagesFromCallOptions(options: {
+  messages?: LLMMessage[];
+  instructions?: string;
+  prompt?: MessageContent;
+}): { messages: OpenAIMessage[]; instructions: string | undefined } {
+  if (options.messages !== undefined && options.messages.length > 0) {
+    // Split off leading contiguous system-role messages. Concatenate their
+    // content with newline separators; that becomes the top-level system
+    // (Anthropic / Google needs the split; OpenAI keeps it inline via
+    // executeChatRequest's instructions handling — either way the behavior
+    // is consistent).
+    const arr = options.messages;
+    const leadingSystem: string[] = [];
+    let i = 0;
+    while (i < arr.length && arr[i]!.role === "system") {
+      const content = arr[i]!.content;
+      if (typeof content === "string") {
+        leadingSystem.push(content);
+      } else {
+        // Multimodal system content — flatten text blocks; other blocks
+        // fall through inline (unusual case).
+        const textFragments: string[] = [];
+        let hasNonText = false;
+        for (const block of content) {
+          if ((block as { type: string }).type === "text") {
+            textFragments.push((block as { text: string }).text);
+          } else {
+            hasNonText = true;
+          }
+        }
+        if (hasNonText) break; // fall through with system inline; abort concatenation
+        leadingSystem.push(textFragments.join(""));
+      }
+      i++;
+    }
+    const instructions = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : options.instructions;
+    const remaining = arr.slice(i);
+    const openaiMessages = remaining.length > 0 ? toOpenAIMessages(remaining) : [];
+    // If we consumed all messages as system content, fall back to a single
+    // empty user message so the provider has SOMETHING to respond to. This
+    // is a defensive edge case — most callers wouldn't do this deliberately.
+    if (openaiMessages.length === 0) {
+      openaiMessages.push({ role: "user", content: "" });
+    }
+    return { messages: openaiMessages, instructions };
+  }
+  // Legacy shape (only reachable if the caller bypassed the Registry).
+  if (options.prompt === undefined) {
+    return { messages: [{ role: "user", content: "" }], instructions: options.instructions };
+  }
+  return {
+    messages: [{ role: "user", content: toOpenAIUserContent(options.prompt) }],
+    instructions: options.instructions,
+  };
+}
+
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
   // Seed known-reasoning catalog so first calls on o-series / gpt-5-nano /
@@ -478,16 +556,13 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      if (options.prompt !== undefined) validateContent(options.prompt);
       const start = Date.now();
-      const userMsg: OpenAIMessage = {
-        role: "user",
-        content: toOpenAIUserContent(options.prompt),
-      };
+      const { messages: chatMessages, instructions } = resolveMessagesFromCallOptions(options);
       const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
         modelId,
-        messages: [userMsg],
-        ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+        messages: chatMessages,
+        ...(instructions !== undefined ? { instructions } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
@@ -516,7 +591,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      if (options.prompt !== undefined) validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -528,11 +603,38 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let lastUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let lastModelId = modelId;
 
+      // alpha.26+: resolve the base messages array from either the canonical
+      // `messages` shape or the legacy `{instructions, prompt}` shape. The
+      // legacy path preserves the historical "append JSON instruction to the
+      // last user message" behavior for backwards-compat; the canonical
+      // path uses caller-provided messages verbatim, relying on strict
+      // schema mode OR the caller including their own JSON instruction.
+      const {
+        messages: baseMessages,
+        instructions: baseInstructions,
+      } = resolveMessagesFromCallOptions(options);
+      const isLegacyShape = options.messages === undefined;
+
       while (attempts < maxAttempts) {
         attempts++;
-        const userText = correctionPrompt
-          ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
-          : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
+        // Build the request messages. For the legacy shape, we mimic the
+        // pre-alpha.26 behavior of augmenting the last user message with a
+        // JSON directive (and correction on retry). For the canonical
+        // messages shape, we append correction prompts as user messages on
+        // retry; the caller is responsible for their initial JSON directive.
+        let requestMessages: OpenAIMessage[];
+        if (isLegacyShape) {
+          const promptRepr = options.prompt !== undefined ? stringifyContentBlocks(options.prompt) : "";
+          const userText = correctionPrompt
+            ? `${promptRepr}\n\n${correctionPrompt}`
+            : `${promptRepr}\n\nReply with a single JSON object only. No prose, no code fences.`;
+          requestMessages = [{ role: "user", content: userText }];
+        } else {
+          requestMessages = [...baseMessages];
+          if (correctionPrompt) {
+            requestMessages.push({ role: "user", content: correctionPrompt });
+          }
+        }
 
         // When strict mode is enabled, build the JSON Schema for the call.
         // The schema is reused across retry-with-feedback rounds so we only
@@ -561,8 +663,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         // let failValidation throw ValidationError directly.
         const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
           modelId,
-          messages: [{ role: "user", content: userText }],
-          ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+          messages: requestMessages,
+          ...(baseInstructions !== undefined ? { instructions: baseInstructions } : {}),
           temperature: options.temperature ?? 0,
           ...(options.maxOutputTokens !== undefined
             ? { maxOutputTokens: options.maxOutputTokens }
@@ -642,17 +744,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
-      const userMsg: OpenAIMessage = {
-        role: "user",
-        content: toOpenAIUserContent(options.prompt),
-      };
+      if (options.prompt !== undefined) validateContent(options.prompt);
+      const { messages: chatMessages, instructions } = resolveMessagesFromCallOptions(options);
       const streamStart = Date.now();
       const streamCompleteCallback = readStreamCompleteCallback(options);
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
-        messages: [userMsg],
-        ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+        messages: chatMessages,
+        ...(instructions !== undefined ? { instructions } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
@@ -693,7 +792,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      if (options.prompt !== undefined) validateContent(options.prompt);
       // alpha.21+: mirror generateStructured's strict-mode precedence chain
       // so streamStructured callers can also opt into strict json_schema
       // mode per call.
@@ -706,15 +805,25 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         : undefined;
       const streamStart = Date.now();
       const streamCompleteCallback = readStreamCompleteCallback(options);
+      // alpha.26+: resolve base messages from either shape. Legacy shape
+      // appends "Reply with JSON only. Stream progressively." to the user
+      // text; canonical shape uses messages verbatim + relies on strict
+      // schema mode or caller-provided JSON instruction.
+      const {
+        messages: baseMessages,
+        instructions: baseInstructions,
+      } = resolveMessagesFromCallOptions(options);
+      const isLegacyShape = options.messages === undefined;
+      const chatMessages: OpenAIMessage[] = isLegacyShape
+        ? [{
+            role: "user",
+            content: `${options.prompt !== undefined ? stringifyContentBlocks(options.prompt) : ""}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+          }]
+        : baseMessages;
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
-        messages: [
-          {
-            role: "user",
-            content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
-          },
-        ],
-        ...(options.instructions !== undefined ? { instructions: options.instructions } : {}),
+        messages: chatMessages,
+        ...(baseInstructions !== undefined ? { instructions: baseInstructions } : {}),
         temperature: options.temperature ?? 0,
         ...(options.maxOutputTokens !== undefined ? { maxOutputTokens: options.maxOutputTokens } : {}),
         ...(options.signal ? { signal: options.signal } : {}),

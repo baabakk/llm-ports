@@ -302,7 +302,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
       const start = Date.now();
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
         const response = await executeMessageCreate<Anthropic.Messages.Message>(
           (caps) =>
@@ -316,7 +316,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                   messages: [
                     {
                       role: "user",
-                      content: toAnthropicContent(options.prompt) as never,
+                      content: toAnthropicContent(options.prompt!) as never,
                     },
                   ],
                 },
@@ -349,7 +349,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       // pattern for structured output; for v0.1 we use the simpler prompted JSON
       // approach plus retry-with-feedback. Tool-mode can be added later.
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       let lastErr: Error | null = null;
@@ -367,8 +367,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         attempts++;
         try {
           const userContent = correctionPrompt
-            ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
-            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences. Only the JSON.`;
+            ? `${stringifyContentBlocks(options.prompt!)}\n\n${correctionPrompt}`
+            : `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences. Only the JSON.`;
 
           const response = await executeMessageCreate<Anthropic.Messages.Message>(
             (caps) =>
@@ -443,7 +443,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       // Apply learned capabilities up front for the streaming call. Streaming
       // retries on capability rejection are not yet supported (mid-stream
       // retry requires buffering the entire response, which defeats the point
@@ -463,7 +463,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               messages: [
                 {
                   role: "user",
-                  content: toAnthropicContent(options.prompt) as never,
+                  content: toAnthropicContent(options.prompt!) as never,
                 },
               ],
             },
@@ -486,7 +486,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       // Anthropic doesn't stream parsed JSON natively. We accumulate text deltas
       // and best-effort parse a partial JSON object after each chunk.
       const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
@@ -504,7 +504,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               messages: [
                 {
                   role: "user",
-                  content: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
+                  content: `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
                 },
               ],
             },

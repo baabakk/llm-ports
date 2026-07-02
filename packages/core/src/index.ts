@@ -128,12 +128,16 @@ export {
   ContentBlockUnsupportedError,
   ContentPolicyViolationError,
   ContextWindowExceededError,
+  EmptyMessagesError,
   EmptyResponseError,
   errorMatchers,
   ImageTooLargeError,
   InvalidImageUrlError,
   LLMPortError,
+  MessagesConflictError,
+  MessagesRequiredError,
   NoProvidersAvailableError,
+  PromptRequiredError,
   ProviderUnavailableError,
   RateLimitError,
   ServiceUnavailableError,
@@ -215,3 +219,9 @@ export type { OpenCostSessionOptions } from "./registry/cost-session.js";
 
 // ─── Abort signal helper ─────────────────────────────────────────────
 export { throwIfAborted } from "./utils/abort.js";
+
+// ─── alpha.26 messages helpers ───────────────────────────────────────
+export { toMessages, sys, usr } from "./utils/to-messages.js";
+export type { WarningState } from "./utils/deprecation.js";
+export { createWarningState, warnDeprecatedLegacyInput } from "./utils/deprecation.js";
+export { resolveCanonicalMessages } from "./utils/resolve-messages.js";

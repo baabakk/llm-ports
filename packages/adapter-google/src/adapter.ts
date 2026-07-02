@@ -193,10 +193,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       try {
-        const parts = toGeminiParts2(options.prompt);
+        const parts = toGeminiParts2(options.prompt!);
         const response = await ctx.client.models.generateContent({
           model: modelId,
           contents: [{ role: "user", parts }],
@@ -234,7 +234,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -270,10 +270,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         // first attempt. Correction prompts still apply on retry-with-
         // feedback rounds.
         const userText = correctionPrompt
-          ? `${stringifyContentBlocks(options.prompt)}\n\n${correctionPrompt}`
+          ? `${stringifyContentBlocks(options.prompt!)}\n\n${correctionPrompt}`
           : useNativeResponseSchema
-            ? stringifyContentBlocks(options.prompt)
-            : `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. No prose, no code fences.`;
+            ? stringifyContentBlocks(options.prompt!)
+            : `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only. No prose, no code fences.`;
 
         try {
           const response = await ctx.client.models.generateContent({
@@ -349,9 +349,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
-        const parts = toGeminiParts2(options.prompt);
+        const parts = toGeminiParts2(options.prompt!);
         const stream = await ctx.client.models.generateContentStream({
           model: modelId,
           contents: [{ role: "user", parts }],
@@ -382,7 +382,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt);
+      validateContent(options.prompt!);
       try {
         const stream = await ctx.client.models.generateContentStream({
           model: modelId,
@@ -391,7 +391,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               role: "user",
               parts: [
                 {
-                  text: `${stringifyContentBlocks(options.prompt)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
+                  text: `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
                 },
               ],
             },
