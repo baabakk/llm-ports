@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createAnalyzer, createPlanner } from "../src/index.js";
-import { createFakePort } from "./helpers/fake-port.js";
+import { createFakePort, getSystemContent, getUserContent } from "./helpers/fake-port.js";
 
 describe("createPlanner", () => {
   const PlanSchema = z.object({
@@ -66,8 +66,8 @@ describe("createPlanner", () => {
       toolCatalog: "fetchEmail, draftReply, sendEmail",
     });
     await plan({ goal: "x" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("fetchEmail, draftReply, sendEmail");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("fetchEmail, draftReply, sendEmail");
   });
 });
 
@@ -154,7 +154,7 @@ describe("createAnalyzer", () => {
       framework: "SWOT",
     });
     await analyze({ content: "biz", question: "Should we proceed?" });
-    const opts = fake.calls[0]!.options as { prompt: string };
-    expect(opts.prompt).toContain("Should we proceed?");
+    const opts = fake.calls[0]!.options;
+    expect(getUserContent(opts)).toContain("Should we proceed?");
   });
 });

@@ -11,12 +11,51 @@ import type {
   GenerateStructuredResult,
   GenerateTextOptions,
   GenerateTextResult,
+  LLMMessage,
   LLMPort,
   RunAgentOptions,
   StreamStructuredOptions,
   StreamTextOptions,
   TokenUsage,
 } from "@llm-ports/core";
+
+/**
+ * Extract the concatenated content of all system-role messages from a
+ * recorded call's options (alpha.26.1+). Tests use this instead of the
+ * removed `options.instructions` field. Returns "" when no system
+ * message is present. Content-block arrays are stringified via their
+ * text fragments.
+ */
+export function getSystemContent(options: unknown): string {
+  const opts = options as { messages?: LLMMessage[] };
+  if (!opts.messages) return "";
+  const systemMessages = opts.messages.filter((m) => m.role === "system");
+  return systemMessages
+    .map((m) => (typeof m.content === "string" ? m.content : blockText(m.content)))
+    .join("\n\n");
+}
+
+/**
+ * Extract the last user-role message's content from a recorded call's
+ * options (alpha.26.1+). Tests use this instead of the removed
+ * `options.prompt` field. Returns "" when no user message is present.
+ */
+export function getUserContent(options: unknown): string {
+  const opts = options as { messages?: LLMMessage[] };
+  if (!opts.messages) return "";
+  const userMessages = opts.messages.filter((m) => m.role === "user");
+  const last = userMessages[userMessages.length - 1];
+  if (!last) return "";
+  return typeof last.content === "string" ? last.content : blockText(last.content);
+}
+
+function blockText(blocks: unknown): string {
+  if (!Array.isArray(blocks)) return "";
+  return blocks
+    .filter((b) => (b as { type: string }).type === "text")
+    .map((b) => (b as { text: string }).text)
+    .join("");
+}
 
 export interface RecordedCall {
   method: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "runAgent";

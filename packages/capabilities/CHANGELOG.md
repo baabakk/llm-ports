@@ -1,5 +1,23 @@
 # @llm-ports/capabilities
 
+## 0.1.0-alpha.26.1
+
+### Patch Changes
+
+- Fix: migrate the 7 factory implementations to use the canonical `messages: LLMMessage[]` shape internally, unblocking the alpha.27 upgrade path.
+
+  The alpha.26 ship marked `{instructions, prompt}` deprecated on the port interface but left `@llm-ports/capabilities` calling the port with the deprecated shape internally. That worked at runtime (the Registry's dual-population synthesized `messages` from the legacy fields) but would have failed to compile against `@llm-ports/core@alpha.27` once the legacy fields are removed. Every downstream consumer using `createExtractor` / `createClassifier` / `createScorer` / `createSummarizer` / `createDrafter` / `createAnalyzer` / `createPlanner` would have broken at that point.
+
+  Fix: all 7 factory implementations now build `messages: LLMMessage[]` via `toMessages(system, userPrompt)`.
+
+  Files updated: `src/{understanding/{classify,extract,score},reasoning/{analyze,plan},generation/draft,compression/summarize}.ts`.
+
+  Regression guard: new `tests/legacy-shape-guard.test.ts` uses a recording spy port to assert every factory calls the port with `messages` set and NEITHER `instructions` nor `prompt` set. Trips before publish if a future PR reintroduces the deprecated shape.
+
+  Test coverage: 888 tests pass across the workspace (was 881 at alpha.26; +7 new guard tests; 0 regressions).
+
+  Consumer impact: zero API changes. Wrapper input types (`DraftInput.instructions`, etc.) unchanged — that's BEPA-facing consumer surface, not the port surface. Only the internal port call shape changed.
+
 ## 0.1.0-alpha.26
 
 ### Patch Changes

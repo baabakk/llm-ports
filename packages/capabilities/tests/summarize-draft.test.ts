@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDrafter, createSummarizer } from "../src/index.js";
-import { createFakePort } from "./helpers/fake-port.js";
+import { createFakePort, getSystemContent, getUserContent } from "./helpers/fake-port.js";
 
 describe("createSummarizer", () => {
   it("returns the summarized text", async () => {
@@ -32,8 +32,8 @@ describe("createSummarizer", () => {
     fake.enqueueText("ok");
     const summarize = createSummarizer({ port: fake.port, targetWords: 50 });
     await summarize({ content: "x" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("about 50 words");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("about 50 words");
   });
 });
 
@@ -75,10 +75,10 @@ describe("createDrafter", () => {
       antiPatterns: "never say 'reach out'",
     });
     await draft({ instructions: "go" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("concise warm");
-    expect(opts.instructions).toContain("SMS, max 160 chars");
-    expect(opts.instructions).toContain("never say 'reach out'");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("concise warm");
+    expect(getSystemContent(opts)).toContain("SMS, max 160 chars");
+    expect(getSystemContent(opts)).toContain("never say 'reach out'");
   });
 
   it("truncates output when maxLength is exceeded", async () => {
@@ -101,8 +101,8 @@ describe("createDrafter", () => {
       instructions: "reply",
       threadHistory: "Previous: hello\nMe: hi",
     });
-    const opts = fake.calls[0]!.options as { prompt: string };
-    expect(opts.prompt).toContain("<thread>");
-    expect(opts.prompt).toContain("Previous: hello");
+    const opts = fake.calls[0]!.options;
+    expect(getUserContent(opts)).toContain("<thread>");
+    expect(getUserContent(opts)).toContain("Previous: hello");
   });
 });

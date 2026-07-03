@@ -5,7 +5,7 @@
  * explicit list of action items), use createExtractor with a schema instead.
  */
 
-import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import { toMessages, type CacheControl, type LLMPort, type LLMPriority, type MessageContent } from "@llm-ports/core";
 import {
   buildSystemPrompt,
   resolve,
@@ -85,8 +85,7 @@ export function createSummarizer(
       const result = await config.port.generateText({
         taskType,
         ...(config.priority !== undefined ? { priority: config.priority } : {}),
-        instructions: system,
-        prompt: wrapContent(input.content),
+        messages: toMessages(system, wrapContent(input.content)),
         temperature: config.temperature ?? 0.2,
         ...(config.maxOutputTokens !== undefined
           ? { maxOutputTokens: config.maxOutputTokens }

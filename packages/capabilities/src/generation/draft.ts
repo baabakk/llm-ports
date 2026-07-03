@@ -6,7 +6,7 @@
  * chars, email = 150-250 words) help the model size its output.
  */
 
-import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import { toMessages, type CacheControl, type LLMPort, type LLMPriority, type MessageContent } from "@llm-ports/core";
 import {
   buildSystemPrompt,
   resolve,
@@ -109,8 +109,7 @@ export function createDrafter(
       const result = await config.port.generateText({
         taskType,
         ...(config.priority !== undefined ? { priority: config.priority } : {}),
-        instructions: system,
-        prompt: userPrompt,
+        messages: toMessages(system, userPrompt),
         temperature: config.temperature ?? 0.4,
         ...(config.maxOutputTokens !== undefined
           ? { maxOutputTokens: config.maxOutputTokens }

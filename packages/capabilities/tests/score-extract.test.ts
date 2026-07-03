@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createExtractor, createScorer } from "../src/index.js";
-import { createFakePort } from "./helpers/fake-port.js";
+import { createFakePort, getSystemContent, getUserContent } from "./helpers/fake-port.js";
 
 describe("createScorer", () => {
   const Schema = z.object({
@@ -58,8 +58,8 @@ describe("createScorer", () => {
       rubric: "calibrated rubric content",
     });
     await score({ content: "?" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("calibrated rubric content");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("calibrated rubric content");
   });
 });
 
@@ -124,7 +124,7 @@ describe("createExtractor", () => {
       fieldGuide: "name: full name; email: address; company: org",
     });
     await extract({ content: "?" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("name: full name");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("name: full name");
   });
 });

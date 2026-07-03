@@ -3,7 +3,7 @@
  * numerical score plus reasoning.
  */
 
-import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import { toMessages, type CacheControl, type LLMPort, type LLMPriority, type MessageContent } from "@llm-ports/core";
 import type { z } from "zod";
 import {
   buildSystemPrompt,
@@ -83,8 +83,7 @@ export function createScorer<TSchema extends z.ZodTypeAny>(
       const result = await config.port.generateStructured({
         taskType,
         ...(config.priority !== undefined ? { priority: config.priority } : {}),
-        instructions: system,
-        prompt: wrapContent(input.content),
+        messages: toMessages(system, wrapContent(input.content)),
         schema: config.schema,
         schemaName: config.schemaName,
         temperature: config.temperature ?? 0.1,

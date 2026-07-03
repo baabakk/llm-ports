@@ -4,7 +4,7 @@
  * this?" answer with explicit reasoning and recommendations.
  */
 
-import type { CacheControl, LLMPort, LLMPriority, MessageContent } from "@llm-ports/core";
+import { toMessages, type CacheControl, type LLMPort, type LLMPriority, type MessageContent } from "@llm-ports/core";
 import type { z } from "zod";
 import {
   buildSystemPrompt,
@@ -89,8 +89,7 @@ export function createAnalyzer<TSchema extends z.ZodTypeAny>(
       const result = await config.port.generateStructured({
         taskType,
         ...(config.priority !== undefined ? { priority: config.priority } : {}),
-        instructions: system,
-        prompt: userPrompt,
+        messages: toMessages(system, userPrompt),
         schema: config.schema,
         schemaName: config.schemaName,
         temperature: config.temperature ?? 0.3,

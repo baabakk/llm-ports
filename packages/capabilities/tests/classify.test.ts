@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createClassifier, type CapabilityEvent } from "../src/index.js";
-import { createFakePort } from "./helpers/fake-port.js";
+import { createFakePort, getSystemContent, getUserContent } from "./helpers/fake-port.js";
 
 const Schema = z.object({
   intent: z.enum(["question", "request", "complaint"]),
@@ -92,9 +92,9 @@ describe("createClassifier", () => {
       systemContext: async (input) => `len=${(input.content as string).length}`,
     });
     await classify({ content: "hi" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("dynamic rubric");
-    expect(opts.instructions).toContain("len=2");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("dynamic rubric");
+    expect(getSystemContent(opts)).toContain("len=2");
   });
 
   it("merges systemContext with per-call contextOverride", async () => {
@@ -107,9 +107,9 @@ describe("createClassifier", () => {
       systemContext: "global ctx",
     });
     await classify({ content: "?", contextOverride: "per-call override" });
-    const opts = fake.calls[0]!.options as { instructions: string };
-    expect(opts.instructions).toContain("global ctx");
-    expect(opts.instructions).toContain("per-call override");
+    const opts = fake.calls[0]!.options;
+    expect(getSystemContent(opts)).toContain("global ctx");
+    expect(getSystemContent(opts)).toContain("per-call override");
   });
 
   it("emits a CapabilityEvent with usage, cost, and validation attempts", async () => {
