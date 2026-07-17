@@ -62,7 +62,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -99,7 +99,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
     );
     await port.generateText({
       taskType: "t",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -114,7 +114,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
     );
     await port.generateText({
       taskType: "t",
-      prompt: "hello again",
+      messages: [{ role: "user" as const, content: "hello again" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -143,7 +143,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
 
     await port.generateText({
       taskType: "t",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -171,7 +171,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
       }),
     );
 
-    await port.generateText({ taskType: "t", prompt: "hi", temperature: 0, maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }], temperature: 0, maxOutputTokens: 10 });
 
     expect(mockCreate).toHaveBeenCalledTimes(1);
     const call = mockCreate.mock.calls[0]?.[0] as { temperature?: number };
@@ -194,7 +194,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
     await expect(
       port.generateText({
         taskType: "t",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         temperature: 0,
         maxOutputTokens: 50,
       }),
@@ -224,7 +224,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
 
     await port.generateText({
       taskType: "t",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -252,7 +252,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
 
     await port.generateText({
       taskType: "t",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -290,7 +290,7 @@ describe("#12 — adapter-anthropic strips temperature on models that reject it"
 
     await port.generateText({
       taskType: "t",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       temperature: 0,
       maxOutputTokens: 50,
     });

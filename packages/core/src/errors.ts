@@ -411,6 +411,34 @@ export class MessagesConflictError extends LLMPortError {
 }
 
 /**
+ * Thrown by adapters whose underlying provider does not structurally
+ * support mid-conversation system-role messages. Anthropic's `system` is
+ * a top-level request field distinct from `messages`; Google Gemini's
+ * `systemInstruction` is similar. Both providers reject a `messages`
+ * array that contains a system-role message after any user or assistant
+ * message; the adapter surfaces this typed error at the boundary rather
+ * than silent flattening or a confusing provider error.
+ *
+ * Adapters whose provider tolerates mid-conversation system messages
+ * (OpenAI, Ollama, Vercel) pass them through inline and never throw
+ * this error. See per-adapter docs for the policy.
+ *
+ * (alpha.27+)
+ */
+export class NonContiguousSystemError extends LLMPortError {
+  public override readonly name: string = "NonContiguousSystemError";
+  constructor(
+    public readonly alias: string,
+    public readonly method: string,
+    public readonly messageIndex: number,
+  ) {
+    super(
+      `Provider "${alias}" (${method}): system-role message at index ${messageIndex} appears mid-conversation. This provider structurally rejects non-leading system messages. Group all system-role messages at the start of the array, or fold their content into the leading system message.`,
+    );
+  }
+}
+
+/**
  * Thrown by adapters when an image content block exceeds the provider's
  * per-image byte limit. Caught at the adapter boundary BEFORE the SDK call,
  * so the caller sees a typed error instead of an opaque 413/400 wrapped as

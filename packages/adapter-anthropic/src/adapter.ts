@@ -18,7 +18,7 @@ import {
   extractJSON,
   failValidation,
   mergeTokenUsage,
-  stringifyContentBlocks,
+  NonContiguousSystemError,
   throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
@@ -30,6 +30,7 @@ import {
   type GenerateStructuredResult,
   type GenerateTextOptions,
   type GenerateTextResult,
+  type LLMMessage,
   type LLMPort,
   type ModelPricing,
   type OnRetry,
@@ -48,6 +49,7 @@ import {
   fromAnthropicContent,
   toAnthropicContent,
   toAnthropicMessages,
+  type AnthropicMessage,
 } from "./content.js";
 import {
   extractAnthropicErrorMessage,
@@ -192,6 +194,63 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
 
 // ─── The port implementation ─────────────────────────────────────────
 
+/**
+ * Resolve the canonical `messages` array (alpha.27+) into Anthropic's shape:
+ * a top-level `system` string (concatenated from leading contiguous
+ * system-role messages) plus an `AnthropicMessage[]` array of the rest.
+ *
+ * Anthropic's `system` field is structurally separate from `messages`. The
+ * provider rejects a `messages` array that contains a system-role message
+ * after any user or assistant message. This helper enforces the constraint
+ * at the adapter boundary: leading contiguous system-role messages fold
+ * into `system`; any system-role message appearing after a non-system
+ * message throws `NonContiguousSystemError` with the offending index.
+ *
+ * Added in `0.1.0-alpha.27`.
+ */
+function resolveMessagesForAnthropic(
+  alias: string,
+  method: string,
+  options: { messages: LLMMessage[] },
+): { messages: AnthropicMessage[]; system: string | undefined } {
+  const arr = options.messages;
+  const leadingSystem: string[] = [];
+  let i = 0;
+  while (i < arr.length && arr[i]!.role === "system") {
+    const content = arr[i]!.content;
+    if (typeof content === "string") {
+      leadingSystem.push(content);
+    } else {
+      const textFragments: string[] = [];
+      let hasNonText = false;
+      for (const block of content) {
+        if ((block as { type: string }).type === "text") {
+          textFragments.push((block as { text: string }).text);
+        } else {
+          hasNonText = true;
+        }
+      }
+      if (hasNonText) break;
+      leadingSystem.push(textFragments.join(""));
+    }
+    i++;
+  }
+  const system = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
+  const remaining = arr.slice(i);
+  // Assert: NO system-role messages in the remaining array. Anthropic rejects
+  // non-leading system messages structurally.
+  for (let j = 0; j < remaining.length; j++) {
+    if (remaining[j]!.role === "system") {
+      throw new NonContiguousSystemError(alias, method, i + j);
+    }
+  }
+  const messages: AnthropicMessage[] = remaining.map((m) => ({
+    role: m.role === "tool" ? "user" : (m.role as "user" | "assistant"),
+    content: toAnthropicContent(m.content),
+  }));
+  return system !== undefined ? { messages, system } : { messages, system: undefined };
+}
+
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
   // Validate image blocks in any outgoing prompt/messages. Throws typed
@@ -302,7 +361,13 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
       const start = Date.now();
-      validateContent(options.prompt!);
+      // alpha.27+: canonical messages input. Anthropic splits system into a
+      // top-level field; leading contiguous system messages fold there.
+      const { messages: chatMessages, system } = resolveMessagesForAnthropic(
+        alias,
+        "generateText",
+        { messages: options.messages! },
+      );
       try {
         const response = await executeMessageCreate<Anthropic.Messages.Message>(
           (caps) =>
@@ -311,14 +376,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                 {
                   model: modelId,
                   max_tokens: options.maxOutputTokens ?? 1024,
-                  ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                  ...(system !== undefined ? { system } : {}),
                   ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-                  messages: [
-                    {
-                      role: "user",
-                      content: toAnthropicContent(options.prompt!) as never,
-                    },
-                  ],
+                  messages: chatMessages as never,
                 },
                 caps,
               ),
@@ -349,7 +409,6 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       // pattern for structured output; for v0.1 we use the simpler prompted JSON
       // approach plus retry-with-feedback. Tool-mode can be added later.
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       let lastErr: Error | null = null;
@@ -363,13 +422,25 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let lastUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let lastModelId = modelId;
 
+      // alpha.27+: resolve messages once outside the retry loop.
+      const { messages: baseMessages, system } = resolveMessagesForAnthropic(
+        alias,
+        "generateStructured",
+        { messages: options.messages! },
+      );
+      const jsonDirective =
+        "Reply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences. Only the JSON.";
+
       while (attempts < maxAttempts) {
         attempts++;
         try {
-          const userContent = correctionPrompt
-            ? `${stringifyContentBlocks(options.prompt!)}\n\n${correctionPrompt}`
-            : `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object that matches the requested schema. Do not include any prose, explanation, or code fences. Only the JSON.`;
-
+          // Append JSON directive (first attempt) or correction prompt (retry)
+          // as a trailing user message.
+          const trailingUserContent = correctionPrompt ?? jsonDirective;
+          const requestMessages: AnthropicMessage[] = [
+            ...baseMessages,
+            { role: "user", content: trailingUserContent },
+          ];
           const response = await executeMessageCreate<Anthropic.Messages.Message>(
             (caps) =>
               applyAnthropicCacheControl(
@@ -377,9 +448,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                   {
                     model: modelId,
                     max_tokens: options.maxOutputTokens ?? 2048,
-                    ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+                    ...(system !== undefined ? { system } : {}),
                     temperature: options.temperature ?? 0,
-                    messages: [{ role: "user", content: userContent }],
+                    messages: requestMessages as never,
                   },
                   caps,
                 ),
@@ -443,7 +514,12 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      // alpha.27+: canonical messages input.
+      const { messages: chatMessages, system } = resolveMessagesForAnthropic(
+        alias,
+        "streamText",
+        { messages: options.messages! },
+      );
       // Apply learned capabilities up front for the streaming call. Streaming
       // retries on capability rejection are not yet supported (mid-stream
       // retry requires buffering the entire response, which defeats the point
@@ -456,16 +532,11 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             {
               model: modelId,
               max_tokens: options.maxOutputTokens ?? 1024,
-              ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+              ...(system !== undefined ? { system } : {}),
               ...(options.temperature !== undefined && !caps.temperatureLocked
                 ? { temperature: options.temperature }
                 : {}),
-              messages: [
-                {
-                  role: "user",
-                  content: toAnthropicContent(options.prompt!) as never,
-                },
-              ],
+              messages: chatMessages as never,
             },
             options.cacheControl,
           ) as Parameters<typeof ctx.client.messages.stream>[0],
@@ -486,7 +557,21 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      // alpha.27+: canonical messages input. Append the streaming-JSON
+      // directive as a trailing user message.
+      const { messages: baseMessages, system } = resolveMessagesForAnthropic(
+        alias,
+        "streamStructured",
+        { messages: options.messages! },
+      );
+      const requestMessages: AnthropicMessage[] = [
+        ...baseMessages,
+        {
+          role: "user",
+          content:
+            "Reply with a single JSON object that matches the requested schema. Stream the JSON progressively.",
+        },
+      ];
       // Anthropic doesn't stream parsed JSON natively. We accumulate text deltas
       // and best-effort parse a partial JSON object after each chunk.
       const userCapabilities = ctx.pricingOverrides[modelId]?.capabilities;
@@ -497,16 +582,11 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             {
               model: modelId,
               max_tokens: options.maxOutputTokens ?? 2048,
-              ...(options.instructions !== undefined ? { system: options.instructions } : {}),
+              ...(system !== undefined ? { system } : {}),
               // Omit temperature on models that reject it; otherwise default to 0
               // for deterministic JSON parsing.
               ...(caps.temperatureLocked ? {} : { temperature: options.temperature ?? 0 }),
-              messages: [
-                {
-                  role: "user",
-                  content: `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object that matches the requested schema. Stream the JSON progressively.`,
-                },
-              ],
+              messages: requestMessages as never,
             },
             options.cacheControl,
           ) as Parameters<typeof ctx.client.messages.stream>[0],

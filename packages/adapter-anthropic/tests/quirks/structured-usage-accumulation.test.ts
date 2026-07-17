@@ -44,7 +44,7 @@ describe("generateStructured usage accumulation (alpha.11)", () => {
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "p",
+      messages: [{ role: "user" as const, content: "p" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -80,7 +80,7 @@ describe("generateStructured usage accumulation (alpha.11)", () => {
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "p",
+      messages: [{ role: "user" as const, content: "p" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -119,7 +119,7 @@ describe("generateStructured usage accumulation (alpha.11)", () => {
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "p",
+      messages: [{ role: "user" as const, content: "p" }],
       schema: z.object({ x: z.number() }),
     });
 

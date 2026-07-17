@@ -48,8 +48,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "stable system prompt",
-        prompt: "hello",
+        messages: [{ role: "system" as const, content: "stable system prompt" }, { role: "user" as const, content: "hello" }],
         cacheControl: { mode: "auto" },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -62,7 +61,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hello",
+        messages: [{ role: "user" as const, content: "hello" }],
         cacheControl: { mode: "auto" },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -73,8 +72,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
         cacheControl: { mode: "auto", ttlSeconds: 3600 },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -85,8 +83,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
         cacheControl: { mode: "auto", ttlSeconds: 300 },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -99,8 +96,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
         cacheControl: { mode: "manual", breakpoints: [{ at: "system" }] },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -119,7 +115,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       );
       await port().generateStructured({
         taskType: "x",
-        prompt: "long user turn",
+        messages: [{ role: "user" as const, content: "long user turn" }],
         schema: z.object({ ok: z.boolean() }),
         cacheControl: { mode: "manual", breakpoints: [{ at: "message-index", index: 0 }] },
       });
@@ -135,8 +131,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
         cacheControl: { mode: "manual" },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -149,8 +144,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
         cacheControl: { mode: "off" },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -163,8 +157,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
         cacheControl: { mode: "preCreated", cachedContentHandle: "ignored-on-anthropic" },
       });
       const sent = mockCreate.mock.calls[0][0];
@@ -177,8 +170,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockCreate.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        instructions: "sys",
-        prompt: "hi",
+        messages: [{ role: "system" as const, content: "sys" }, { role: "user" as const, content: "hi" }],
       });
       const sent = mockCreate.mock.calls[0][0];
       expect(sent.system).toBe("sys");

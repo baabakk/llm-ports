@@ -68,7 +68,7 @@ describe("KNOWN_TEMPERATURE_REJECTORS catalog (alpha.10)", () => {
 
       const result = await port.generateText({
         taskType: "t",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         temperature: 0.7,
         maxOutputTokens: 50,
       });
@@ -101,7 +101,7 @@ describe("KNOWN_TEMPERATURE_REJECTORS catalog (alpha.10)", () => {
 
       await port.generateText({
         taskType: "t",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         temperature: 0.7,
         maxOutputTokens: 50,
       });
@@ -130,7 +130,7 @@ describe("KNOWN_TEMPERATURE_REJECTORS catalog (alpha.10)", () => {
 
     const iter = port.streamText({
       taskType: "t",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       temperature: 0.7,
     });
     for await (const _ of iter) {

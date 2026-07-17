@@ -136,6 +136,7 @@ export {
   LLMPortError,
   MessagesConflictError,
   MessagesRequiredError,
+  NonContiguousSystemError,
   NoProvidersAvailableError,
   PromptRequiredError,
   ProviderUnavailableError,
