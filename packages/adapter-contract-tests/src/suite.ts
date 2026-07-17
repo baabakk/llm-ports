@@ -127,7 +127,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await ctx.port.generateText({
           taskType: "test-text",
-          prompt: "say hello",
+          messages: [{ role: "user" as const, content: "say hello" }],
         });
 
         expect(result.text).toBe("hello world");
@@ -144,7 +144,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         ctx.setupNetworkError(new Error("simulated network failure"));
 
         await expect(
-          ctx.port.generateText({ taskType: "test-text", prompt: "hi" }),
+          ctx.port.generateText({ taskType: "test-text", messages: [{ role: "user" as const, content: "hi" }] }),
         ).rejects.toThrow(/network|failure|unavailable/i);
       });
     });
@@ -164,7 +164,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await ctx.port.generateStructured({
           taskType: "test-classify",
-          prompt: "classify this",
+          messages: [{ role: "user" as const, content: "classify this" }],
           schema: Schema,
           schemaName: "TestSchema",
         });
@@ -188,7 +188,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await ctx.port.generateStructured({
           taskType: "test-classify",
-          prompt: "classify this",
+          messages: [{ role: "user" as const, content: "classify this" }],
           schema: Schema,
           schemaName: "TestSchema",
         });
@@ -212,7 +212,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         const collected: string[] = [];
         for await (const chunk of ctx.port.streamText({
           taskType: "test-stream",
-          prompt: "stream a greeting",
+          messages: [{ role: "user" as const, content: "stream a greeting" }],
         })) {
           collected.push(chunk);
         }
@@ -234,7 +234,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         const collected: Array<Partial<{ ready: boolean; message: string }>> = [];
         for await (const partial of ctx.port.streamStructured({
           taskType: "test-stream-structured",
-          prompt: "stream a status",
+          messages: [{ role: "user" as const, content: "stream a status" }],
           schema: Schema,
         })) {
           collected.push(partial);
@@ -273,7 +273,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await hookedPort.generateStructured({
           taskType: "test-classify",
-          prompt: "classify this",
+          messages: [{ role: "user" as const, content: "classify this" }],
           schema: Schema,
           schemaName: "TestSchema",
         });
@@ -300,7 +300,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await hookedPort.generateStructured({
           taskType: "test-classify",
-          prompt: "classify this",
+          messages: [{ role: "user" as const, content: "classify this" }],
           schema: Schema,
           schemaName: "TestSchema",
         });
@@ -325,7 +325,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await hookedPort.generateStructured({
           taskType: "test-classify",
-          prompt: "classify this",
+          messages: [{ role: "user" as const, content: "classify this" }],
           schema: Schema,
           schemaName: "TestSchema",
         });
@@ -357,11 +357,16 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await ctx.port.generateText({
           taskType: "test-vision",
-          prompt: [
-            { type: "text", text: "What is in this image?" },
+          messages: [
             {
-              type: "image",
-              source: { kind: "base64", mediaType: "image/png", data: tinyPng },
+              role: "user" as const,
+              content: [
+                { type: "text", text: "What is in this image?" },
+                {
+                  type: "image",
+                  source: { kind: "base64", mediaType: "image/png", data: tinyPng },
+                },
+              ],
             },
           ],
         });
@@ -388,9 +393,14 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
         const result = await ctx.port.generateText({
           taskType: "test-vision-url",
-          prompt: [
-            { type: "text", text: "What is in this image?" },
-            { type: "image", source: { kind: "url", url: "https://example.com/cat.png" } },
+          messages: [
+            {
+              role: "user" as const,
+              content: [
+                { type: "text", text: "What is in this image?" },
+                { type: "image", source: { kind: "url", url: "https://example.com/cat.png" } },
+              ],
+            },
           ],
         });
 
@@ -421,7 +431,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         await expect(
           ctx.port.generateText({
             taskType: "test-signal",
-            prompt: "hi",
+            messages: [{ role: "user" as const, content: "hi" }],
             signal: controller.signal,
           }),
         ).rejects.toBeDefined();
@@ -450,7 +460,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         await expect(
           ctx.port.generateStructured({
             taskType: "test-signal-structured",
-            prompt: "hi",
+            messages: [{ role: "user" as const, content: "hi" }],
             schema: Schema,
             schemaName: "TestSchema",
             signal: controller.signal,

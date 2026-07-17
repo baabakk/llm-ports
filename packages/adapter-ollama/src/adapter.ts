@@ -18,7 +18,6 @@ import {
   extractJSON,
   failValidation,
   mergeTokenUsage,
-  stringifyContentBlocks,
   throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
@@ -244,19 +243,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       const start = Date.now();
       try {
         await ensurePulled(ctx, modelId);
-        const messages: OllamaMessage[] = [];
-        if (options.instructions !== undefined) {
-          messages.push({ role: "system", content: options.instructions });
-        }
-        messages.push(
-          ...toOllamaMessages([
-            { role: "user", content: options.prompt! },
-          ]),
-        );
+        // alpha.27+: canonical messages input. Ollama supports mid-conversation
+        // system messages inline (unlike Anthropic/Google which split system to a
+        // top-level request field), so pass the array verbatim without splitting
+        // leading system content.
+        const messages = toOllamaMessages(options.messages!);
 
         const response = await ctx.client.chat({
           model: modelId,
@@ -286,7 +280,6 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -301,14 +294,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         attempts++;
         try {
           await ensurePulled(ctx, modelId);
-          const messages: OllamaMessage[] = [];
-          if (options.instructions !== undefined) {
-            messages.push({ role: "system", content: options.instructions });
+          // alpha.27+: canonical messages input. Ollama's native `format: "json"`
+          // handles the "reply with JSON" directive at the wire level, so we don't
+          // need to inject the instruction inline. Caller-provided messages pass
+          // through verbatim; retry-with-feedback appends the correction as a new
+          // user message.
+          const messages: OllamaMessage[] = toOllamaMessages(options.messages!);
+          if (correctionPrompt) {
+            messages.push({ role: "user", content: correctionPrompt });
           }
-          const userText = correctionPrompt
-            ? `${stringifyContentBlocks(options.prompt!)}\n\n${correctionPrompt}`
-            : `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only.`;
-          messages.push({ role: "user", content: userText });
 
           const response = await ctx.client.chat({
             model: modelId,
@@ -376,16 +370,11 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       try {
         await ensurePulled(ctx, modelId);
-        const messages: OllamaMessage[] = [];
-        if (options.instructions !== undefined) {
-          messages.push({ role: "system", content: options.instructions });
-        }
-        messages.push(
-          ...toOllamaMessages([{ role: "user", content: options.prompt! }]),
-        );
+        // alpha.27+: canonical messages input. Same pass-through pattern as
+        // generateText (Ollama accepts mid-conversation system messages inline).
+        const messages = toOllamaMessages(options.messages!);
         const stream = await ctx.client.chat({
           model: modelId,
           messages,
@@ -407,17 +396,12 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       try {
         await ensurePulled(ctx, modelId);
-        const messages: OllamaMessage[] = [];
-        if (options.instructions !== undefined) {
-          messages.push({ role: "system", content: options.instructions });
-        }
-        messages.push({
-          role: "user",
-          content: `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
-        });
+        // alpha.27+: canonical messages input. Ollama's `format: "json"` handles
+        // the JSON directive at the wire level; caller-provided messages pass
+        // through verbatim.
+        const messages = toOllamaMessages(options.messages!);
         const stream = await ctx.client.chat({
           model: modelId,
           messages,
