@@ -48,7 +48,7 @@ describe("generateStructured — native responseSchema", () => {
     const schema = z.object({ name: z.string(), age: z.number() });
     const result = await port.generateStructured({
       taskType: "test",
-      prompt: "Extract the user from: 'Babak is 42'",
+      messages: [{ role: "user" as const, content: "Extract the user from: 'Babak is 42'" }],
       schema,
     });
 
@@ -77,7 +77,7 @@ describe("generateStructured — native responseSchema", () => {
     const schema = z.object({ x: z.number() });
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema,
     });
 
@@ -106,7 +106,7 @@ describe("generateStructured — native responseSchema", () => {
 
     const result = await port.generateStructured({
       taskType: "test",
-      prompt: "kind a, value 42",
+      messages: [{ role: "user" as const, content: "kind a, value 42" }],
       schema,
     });
 
@@ -138,7 +138,7 @@ describe("generateStructured — native responseSchema", () => {
 
     const result = await port.generateStructured({
       taskType: "test",
-      prompt: "Build a record.",
+      messages: [{ role: "user" as const, content: "Build a record." }],
       schema,
     });
 
@@ -149,8 +149,11 @@ describe("generateStructured — native responseSchema", () => {
     };
     // Native path NOT used: no responseSchema forwarded
     expect(callArgs.config.responseSchema).toBeUndefined();
-    // Prompted-JSON suffix WAS appended
-    expect(callArgs.contents[0]!.parts[0]!.text).toContain("Reply with a single JSON object only");
+    // alpha.27+: Prompted-JSON directive appended as a SEPARATE trailing user
+    // message rather than concatenated to the caller's user text. Look for it
+    // across all message contents.
+    const allText = callArgs.contents.flatMap((c) => c.parts.map((p) => p.text)).join(" ");
+    expect(allText).toContain("Reply with a single JSON object only");
     // And we surfaced a warning naming the unsupported feature
     expect(warnSpy).toHaveBeenCalled();
     const warnMsg = warnSpy.mock.calls[0]![0] as string;
@@ -173,9 +176,9 @@ describe("generateStructured — native responseSchema", () => {
       z.object({ b: z.number() }),
     );
 
-    await port.generateStructured({ taskType: "test", prompt: "x", schema });
-    await port.generateStructured({ taskType: "test", prompt: "y", schema });
-    await port.generateStructured({ taskType: "test", prompt: "z", schema });
+    await port.generateStructured({ taskType: "test", messages: [{ role: "user" as const, content: "x" }], schema });
+    await port.generateStructured({ taskType: "test", messages: [{ role: "user" as const, content: "y" }], schema });
+    await port.generateStructured({ taskType: "test", messages: [{ role: "user" as const, content: "z" }], schema });
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
@@ -202,7 +205,7 @@ describe("generateStructured — native responseSchema", () => {
     const schema = z.object({ name: z.string(), age: z.number() });
     const result = await port.generateStructured({
       taskType: "test",
-      prompt: "Extract",
+      messages: [{ role: "user" as const, content: "Extract" }],
       schema,
     });
 

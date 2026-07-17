@@ -44,7 +44,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         cacheControl: { mode: "preCreated", cachedContentHandle: HANDLE },
       });
       const sent = mockGenerateContent.mock.calls[0][0];
@@ -55,7 +55,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         cacheControl: { mode: "preCreated" },
       });
       const sent = mockGenerateContent.mock.calls[0][0];
@@ -66,7 +66,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         cacheControl: { mode: "preCreated", cachedContentHandle: "" },
       });
       const sent = mockGenerateContent.mock.calls[0][0];
@@ -79,7 +79,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         cacheControl: { mode: "auto", ttlSeconds: 3600 },
       });
       const sent = mockGenerateContent.mock.calls[0][0];
@@ -92,7 +92,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         cacheControl: { mode: "manual", breakpoints: [{ at: "system" }] },
       });
       const sent = mockGenerateContent.mock.calls[0][0];
@@ -105,7 +105,7 @@ describe("CacheControl translation — alpha.19.1", () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
       await port().generateText({
         taskType: "x",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         cacheControl: { mode: "off" },
       });
       const sent = mockGenerateContent.mock.calls[0][0];
@@ -116,7 +116,7 @@ describe("CacheControl translation — alpha.19.1", () => {
   describe("default (cacheControl omitted)", () => {
     it("does not set config.cachedContent", async () => {
       mockGenerateContent.mockResolvedValueOnce(okResponse());
-      await port().generateText({ taskType: "x", prompt: "hi" });
+      await port().generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
       const sent = mockGenerateContent.mock.calls[0][0];
       expect(sent.config.cachedContent).toBeUndefined();
     });

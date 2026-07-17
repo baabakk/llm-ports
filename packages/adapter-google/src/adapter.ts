@@ -30,7 +30,7 @@ import {
   extractJSON,
   failValidation,
   mergeTokenUsage,
-  stringifyContentBlocks,
+  NonContiguousSystemError,
   throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
@@ -62,6 +62,7 @@ import {
   toGeminiRequest,
   toGeminiTools,
   zodToGeminiSchema,
+  type GeminiContent,
   type GeminiPart,
 } from "./content.js";
 import { GEMINI_PRICING } from "./pricing.js";
@@ -173,6 +174,65 @@ export function createGoogleAdapter(opts: GoogleAdapterOptions): GoogleAdapter {
 
 // ─── Port implementation ─────────────────────────────────────────────
 
+/**
+ * Resolve the canonical `messages` array (alpha.27+) into Gemini's shape:
+ * a `systemInstruction` string (concatenated from leading contiguous
+ * system-role messages) plus a `GeminiContent[]` array of everything
+ * else.
+ *
+ * Gemini's `systemInstruction` is structurally separate from `contents`.
+ * The provider rejects a `contents` array that contains a system-role
+ * message. This helper enforces the constraint at the adapter boundary:
+ * leading contiguous system-role messages fold into `systemInstruction`;
+ * any system-role message appearing after a non-system message throws
+ * `NonContiguousSystemError` with the offending index.
+ *
+ * Added in `0.1.0-alpha.27`.
+ */
+function resolveMessagesForGoogle(
+  alias: string,
+  method: string,
+  options: { messages: LLMMessage[] },
+): { contents: GeminiContent[]; systemInstruction: string | undefined } {
+  const arr = options.messages;
+  const leadingSystem: string[] = [];
+  let i = 0;
+  while (i < arr.length && arr[i]!.role === "system") {
+    const content = arr[i]!.content;
+    if (typeof content === "string") {
+      leadingSystem.push(content);
+    } else {
+      const textFragments: string[] = [];
+      let hasNonText = false;
+      for (const block of content) {
+        if ((block as { type: string }).type === "text") {
+          textFragments.push((block as { text: string }).text);
+        } else {
+          hasNonText = true;
+        }
+      }
+      if (hasNonText) break;
+      leadingSystem.push(textFragments.join(""));
+    }
+    i++;
+  }
+  const systemInstruction = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
+  const remaining = arr.slice(i);
+  // Assert: NO system-role messages in the remaining array. Gemini rejects
+  // non-leading system messages structurally.
+  for (let j = 0; j < remaining.length; j++) {
+    if (remaining[j]!.role === "system") {
+      throw new NonContiguousSystemError(alias, method, i + j);
+    }
+  }
+  const contents: GeminiContent[] = remaining.map((m) => {
+    const role: GeminiContent["role"] =
+      m.role === "tool" ? "function" : m.role === "assistant" ? "model" : "user";
+    return { role, parts: toGeminiParts2(m.content) };
+  });
+  return systemInstruction !== undefined ? { contents, systemInstruction } : { contents, systemInstruction: undefined };
+}
+
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
 
@@ -193,18 +253,21 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       const start = Date.now();
+      // alpha.27+: canonical messages input. Gemini splits systemInstruction
+      // into a top-level field; leading contiguous system messages fold there.
+      const { contents, systemInstruction } = resolveMessagesForGoogle(
+        alias,
+        "generateText",
+        { messages: options.messages! },
+      );
       try {
-        const parts = toGeminiParts2(options.prompt!);
         const response = await ctx.client.models.generateContent({
           model: modelId,
-          contents: [{ role: "user", parts }],
+          contents,
           config: applyGoogleCacheControl(
             {
-              ...(options.instructions !== undefined
-                ? { systemInstruction: options.instructions }
-                : {}),
+              ...(systemInstruction !== undefined ? { systemInstruction } : {}),
               ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
               ...(options.maxOutputTokens !== undefined
                 ? { maxOutputTokens: options.maxOutputTokens }
@@ -234,7 +297,6 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -259,6 +321,14 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         ? sanitizeGeminiSchema(jsonSchema)
         : null;
 
+      // alpha.27+: resolve messages once outside the retry loop.
+      const { contents: baseContents, systemInstruction } = resolveMessagesForGoogle(
+        alias,
+        "generateStructured",
+        { messages: options.messages! },
+      );
+      const jsonDirective = "Reply with a single JSON object only. No prose, no code fences.";
+
       let correctionPrompt: string | null = null;
       let lastUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let lastModelId = modelId;
@@ -269,21 +339,22 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         // skip the "Reply with a single JSON object only" suffix on the
         // first attempt. Correction prompts still apply on retry-with-
         // feedback rounds.
-        const userText = correctionPrompt
-          ? `${stringifyContentBlocks(options.prompt!)}\n\n${correctionPrompt}`
+        const trailingText = correctionPrompt
+          ? correctionPrompt
           : useNativeResponseSchema
-            ? stringifyContentBlocks(options.prompt!)
-            : `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only. No prose, no code fences.`;
+            ? null
+            : jsonDirective;
+        const requestContents: GeminiContent[] = trailingText === null
+          ? baseContents
+          : [...baseContents, { role: "user", parts: [{ text: trailingText }] }];
 
         try {
           const response = await ctx.client.models.generateContent({
             model: modelId,
-            contents: [{ role: "user", parts: [{ text: userText }] }],
+            contents: requestContents,
             config: applyGoogleCacheControl(
               {
-                ...(options.instructions !== undefined
-                  ? { systemInstruction: options.instructions }
-                  : {}),
+                ...(systemInstruction !== undefined ? { systemInstruction } : {}),
                 temperature: options.temperature ?? 0,
                 ...(options.maxOutputTokens !== undefined
                   ? { maxOutputTokens: options.maxOutputTokens }
@@ -349,17 +420,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      // alpha.27+: canonical messages input.
+      const { contents, systemInstruction } = resolveMessagesForGoogle(
+        alias,
+        "streamText",
+        { messages: options.messages! },
+      );
       try {
-        const parts = toGeminiParts2(options.prompt!);
         const stream = await ctx.client.models.generateContentStream({
           model: modelId,
-          contents: [{ role: "user", parts }],
+          contents,
           config: applyGoogleCacheControl(
             {
-              ...(options.instructions !== undefined
-                ? { systemInstruction: options.instructions }
-                : {}),
+              ...(systemInstruction !== undefined ? { systemInstruction } : {}),
               ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
               ...(options.maxOutputTokens !== undefined
                 ? { maxOutputTokens: options.maxOutputTokens }
@@ -382,25 +455,31 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      // alpha.27+: canonical messages input; append streaming-JSON directive
+      // as a trailing user message.
+      const { contents: baseContents, systemInstruction } = resolveMessagesForGoogle(
+        alias,
+        "streamStructured",
+        { messages: options.messages! },
+      );
+      const requestContents: GeminiContent[] = [
+        ...baseContents,
+        {
+          role: "user",
+          parts: [
+            {
+              text: "Reply with a single JSON object only. Stream the JSON progressively.",
+            },
+          ],
+        },
+      ];
       try {
         const stream = await ctx.client.models.generateContentStream({
           model: modelId,
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `${stringifyContentBlocks(options.prompt!)}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
-                },
-              ],
-            },
-          ],
+          contents: requestContents,
           config: applyGoogleCacheControl(
             {
-              ...(options.instructions !== undefined
-                ? { systemInstruction: options.instructions }
-                : {}),
+              ...(systemInstruction !== undefined ? { systemInstruction } : {}),
               temperature: options.temperature ?? 0,
               ...(options.maxOutputTokens !== undefined
                 ? { maxOutputTokens: options.maxOutputTokens }

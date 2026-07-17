@@ -61,7 +61,7 @@ describe("onRetry observability hook (validation-feedback)", () => {
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "classify this",
+      messages: [{ role: "user" as const, content: "classify this" }],
       schema: Schema,
       schemaName: "Test",
     });
@@ -105,7 +105,7 @@ describe("onRetry observability hook (validation-feedback)", () => {
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       schema: Schema,
       schemaName: "Test",
     });
@@ -148,7 +148,7 @@ describe("onRetry observability hook (validation-feedback)", () => {
     // The retry SHOULD succeed even though the hook throws.
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       schema: Schema,
       schemaName: "Test",
     });
@@ -188,7 +188,7 @@ describe("onRetry observability hook (validation-feedback)", () => {
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       schema: Schema,
       schemaName: "Test",
     });
