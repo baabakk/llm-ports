@@ -44,7 +44,7 @@ describe("providerExtras option", () => {
 
     await port.generateText({
       taskType: "reason",
-      prompt: "think hard",
+      messages: [{ role: "user" as const, content: "think hard" }],
       providerExtras: { chat_template_kwargs: { enable_thinking: true } },
     });
 
@@ -71,7 +71,7 @@ describe("providerExtras option", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       providerExtras: {
         repetition_penalty: 1.1,
         guided_json: { type: "object" },
@@ -107,7 +107,7 @@ describe("providerExtras option", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       reasoningEffort: "low",
       providerExtras: { reasoning_effort: "high" },
     });
@@ -133,7 +133,7 @@ describe("providerExtras option", () => {
     });
     const port = adapter.createLLMPort("m", "openai");
 
-    await port.generateText({ taskType: "t", prompt: "x" });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }] });
 
     const args = mockChatCompletionsCreate.mock.calls[0]![0] as Record<
       string,
@@ -163,7 +163,7 @@ describe("providerExtras option", () => {
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
       providerExtras: { regex: "\\{\"x\":\\d+\\}" },
     });

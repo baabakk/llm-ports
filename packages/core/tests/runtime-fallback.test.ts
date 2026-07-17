@@ -112,7 +112,7 @@ describe("Registry runtime fallback (default behavior)", () => {
     });
     const result = await registry.getPort().generateText({
       taskType: "default",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
     });
     expect(result.text).toBe("from-fallback");
   });
@@ -135,7 +135,7 @@ describe("Registry runtime fallback (default behavior)", () => {
     });
     const result = await registry.getPort().generateText({
       taskType: "default",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
     });
     expect(result.text).toBe("from-last");
   });
@@ -153,7 +153,7 @@ describe("Registry runtime fallback (default behavior)", () => {
       },
     });
     await expect(
-      registry.getPort().generateText({ taskType: "default", prompt: "hi" }),
+      registry.getPort().generateText({ taskType: "default", messages: [{ role: "user" as const, content: "hi" }] }),
     ).rejects.toThrow(NoProvidersAvailableError);
   });
 
@@ -170,7 +170,7 @@ describe("Registry runtime fallback (default behavior)", () => {
       },
     });
     await expect(
-      registry.getPort().generateText({ taskType: "default", prompt: "hi" }),
+      registry.getPort().generateText({ taskType: "default", messages: [{ role: "user" as const, content: "hi" }] }),
     ).rejects.toThrow(TypeError);
   });
 
@@ -191,7 +191,7 @@ describe("Registry runtime fallback (default behavior)", () => {
         check: async () => ({ allowed: true }),
       },
     });
-    await registry.getPort().generateText({ taskType: "default", prompt: "hi" });
+    await registry.getPort().generateText({ taskType: "default", messages: [{ role: "user" as const, content: "hi" }] });
     expect(costSpy).toHaveBeenCalledTimes(1);
     expect(costSpy).toHaveBeenCalledWith("fallback", 0.001);
   });
@@ -212,7 +212,7 @@ describe("Registry runtime fallback (configured)", () => {
       },
     });
     await expect(
-      registry.getPort().generateText({ taskType: "default", prompt: "hi" }),
+      registry.getPort().generateText({ taskType: "default", messages: [{ role: "user" as const, content: "hi" }] }),
     ).rejects.toThrow(ProviderUnavailableError);
   });
 
@@ -234,7 +234,7 @@ describe("Registry runtime fallback (configured)", () => {
     });
     const result = await registry.getPort().generateStructured({
       taskType: "default",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       schema: z.object({ ok: z.boolean() }),
       schemaName: "Test",
     });
@@ -270,7 +270,7 @@ describe("Registry runtime fallback: streaming methods", () => {
     const chunks: string[] = [];
     for await (const chunk of registry.getPort().streamText({
       taskType: "default",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
     })) {
       chunks.push(chunk);
     }

@@ -135,7 +135,7 @@ describe("refs field (alpha.25+)", () => {
 
     await registry
       .getPort()
-      .generateText({ taskType: "test", prompt: "hi", refs: SAMPLE_REFS });
+      .generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], refs: SAMPLE_REFS });
 
     expect(onCost).toHaveBeenCalledTimes(1);
     const costEvent = onCost.mock.calls[0]![0] as CostEvent;
@@ -160,7 +160,7 @@ describe("refs field (alpha.25+)", () => {
 
     await registry.getPort().generateStructured({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       schema: z.object({ x: z.number() }),
       refs: { prompt: { key: "p", version: 1 } },
     });
@@ -216,7 +216,7 @@ describe("refs field (alpha.25+)", () => {
 
     await registry
       .getPort()
-      .generateText({ taskType: "test", prompt: "hi", refs: SAMPLE_REFS });
+      .generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], refs: SAMPLE_REFS });
 
     expect(onFallback).toHaveBeenCalledTimes(1);
     const fbEvent = onFallback.mock.calls[0]![0] as FallbackEvent;
@@ -242,7 +242,7 @@ describe("refs field (alpha.25+)", () => {
 
     await registry.getPort().generateText({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       refs: { session: { key: "sess-abc123" } },
     });
 
@@ -294,7 +294,7 @@ describe("refs field (alpha.25+)", () => {
 
     await registry.getPort().generateText({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       refs: { prompt: { key: "p" } },
     });
 
@@ -318,7 +318,7 @@ describe("refs field (alpha.25+)", () => {
     });
 
     // No refs on the call.
-    await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
     const event = onCost.mock.calls[0]![0] as CostEvent;
     // refs field is absent from the event object (not "refs: undefined").
@@ -336,7 +336,7 @@ describe("refs field (alpha.25+)", () => {
       observability: { onCost },
     });
 
-    await registry.getPort().generateText({ taskType: "test", prompt: "hi", refs: {} });
+    await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], refs: {} });
 
     const event = onCost.mock.calls[0]![0] as CostEvent;
     expect(event.refs).toEqual({});

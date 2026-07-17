@@ -74,7 +74,7 @@ describe("Group D: error-wrapping idempotence", () => {
       mockChatCompletionsCreate.mockRejectedValueOnce(thrown);
       let caught: unknown;
       try {
-        await port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 10 });
+        await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], maxOutputTokens: 10 });
       } catch (err) {
         caught = err;
       }
@@ -105,7 +105,7 @@ describe("Group D: error-wrapping idempotence", () => {
     try {
       await port.generateStructured({
         taskType: "t",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         schema: z.object({ intent: z.enum(["a", "b"]) }),
       });
     } catch (err) {
@@ -129,7 +129,7 @@ describe("Group D: error-wrapping idempotence", () => {
 
     let caught: unknown;
     try {
-      await port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 10 });
+      await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], maxOutputTokens: 10 });
     } catch (err) {
       caught = err;
     }
@@ -147,7 +147,7 @@ describe("Group D: error-wrapping idempotence", () => {
     mockChatCompletionsCreate.mockRejectedValueOnce(caught);
     let caught2: unknown;
     try {
-      await port.generateText({ taskType: "t", prompt: "y", maxOutputTokens: 10 });
+      await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "y" }], maxOutputTokens: 10 });
     } catch (err) {
       caught2 = err;
     }

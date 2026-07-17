@@ -116,7 +116,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onCost },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(onCost).toHaveBeenCalledTimes(1);
       const event = onCost.mock.calls[0]![0] as CostEvent;
@@ -142,7 +142,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onCost },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(onCost).toHaveBeenCalledTimes(1);
       const event = onCost.mock.calls[0]![0] as CostEvent;
@@ -162,7 +162,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onTokenUsage },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(onTokenUsage).toHaveBeenCalledTimes(1);
       const event = onTokenUsage.mock.calls[0]![0] as TokenUsageEvent;
@@ -185,7 +185,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onTokenUsage },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       const event = onTokenUsage.mock.calls[0]![0] as TokenUsageEvent;
       expect("cachedInputTokens" in event).toBe(false);
@@ -210,7 +210,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onFallback },
       });
 
-      const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       // backup served the call (transient threw, then we walked).
       expect(result.providerAlias).toBe("backup");
@@ -234,7 +234,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onFallback },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(onFallback).not.toHaveBeenCalled();
     });
@@ -252,7 +252,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onCacheHit },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(onCacheHit).toHaveBeenCalledTimes(1);
       const event = onCacheHit.mock.calls[0]![0] as CacheHitEvent;
@@ -274,7 +274,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onCacheHit },
       });
 
-      await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(onCacheHit).not.toHaveBeenCalled();
     });
@@ -294,7 +294,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onCost },
       });
 
-      const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(result.text).toBe("out");
       expect(onCost).toHaveBeenCalledTimes(1);
@@ -311,7 +311,7 @@ describe("OTel observability hooks (alpha.21+)", () => {
         observability: { onTokenUsage },
       });
 
-      const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+      const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
       expect(result.text).toBe("out");
     });
@@ -436,7 +436,7 @@ describe("Registry with no observability hooks (backwards-compat)", () => {
       // no observability field
     });
 
-    const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
     expect(result.providerAlias).toBe("primary");
     expect(result.text).toBe("out");
   });
@@ -476,7 +476,7 @@ describe("Registry with no observability hooks (backwards-compat)", () => {
       adapters: { "fake-transient": fakeAdapterTransient },
     });
     await expect(
-      registry.getPort().generateText({ taskType: "test", prompt: "hi" }),
+      registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] }),
     ).rejects.toBeInstanceOf(NoProvidersAvailableError);
   });
 });

@@ -310,7 +310,7 @@ describe("Adapter integration: fingerprint cache writes on successful responses"
       usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 },
     });
 
-    await port.generateText({ taskType: "test", prompt: "What is 2+2?" });
+    await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "What is 2+2?" }] });
 
     // Fingerprint write is fire-and-forget; await a microtask tick to let
     // the promise resolve.
@@ -345,7 +345,7 @@ describe("Adapter integration: fingerprint cache writes on successful responses"
       }),
     );
 
-    await port.generateText({ taskType: "test", prompt: "say ok" });
+    await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "say ok" }] });
     await new Promise((resolve) => setImmediate(resolve));
 
     // Negative observations aren't cached — could be a non-reasoning prompt
@@ -406,7 +406,7 @@ describe("Adapter integration: fingerprint cache writes on successful responses"
       }),
     );
 
-    const result = await port.generateText({ taskType: "test", prompt: "say ok" });
+    const result = await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "say ok" }] });
     expect(result.text).toBe("ok");
   });
 
@@ -441,7 +441,7 @@ describe("Adapter integration: fingerprint cache writes on successful responses"
     });
 
     // Should NOT throw — cache errors are swallowed.
-    const result = await port.generateText({ taskType: "test", prompt: "what's 2+2?" });
+    const result = await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "what's 2+2?" }] });
     await new Promise((resolve) => setImmediate(resolve));
     expect(result.text).toBe("4");
   });

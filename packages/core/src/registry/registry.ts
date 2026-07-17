@@ -57,13 +57,11 @@ import {
   aggressiveShouldFallback,
   ConfigError,
   EmptyMessagesError,
-  MessagesConflictError,
   MessagesRequiredError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
 } from "../errors.js";
-import { createWarningState, warnDeprecatedLegacyInput, type WarningState } from "../utils/deprecation.js";
-import { toMessages } from "../utils/to-messages.js";
+import { createWarningState, type WarningState } from "../utils/deprecation.js";
 import type { LLMMessage } from "../ports/llm-port.js";
 import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
@@ -768,28 +766,14 @@ async function walkChain<R>(
  * backwards-compat adapter reads during the alpha.26 window.
  */
 function normalizeMessagesOnOptions(
-  registry: Registry,
   method: "generateText" | "generateStructured" | "streamText" | "streamStructured",
   opts: {
     messages?: LLMMessage[];
-    instructions?: string;
-    prompt?: unknown;
   },
 ): LLMMessage[] {
-  if (opts.messages !== undefined) {
-    if (opts.instructions !== undefined || opts.prompt !== undefined) {
-      const fields = [
-        opts.instructions !== undefined ? "instructions" : undefined,
-        opts.prompt !== undefined ? "prompt" : undefined,
-      ].filter((f): f is string => !!f);
-      throw new MessagesConflictError(method, fields);
-    }
-    if (opts.messages.length === 0) throw new EmptyMessagesError(method);
-    return opts.messages;
-  }
-  if (opts.prompt === undefined) throw new MessagesRequiredError(method);
-  warnDeprecatedLegacyInput(registry.warningState, method);
-  return toMessages(opts.instructions, opts.prompt as never);
+  if (opts.messages === undefined) throw new MessagesRequiredError(method);
+  if (opts.messages.length === 0) throw new EmptyMessagesError(method);
+  return opts.messages;
 }
 
 class RegistryPort implements LLMPort {
@@ -859,7 +843,7 @@ class RegistryPort implements LLMPort {
   }
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
-    const messages = normalizeMessagesOnOptions(this.registry, "generateText", options);
+    const messages = normalizeMessagesOnOptions("generateText", options);
     const normalizedOptions = { ...options, messages };
     const result = await walkChain(
       this.registry,
@@ -890,7 +874,7 @@ class RegistryPort implements LLMPort {
   async generateStructured<T>(
     options: GenerateStructuredOptions<T>,
   ): Promise<GenerateStructuredResult<T>> {
-    const messages = normalizeMessagesOnOptions(this.registry, "generateStructured", options);
+    const messages = normalizeMessagesOnOptions("generateStructured", options);
     const normalizedOptions = { ...options, messages };
     const result = await walkChain(
       this.registry,
@@ -959,7 +943,7 @@ class RegistryPort implements LLMPort {
   }
 
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
-    const messages = normalizeMessagesOnOptions(this.registry, "streamText", options);
+    const messages = normalizeMessagesOnOptions("streamText", options);
     const normalizedOptions = { ...options, messages };
     // Streaming runtime fallback is more nuanced — once we start yielding
     // chunks, switching providers mid-stream would emit a confusing mix.
@@ -999,7 +983,7 @@ class RegistryPort implements LLMPort {
   }
 
   async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
-    const messages = normalizeMessagesOnOptions(this.registry, "streamStructured", options);
+    const messages = normalizeMessagesOnOptions("streamStructured", options);
     const normalizedOptions = { ...options, messages };
     const completeCallback = this.buildStreamCompleteCallback(
       "streamStructured",

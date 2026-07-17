@@ -120,7 +120,7 @@ describe("First-call behavior for seeded reasoning models", () => {
       }),
     );
 
-    await port.generateText({ taskType: "test", prompt: "hi", maxOutputTokens: 100 });
+    await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], maxOutputTokens: 100 });
 
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(1);
     const firstCall = mockChatCompletionsCreate.mock.calls[0]?.[0] as {
@@ -149,7 +149,7 @@ describe("First-call behavior for seeded reasoning models", () => {
       }),
     );
 
-    await port.generateText({ taskType: "test", prompt: "hi", maxOutputTokens: 50 });
+    await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], maxOutputTokens: 50 });
 
     const firstCall = mockChatCompletionsCreate.mock.calls[0]?.[0] as {
       max_completion_tokens: number;
@@ -170,7 +170,7 @@ describe("First-call behavior for seeded reasoning models", () => {
       buildOpenAIChatResponse({ text: "ok", promptTokens: 10, completionTokens: 5 }),
     );
 
-    await port.generateText({ taskType: "test", prompt: "hi", maxOutputTokens: 100 });
+    await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], maxOutputTokens: 100 });
 
     const firstCall = mockChatCompletionsCreate.mock.calls[0]?.[0] as {
       max_completion_tokens: number;
@@ -202,7 +202,7 @@ describe("First-call behavior for seeded reasoning models", () => {
       }),
     );
 
-    await port.generateText({ taskType: "test", prompt: "hi", maxOutputTokens: 100 });
+    await port.generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], maxOutputTokens: 100 });
 
     const firstCall = mockChatCompletionsCreate.mock.calls[0]?.[0] as {
       max_completion_tokens: number;

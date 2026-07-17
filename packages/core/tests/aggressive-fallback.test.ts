@@ -247,7 +247,7 @@ describe("registry integration with runtimeFallback: 'aggressive'", () => {
 
     const result = await registry.getPort().generateText({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
     });
 
     expect(result.providerAlias).toBe("c");
@@ -287,7 +287,7 @@ describe("registry integration with runtimeFallback: 'aggressive'", () => {
     });
 
     await expect(
-      registry.getPort().generateText({ taskType: "test", prompt: "hi" }),
+      registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] }),
     ).rejects.toThrow(RateLimitError);
   });
 
@@ -328,7 +328,7 @@ describe("registry integration with runtimeFallback: 'aggressive'", () => {
 
     const result = await registry.getPort().generateText({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
     });
     expect(result.text).toBe("healthy");
   });

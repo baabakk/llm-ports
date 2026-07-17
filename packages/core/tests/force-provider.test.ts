@@ -94,11 +94,11 @@ describe("forceProviderAlias", () => {
     const llm = registry.getPort();
 
     // Default routing: picks cheap (only provider in chain).
-    const a = await llm.generateText({ taskType: "describe", prompt: "x" });
+    const a = await llm.generateText({ taskType: "describe", messages: [{ role: "user" as const, content: "x" }] });
     // forceProviderAlias: routes directly to expensive (NOT in the chain).
     const b = await llm.generateText({
       taskType: "describe",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       forceProviderAlias: "expensive",
     });
 
@@ -120,7 +120,7 @@ describe("forceProviderAlias", () => {
     await expect(
       registry.getPort().generateText({
         taskType: "describe",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         forceProviderAlias: "ghost-provider",
       }),
     ).rejects.toThrow(NoProvidersAvailableError);
@@ -154,7 +154,7 @@ describe("forceProviderAlias", () => {
     await expect(
       registry.getPort().generateText({
         taskType: "describe",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         forceProviderAlias: "forced",
       }),
     ).rejects.toThrow(ProviderUnavailableError);
@@ -179,7 +179,7 @@ describe("forceProviderAlias", () => {
     try {
       await registry.getPort().generateText({
         taskType: "describe",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         forceProviderAlias: "tiny",
       });
     } catch (err) {
@@ -204,7 +204,7 @@ describe("forceProviderAlias", () => {
     // priority: 0 bypasses budget checks (matches existing selectModel contract).
     const result = await registry.getPort().generateText({
       taskType: "describe",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       priority: 0,
       forceProviderAlias: "tiny",
     });

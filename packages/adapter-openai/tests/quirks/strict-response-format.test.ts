@@ -49,7 +49,7 @@ describe("useStrictResponseFormat", () => {
     const schema = z.object({ name: z.string(), age: z.number() });
     const result = await port.generateStructured({
       taskType: "test",
-      prompt: "Extract.",
+      messages: [{ role: "user" as const, content: "Extract." }],
       schema,
       schemaName: "person",
     });
@@ -87,7 +87,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -116,7 +116,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -147,7 +147,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -178,7 +178,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -212,7 +212,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -243,7 +243,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -272,7 +272,7 @@ describe("useStrictResponseFormat", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -306,7 +306,7 @@ describe("useStrictResponseFormat", () => {
     });
     await port.generateStructured({
       taskType: "test",
-      prompt: "Build a user.",
+      messages: [{ role: "user" as const, content: "Build a user." }],
       schema,
     });
 
@@ -407,7 +407,7 @@ describe("per-call strict?: boolean override (alpha.21+)", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
       schemaName: "test-schema",
       strict: true,
@@ -438,7 +438,7 @@ describe("per-call strict?: boolean override (alpha.21+)", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
       strict: false,
     });
@@ -467,7 +467,7 @@ describe("per-call strict?: boolean override (alpha.21+)", () => {
 
     await port.generateStructured({
       taskType: "test",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
       // strict deliberately not set
     });
@@ -504,7 +504,7 @@ describe("per-call strict?: boolean override (alpha.21+)", () => {
     });
     await port.generateStructured({
       taskType: "test",
-      prompt: "Build a user.",
+      messages: [{ role: "user" as const, content: "Build a user." }],
       schema,
       strict: true,
     });

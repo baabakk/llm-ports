@@ -1,30 +1,24 @@
 /**
- * Deprecation-warning emitter with fingerprint-based dedup.
+ * Deprecation-warning emitter with dedup + suppression + custom handler.
  *
- * When the Registry synthesizes `messages` from the deprecated `{instructions,
- * prompt}` shape, it emits a one-line `console.warn` per unique (method,
- * call-site) tuple per Registry instance. Callers with 50 legacy call sites
- * see at most 50 warnings across the runtime lifetime; repeated calls from
- * the same site are silenced after the first.
+ * A generic surface consumers and library authors reuse whenever a
+ * public field, method, or configuration is deprecated on an active
+ * release line. Every unique deprecation "where" produces at most one
+ * warning per Registry instance; suppression is per-Registry;
+ * structured logging routes through the optional `handler`.
  *
- * The fingerprint is computed lazily: only when a warning would fire and
- * the (method, first-frame) pair hasn't been seen yet. When the pair has
- * already been seen, no stack capture happens. This keeps the hot path
- * cheap — the O(1) Set lookup runs on every legacy call, but the O(stack)
- * capture runs at most once per unique site.
- *
- * A `WarningState` object holds the dedup Set and a suppression flag; each
- * Registry constructs one at instantiation and threads it into every
- * legacy-path emit call. Reset by discarding the Registry.
- *
- * Added in `0.1.0-alpha.26` (issue #TBD).
+ * Renamed and generalized in `0.1.0-alpha.27` from the field-specific
+ * `warnDeprecatedLegacyInput(state, method)` shipped in alpha.26. The
+ * runtime behavior (method-only dedup, suppression, handler routing)
+ * is identical; the new signature accepts a details object instead of
+ * just a method name.
  */
 
 /** Per-Registry deprecation-warning state. */
 export interface WarningState {
-  /** When true, no warnings fire regardless of the fingerprint set. */
+  /** When true, no warnings fire regardless of the dedup set. */
   suppressed: boolean;
-  /** Set of (method, first-frame-hash) pairs already warned for. */
+  /** Set of `where` keys already warned for. */
   warned: Set<string>;
   /**
    * Optional replacement for `console.warn`. Consumers wanting structured
@@ -48,33 +42,59 @@ export function createWarningState(opts?: {
 }
 
 /**
- * Emit a deprecation warning for the legacy `{instructions, prompt}` path,
- * deduplicated by method per Registry. Cheap on repeat calls: only the
- * O(1) Set lookup runs after the first warning per method.
- *
- * The dedup grain is deliberately coarse (method-only, not per-call-site).
- * Rationale: async stack traces make per-site fingerprinting unreliable
- * (V8 async continuations produce slightly different traces across
- * invocations of the same site), and one warning per unique method per
- * Registry is sufficient to alert the consumer. A consumer with 50 legacy
- * call sites gets 4 warnings (one per method) — enough signal to trigger
- * a migration audit without flooding logs.
- *
- * If per-site granularity is needed later, `WarningState.warned` can be
- * refined with a caller-supplied fingerprint function.
+ * Descriptor for a deprecation warning. `where` is the dedup key; every
+ * unique `where` produces at most one warning per WarningState. Consumers
+ * of the library and library authors both use this surface.
  */
-export function warnDeprecatedLegacyInput(
-  state: WarningState,
-  method: string,
-): void {
+export interface DeprecationDetails {
+  /**
+   * Human-readable name of the deprecated surface. E.g.
+   * `"'onMissing' as a function callback"` or
+   * `"'perAttemptTimeoutMs' option"`.
+   */
+  what: string;
+  /**
+   * Dedup key AND display location. E.g. `"createVersionedStore"` or
+   * `"streamText"`. Every unique `where` value produces at most one
+   * warning per WarningState.
+   */
+  where: string;
+  /**
+   * Version the deprecated surface will be removed in. E.g.
+   * `"alpha.35"`. Optional but recommended for consumer planning.
+   */
+  removalVersion?: string;
+  /**
+   * URL to the migration guide for this specific deprecation. Optional
+   * but recommended.
+   */
+  migrationUrl?: string;
+}
+
+/**
+ * Emit a deprecation warning through the shared WarningState. Cheap on
+ * repeat calls: only the O(1) Set lookup runs after the first warning
+ * per unique `where`. Respects `suppressed` and routes through the
+ * optional `handler` (default `console.warn`).
+ *
+ * Consumers of `@llm-ports/core` who need to fire deprecation warnings
+ * from custom code paths (adapter authors, downstream wrapper
+ * libraries) can call this with a WarningState acquired from the
+ * Registry: `warnDeprecated(registry.warningState, { what, where, ... })`.
+ *
+ * Generalized in `0.1.0-alpha.27` from the field-specific
+ * `warnDeprecatedLegacyInput` that shipped in alpha.26.
+ */
+export function warnDeprecated(state: WarningState, details: DeprecationDetails): void {
   if (state.suppressed) return;
-  const key = method;
-  if (state.warned.has(key)) return;
-  state.warned.add(key);
-  const message =
-    `[llm-ports] DEPRECATED: 'instructions'/'prompt' fields on ${method} ` +
-    `will be removed in alpha.27. Use 'messages: LLMMessage[]' instead. ` +
-    `See https://github.com/baabakk/llm-ports/blob/main/docs/migration/alpha-25-to-alpha-26.md.`;
-  const handler = state.handler ?? console.warn.bind(console);
-  handler(message);
+  if (state.warned.has(details.where)) return;
+  state.warned.add(details.where);
+  const parts = [`[llm-ports] DEPRECATED: ${details.what} on ${details.where}`];
+  if (details.removalVersion) {
+    parts.push(`will be removed in ${details.removalVersion}.`);
+  } else {
+    parts.push(`is deprecated.`);
+  }
+  if (details.migrationUrl) parts.push(`See ${details.migrationUrl}.`);
+  (state.handler ?? console.warn.bind(console))(parts.join(" "));
 }

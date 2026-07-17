@@ -44,7 +44,7 @@ describe("generateStructured throws EmptyResponseError on empty content (parity 
     await expect(
       port.generateStructured({
         taskType: "t",
-        prompt: "classify",
+        messages: [{ role: "user" as const, content: "classify" }],
         schema: z.object({ label: z.string() }),
         schemaName: "c",
       }),
@@ -68,7 +68,7 @@ describe("generateStructured throws EmptyResponseError on empty content (parity 
     try {
       await port.generateStructured({
         taskType: "t",
-        prompt: "classify",
+        messages: [{ role: "user" as const, content: "classify" }],
         schema: z.object({ label: z.string() }),
         schemaName: "c",
       });
@@ -99,7 +99,7 @@ describe("generateStructured throws EmptyResponseError on empty content (parity 
     await expect(
       port.generateStructured({
         taskType: "t",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         schema: z.object({ label: z.string() }),
         schemaName: "c",
       }),
@@ -121,7 +121,7 @@ describe("generateStructured throws EmptyResponseError on empty content (parity 
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "classify",
+      messages: [{ role: "user" as const, content: "classify" }],
       schema: z.object({ label: z.string() }),
       schemaName: "c",
     });

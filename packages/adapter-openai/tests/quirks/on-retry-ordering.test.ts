@@ -46,7 +46,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "ok", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "0", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "0" }], maxOutputTokens: 10 });
     const callsAfterPrime = mockChatCompletionsCreate.mock.calls.length;
 
     // Now: 401 then success on retry.
@@ -62,7 +62,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
         buildOpenAIChatResponse({ text: "ok2", promptTokens: 5, completionTokens: 5 }),
       );
 
-    await port.generateText({ taskType: "t", prompt: "1", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "1" }], maxOutputTokens: 10 });
 
     // For this call we made 2 sdk calls total (failed + retry).
     // Hook should have fired at +1 (after the failed call, before the retry).
@@ -97,7 +97,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 10,
     });
@@ -133,7 +133,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 50,
     });
 
@@ -172,7 +172,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "classify",
+      messages: [{ role: "user" as const, content: "classify" }],
       schema: z.object({ label: z.string() }),
       schemaName: "c",
     });

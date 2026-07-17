@@ -30,7 +30,7 @@ describe("validationAttempts counting", () => {
     const port = adapter.createLLMPort("m", "test");
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "p",
+      messages: [{ role: "user" as const, content: "p" }],
       schema: z.object({ x: z.number() }),
     });
     expect(result.validationAttempts).toBe(1);
@@ -58,7 +58,7 @@ describe("validationAttempts counting", () => {
     const port = adapter.createLLMPort("m", "test");
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "p",
+      messages: [{ role: "user" as const, content: "p" }],
       schema: z.object({ x: z.number() }),
     });
     expect(result.validationAttempts).toBe(2);

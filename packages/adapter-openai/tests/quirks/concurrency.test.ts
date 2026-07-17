@@ -144,8 +144,8 @@ describe("Group I: concurrency / shared-state", () => {
     });
 
     const [winner, loser] = await Promise.all([
-      port.generateText({ taskType: "t", prompt: "1", maxOutputTokens: 10 }),
-      port.generateText({ taskType: "t", prompt: "2", maxOutputTokens: 10 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "1" }], maxOutputTokens: 10 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "2" }], maxOutputTokens: 10 }),
     ]);
     expect(winner.text).toBe("winner");
     expect(loser.text).toBe("loser-recovered");

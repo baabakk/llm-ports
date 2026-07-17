@@ -71,7 +71,7 @@ describe("Group A: Cerebras gpt-oss-style reasoning (message.reasoning, no conte
 
     const result = await port.generateText({
       taskType: "test",
-      prompt: "Say 'pong' and nothing else.",
+      messages: [{ role: "user" as const, content: "Say 'pong' and nothing else." }],
       maxOutputTokens: 20,
     });
 
@@ -129,8 +129,8 @@ describe("Group A: Cerebras gpt-oss-style reasoning (message.reasoning, no conte
       }),
     );
 
-    await port.generateText({ taskType: "t", prompt: "first", maxOutputTokens: 20 });
-    await port.generateText({ taskType: "t", prompt: "second", maxOutputTokens: 20 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "first" }], maxOutputTokens: 20 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "second" }], maxOutputTokens: 20 });
 
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(3); // 2 + 1
     const thirdCall = mockChatCompletionsCreate.mock.calls[2]?.[0] as {
@@ -158,7 +158,7 @@ describe("Group A: Cerebras gpt-oss-style reasoning (message.reasoning, no conte
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 200,
     });
 
@@ -195,7 +195,7 @@ describe("Group A: OpenAI o-series-style reasoning (usage.reasoning_tokens > 0)"
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "Say pong",
+      messages: [{ role: "user" as const, content: "Say pong" }],
       maxOutputTokens: 20,
     });
 
@@ -220,7 +220,7 @@ describe("Group A: OpenAI o-series-style reasoning (usage.reasoning_tokens > 0)"
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 200,
     });
 
@@ -244,7 +244,7 @@ describe("Group A: OpenAI o-series-style reasoning (usage.reasoning_tokens > 0)"
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 50,
     });
 
@@ -274,7 +274,7 @@ describe("Group A: mixed shape (content present AND message.reasoning populated)
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 100,
     });
 
@@ -303,7 +303,7 @@ describe("Group A: standard chat model (control case)", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 20,
     });
 
@@ -328,7 +328,7 @@ describe("Group A: standard chat model (control case)", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 20,
     });
 

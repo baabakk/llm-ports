@@ -54,7 +54,7 @@ describe("Registry", () => {
       adapters: { anthropic: fakeAnthropic },
     });
     const llm = registry.getPort();
-    const result = await llm.generateText({ taskType: "triage", prompt: "hello" });
+    const result = await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "hello" }] });
     expect(result.text).toBe("from fast/claude-haiku-4-5");
     expect(result.providerAlias).toBe("fast");
   });
@@ -70,11 +70,11 @@ describe("Registry", () => {
     });
     const llm = registry.getPort();
 
-    const first = await llm.generateText({ taskType: "triage", prompt: "1" });
+    const first = await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "1" }] });
     expect(first.providerAlias).toBe("fast");
 
     // fast is now over budget; second call should land on backup
-    const second = await llm.generateText({ taskType: "triage", prompt: "2" });
+    const second = await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "2" }] });
     expect(second.providerAlias).toBe("backup");
   });
 
@@ -112,7 +112,7 @@ describe("Registry", () => {
     });
     const llm = registry.getPort();
     await expect(
-      llm.generateText({ taskType: "no-such-task", prompt: "hi" }),
+      llm.generateText({ taskType: "no-such-task", messages: [{ role: "user" as const, content: "hi" }] }),
     ).rejects.toBeInstanceOf(NoProvidersAvailableError);
   });
 

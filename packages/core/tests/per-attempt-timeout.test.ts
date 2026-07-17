@@ -118,7 +118,7 @@ describe("Per-attempt timeout (alpha.23+)", () => {
     });
 
     const start = Date.now();
-    const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
     const elapsed = Date.now() - start;
 
     expect(result.providerAlias).toBe("fast");
@@ -138,7 +138,7 @@ describe("Per-attempt timeout (alpha.23+)", () => {
       perAttemptTimeoutMs: 1000,
     });
 
-    const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
     expect(result.text).toBe("fast");
     expect(result.providerAlias).toBe("fast");
   });
@@ -153,7 +153,7 @@ describe("Per-attempt timeout (alpha.23+)", () => {
       // perAttemptTimeoutMs intentionally omitted
     });
 
-    const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
     expect(result.text).toBe("fast");
   });
 
@@ -173,7 +173,7 @@ describe("Per-attempt timeout (alpha.23+)", () => {
     await expect(
       registry.getPort().generateText({
         taskType: "test",
-        prompt: "hi",
+        messages: [{ role: "user" as const, content: "hi" }],
         signal: controller.signal,
       }),
     ).rejects.toThrow(); // The slow provider aborts and the chain has nothing else.
@@ -197,7 +197,7 @@ describe("Per-attempt timeout (alpha.23+)", () => {
     });
 
     const start = Date.now();
-    const result = await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    const result = await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
     const elapsed = Date.now() - start;
 
     expect(result.providerAlias).toBe("fast");
@@ -220,7 +220,7 @@ describe("Per-attempt timeout (alpha.23+)", () => {
       observability: { onFallback },
     });
 
-    await registry.getPort().generateText({ taskType: "test", prompt: "hi" });
+    await registry.getPort().generateText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] });
 
     expect(onFallback).toHaveBeenCalledTimes(1);
     const event = onFallback.mock.calls[0]![0] as { fromAlias: string; toAlias: string; cause: string };

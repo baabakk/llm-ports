@@ -231,13 +231,13 @@ describe("BudgetScope — all 5 axes hash into independent storage keys", () => 
     // Call 2 (spent=0.02 < 0.05) succeeds → spent=0.04.
     // Call 3 (spent=0.04 < 0.05) succeeds → spent=0.06.
     // Call 4 (spent=0.06 ≥ 0.05) blocked.
-    await port.generateText({ taskType: "general", prompt: "hi", budgetScope: { scope: "tenant", scopeId: "A" } });
-    await port.generateText({ taskType: "general", prompt: "hi", budgetScope: { scope: "tenant", scopeId: "A" } });
-    await port.generateText({ taskType: "general", prompt: "hi", budgetScope: { scope: "tenant", scopeId: "A" } });
+    await port.generateText({ taskType: "general", messages: [{ role: "user" as const, content: "hi" }], budgetScope: { scope: "tenant", scopeId: "A" } });
+    await port.generateText({ taskType: "general", messages: [{ role: "user" as const, content: "hi" }], budgetScope: { scope: "tenant", scopeId: "A" } });
+    await port.generateText({ taskType: "general", messages: [{ role: "user" as const, content: "hi" }], budgetScope: { scope: "tenant", scopeId: "A" } });
     // Registry wraps the cost-cap failure as NoProvidersAvailableError with the
     // per-provider reason carrying "Cost cap exceeded".
     const err = await port
-      .generateText({ taskType: "general", prompt: "hi", budgetScope: { scope: "tenant", scopeId: "A" } })
+      .generateText({ taskType: "general", messages: [{ role: "user" as const, content: "hi" }], budgetScope: { scope: "tenant", scopeId: "A" } })
       .catch((e) => e);
     expect(err).toMatchObject({ name: "NoProvidersAvailableError" });
     expect((err as { reasons: Record<string, string> }).reasons["gpt5"]).toMatch(/Cost cap exceeded/);
@@ -245,7 +245,7 @@ describe("BudgetScope — all 5 axes hash into independent storage keys", () => 
     // Tenant B starts at zero — call succeeds.
     const resB = await port.generateText({
       taskType: "general",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       budgetScope: { scope: "tenant", scopeId: "B" },
     });
     expect(resB.text).toBe("ok");
@@ -315,22 +315,22 @@ describe("CostSession — session-window grain enforcement (4 alpha.20 tokens)",
   it("cost:N/session — budgetUSD enforces the USD cap (legacy behavior unchanged)", async () => {
     const session = new CostSession(makeFakePort(0.04, 100), { budgetUSD: 0.1 });
     const port = session.getPort();
-    await port.generateText({ taskType: "x", prompt: "hi" });
-    await port.generateText({ taskType: "x", prompt: "hi" });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
     // 2 calls × $0.04 = $0.08; next call would push to $0.12 > $0.10
-    await port.generateText({ taskType: "x", prompt: "hi" });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
     expect(session.totalSpentUSD()).toBeCloseTo(0.12, 4);
-    await expect(port.generateText({ taskType: "x", prompt: "hi" })).rejects.toThrow(SessionBudgetExceededError);
+    await expect(port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] })).rejects.toThrow(SessionBudgetExceededError);
   });
 
   it("req:N/session — maxRequests trips on the (N+1)th call", async () => {
     const session = new CostSession(makeFakePort(0.001, 10), { budgetUSD: 100, maxRequests: 3 });
     const port = session.getPort();
-    await port.generateText({ taskType: "x", prompt: "hi" });
-    await port.generateText({ taskType: "x", prompt: "hi" });
-    await port.generateText({ taskType: "x", prompt: "hi" });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
     expect(session.requestsMade()).toBe(3);
-    const err = await port.generateText({ taskType: "x", prompt: "hi" }).catch((e) => e);
+    const err = await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] }).catch((e) => e);
     expect(err).toBeInstanceOf(SessionBudgetExceededError);
     expect((err as SessionBudgetExceededError).grain).toMatch(/^requests/);
   });
@@ -338,10 +338,10 @@ describe("CostSession — session-window grain enforcement (4 alpha.20 tokens)",
   it("total_tokens:N/session — maxTokens trips when accumulated tokens exceed the cap", async () => {
     const session = new CostSession(makeFakePort(0.001, 500), { budgetUSD: 100, maxTokens: 1000 });
     const port = session.getPort();
-    await port.generateText({ taskType: "x", prompt: "hi" }); // 500
-    await port.generateText({ taskType: "x", prompt: "hi" }); // 1000
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] }); // 500
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] }); // 1000
     expect(session.tokensUsed()).toBe(1000);
-    const err = await port.generateText({ taskType: "x", prompt: "hi" }).catch((e) => e);
+    const err = await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] }).catch((e) => e);
     expect(err).toBeInstanceOf(SessionBudgetExceededError);
     expect((err as SessionBudgetExceededError).grain).toMatch(/^tokens/);
   });
@@ -378,7 +378,7 @@ describe("CostSession — session-window grain enforcement (4 alpha.20 tokens)",
   it("requestsMade / tokensUsed / toolCallsMade getters reflect accumulated state", async () => {
     const session = new CostSession(makeFakePort(0.005, 100, 1), { budgetUSD: 100 });
     const port = session.getPort();
-    await port.generateText({ taskType: "x", prompt: "hi" });
+    await port.generateText({ taskType: "x", messages: [{ role: "user" as const, content: "hi" }] });
     await port.runAgent({ taskType: "x", instructions: "go", messages: [], tools: {} });
     expect(session.requestsMade()).toBe(2);
     expect(session.tokensUsed()).toBe(200);

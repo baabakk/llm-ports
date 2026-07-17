@@ -223,6 +223,8 @@ export { throwIfAborted } from "./utils/abort.js";
 
 // ─── alpha.26 messages helpers ───────────────────────────────────────
 export { toMessages, sys, usr } from "./utils/to-messages.js";
-export type { WarningState } from "./utils/deprecation.js";
-export { createWarningState, warnDeprecatedLegacyInput } from "./utils/deprecation.js";
 export { resolveCanonicalMessages } from "./utils/resolve-messages.js";
+
+// ─── Generic deprecation-warning surface (alpha.27+) ─────────────────
+export type { WarningState, DeprecationDetails } from "./utils/deprecation.js";
+export { createWarningState, warnDeprecated } from "./utils/deprecation.js";

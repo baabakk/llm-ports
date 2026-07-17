@@ -42,14 +42,14 @@ describe("Phase 8: failure-mode recovery", () => {
       buildOpenAIError({ status: 503, message: "service unavailable" }),
     );
     await expect(
-      port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 50 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], maxOutputTokens: 50 }),
     ).rejects.toBeInstanceOf(ServiceUnavailableError);
 
     // Second call: success — adapter context is reusable
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "recovered", promptTokens: 5, completionTokens: 5 }),
     );
-    const r = await port.generateText({ taskType: "t", prompt: "y", maxOutputTokens: 50 });
+    const r = await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "y" }], maxOutputTokens: 50 });
     expect(r.text).toBe("recovered");
   });
 
@@ -71,7 +71,7 @@ describe("Phase 8: failure-mode recovery", () => {
     await expect(
       port.generateStructured({
         taskType: "t",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         schema: z.object({ intent: z.enum(["a", "b"]) }),
       }),
     ).rejects.toMatchObject({ name: "ValidationError" });
@@ -86,7 +86,7 @@ describe("Phase 8: failure-mode recovery", () => {
     );
     const r = await port.generateStructured({
       taskType: "t",
-      prompt: "y",
+      messages: [{ role: "user" as const, content: "y" }],
       schema: z.object({ value: z.number() }),
     });
     expect(r.data.value).toBe(42);
@@ -111,7 +111,7 @@ describe("Phase 8: failure-mode recovery", () => {
       );
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -123,7 +123,7 @@ describe("Phase 8: failure-mode recovery", () => {
     );
     const r = await port.generateText({
       taskType: "t",
-      prompt: "y",
+      messages: [{ role: "user" as const, content: "y" }],
       temperature: 0,
       maxOutputTokens: 50,
     });

@@ -136,7 +136,7 @@ describe("streamed cost surfacing (alpha.25+)", () => {
     const collected: string[] = [];
     for await (const chunk of registry
       .getPort()
-      .streamText({ taskType: "test", prompt: "hi" })) {
+      .streamText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] })) {
       collected.push(chunk);
     }
 
@@ -174,7 +174,7 @@ describe("streamed cost surfacing (alpha.25+)", () => {
     const collected: string[] = [];
     for await (const chunk of registry
       .getPort()
-      .streamText({ taskType: "test", prompt: "hi" })) {
+      .streamText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] })) {
       collected.push(chunk);
     }
 
@@ -203,7 +203,7 @@ describe("streamed cost surfacing (alpha.25+)", () => {
     try {
       for await (const _c of registry
         .getPort()
-        .streamText({ taskType: "test", prompt: "hi" })) {
+        .streamText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }] })) {
         // consume
       }
     } catch (err) {
@@ -234,7 +234,7 @@ describe("streamed cost surfacing (alpha.25+)", () => {
     };
     for await (const _c of registry
       .getPort()
-      .streamText({ taskType: "test", prompt: "hi", refs })) {
+      .streamText({ taskType: "test", messages: [{ role: "user" as const, content: "hi" }], refs })) {
       // consume
     }
 
@@ -262,7 +262,7 @@ describe("streamed cost surfacing (alpha.25+)", () => {
 
     for await (const _c of registry.getPort().streamStructured({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       schema: z.object({ partial: z.number() }),
     })) {
       // consume

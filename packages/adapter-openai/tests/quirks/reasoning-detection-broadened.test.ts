@@ -66,7 +66,7 @@ describe("learnFromResponse — reasoning_content field detection (alpha.22+)", 
 
     await port.generateText({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       maxOutputTokens: 100,
     });
 
@@ -92,7 +92,7 @@ describe("learnFromResponse — reasoning_content field detection (alpha.22+)", 
 
     await port.generateText({
       taskType: "test",
-      prompt: "hi",
+      messages: [{ role: "user" as const, content: "hi" }],
       maxOutputTokens: 100,
     });
 
@@ -132,7 +132,7 @@ describe("reasoningStarvedResponse — finish_reason: stop now triggers rescue (
 
     const result = await port.generateText({
       taskType: "test",
-      prompt: "Build something",
+      messages: [{ role: "user" as const, content: "Build something" }],
       maxOutputTokens: 64,
     });
 
@@ -187,7 +187,7 @@ describe("reasoningStarvedResponse — finish_reason: stop now triggers rescue (
 
     const result = await port.generateText({
       taskType: "test",
-      prompt: "test",
+      messages: [{ role: "user" as const, content: "test" }],
       maxOutputTokens: 64,
     });
 
@@ -227,7 +227,7 @@ describe("reasoningStarvedResponse — finish_reason: stop now triggers rescue (
 
     const result = await port.generateText({
       taskType: "test",
-      prompt: "test",
+      messages: [{ role: "user" as const, content: "test" }],
       maxOutputTokens: 100,
     });
 
@@ -265,7 +265,7 @@ describe("reasoningStarvedResponse — finish_reason: stop now triggers rescue (
 
     const result = await port.generateText({
       taskType: "test",
-      prompt: "test",
+      messages: [{ role: "user" as const, content: "test" }],
       maxOutputTokens: 100,
     });
 
@@ -313,7 +313,7 @@ describe("reasoningStarvedResponse — finish_reason: stop now triggers rescue (
 
     await port.generateText({
       taskType: "test",
-      prompt: "test",
+      messages: [{ role: "user" as const, content: "test" }],
       maxOutputTokens: 100,
     });
 

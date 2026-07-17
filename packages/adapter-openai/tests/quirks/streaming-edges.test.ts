@@ -37,7 +37,7 @@ describe("Group E: streaming edges", () => {
     const chunks: string[] = [];
     for await (const chunk of port.streamText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 10,
     })) {
       chunks.push(chunk);
@@ -67,7 +67,7 @@ describe("Group E: streaming edges", () => {
     try {
       for await (const chunk of port.streamText({
         taskType: "t",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         maxOutputTokens: 50,
       })) {
         collected.push(chunk);
@@ -99,7 +99,7 @@ describe("Group E: streaming edges", () => {
     const collected: string[] = [];
     for await (const chunk of port.streamText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 50,
     })) {
@@ -127,7 +127,7 @@ describe("Group E: streaming edges", () => {
       ],
       usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
     });
-    await port.generateText({ taskType: "t", prompt: "init", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "init" }], maxOutputTokens: 10 });
 
     // Now: stream creation fails with burst 401, then succeeds on retry.
     mockChatCompletionsCreate
@@ -143,7 +143,7 @@ describe("Group E: streaming edges", () => {
     const chunks: string[] = [];
     for await (const c of port.streamText({
       taskType: "t",
-      prompt: "stream",
+      messages: [{ role: "user" as const, content: "stream" }],
       maxOutputTokens: 10,
     })) {
       chunks.push(c);
@@ -170,7 +170,7 @@ describe("Group E: streaming edges", () => {
     try {
       for await (const _ of port.streamText({
         taskType: "t",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         maxOutputTokens: 10,
       })) {
         void _;
@@ -202,7 +202,7 @@ describe("Group E: streaming edges", () => {
     const partials: Array<Partial<{ greeting: string; count: number }>> = [];
     for await (const partial of port.streamStructured({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       schema: z.object({ greeting: z.string(), count: z.number() }),
     })) {
       partials.push(partial);

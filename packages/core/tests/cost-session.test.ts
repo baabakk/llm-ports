@@ -72,9 +72,9 @@ describe("CostSession", () => {
   it("tracks cumulative spend across calls", async () => {
     const session = new CostSession(makeMockPort(0.001), { budgetUSD: 0.01 });
     const port = session.getPort();
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
     expect(session.totalSpentUSD()).toBeCloseTo(0.003, 6);
     expect(session.remainingUSD()).toBeCloseTo(0.007, 6);
   });
@@ -83,13 +83,13 @@ describe("CostSession", () => {
     // Budget allows 5 calls at $0.0011 each → 6th call should fail.
     const session = new CostSession(makeMockPort(0.0011), { budgetUSD: 0.005 });
     const port = session.getPort();
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
     // Spent ~$0.0055; over budget.
-    await expect(port.generateText({ taskType: "t", prompt: "hi" })).rejects.toThrow(
+    await expect(port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] })).rejects.toThrow(
       SessionBudgetExceededError,
     );
   });
@@ -110,10 +110,10 @@ describe("CostSession", () => {
     });
     const session = new CostSession(traced, { budgetUSD: 0.5 });
     const port = session.getPort();
-    await expect(port.generateText({ taskType: "t", prompt: "hi" })).resolves.toBeDefined();
+    await expect(port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] })).resolves.toBeDefined();
     expect(called).toBe(1);
     // Second call: budget already exhausted ($1 > $0.50). Should throw BEFORE calling.
-    await expect(port.generateText({ taskType: "t", prompt: "hi" })).rejects.toThrow(
+    await expect(port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] })).rejects.toThrow(
       SessionBudgetExceededError,
     );
     expect(called).toBe(1); // underlying was NOT called the second time
@@ -122,11 +122,11 @@ describe("CostSession", () => {
   it("close() returns total spent and prevents further calls", async () => {
     const session = new CostSession(makeMockPort(0.002), { budgetUSD: 1 });
     const port = session.getPort();
-    await port.generateText({ taskType: "t", prompt: "hi" });
-    await port.generateText({ taskType: "t", prompt: "hi" });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
     const total = session.close();
     expect(total).toBeCloseTo(0.004, 6);
-    await expect(port.generateText({ taskType: "t", prompt: "hi" })).rejects.toThrow(/closed/i);
+    await expect(port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] })).rejects.toThrow(/closed/i);
   });
 
   it("uses caller-supplied sessionId when provided", () => {
@@ -154,9 +154,9 @@ describe("CostSession", () => {
       sessionId: "test-session",
     });
     const port = session.getPort();
-    await port.generateText({ taskType: "t", prompt: "hi" });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
     try {
-      await port.generateText({ taskType: "t", prompt: "hi" });
+      await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "hi" }] });
       throw new Error("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(SessionBudgetExceededError);

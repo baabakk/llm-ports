@@ -50,7 +50,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     mockChatCompletionsCreate.mockRejectedValueOnce(burstError());
 
     await expect(
-      port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 10 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], maxOutputTokens: 10 }),
     ).rejects.toBeInstanceOf(AuthenticationError);
 
     // Exactly one SDK call — no retry, because hasSucceeded was never true
@@ -65,7 +65,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "hello", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "1", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "1" }], maxOutputTokens: 10 });
 
     // Second call: 401 on first SDK attempt, success on retry
     mockChatCompletionsCreate
@@ -76,7 +76,7 @@ describe("Group C: transient-401 retry boundaries", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "2",
+      messages: [{ role: "user" as const, content: "2" }],
       maxOutputTokens: 10,
     });
 
@@ -91,7 +91,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "first", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], maxOutputTokens: 10 });
 
     // Now: keep returning 401 for the next 3 attempts (initial + 2 retries)
     mockChatCompletionsCreate
@@ -100,7 +100,7 @@ describe("Group C: transient-401 retry boundaries", () => {
       .mockRejectedValueOnce(burstError());
 
     await expect(
-      port.generateText({ taskType: "t", prompt: "y", maxOutputTokens: 10 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "y" }], maxOutputTokens: 10 }),
     ).rejects.toBeInstanceOf(AuthenticationError);
 
     // 1 first success + 3 attempts (initial + 2 retries) = 4 SDK calls
@@ -114,12 +114,12 @@ describe("Group C: transient-401 retry boundaries", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "ok", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "x", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], maxOutputTokens: 10 });
 
     mockChatCompletionsCreate.mockRejectedValueOnce(burstError());
 
     await expect(
-      port.generateText({ taskType: "t", prompt: "y", maxOutputTokens: 10 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "y" }], maxOutputTokens: 10 }),
     ).rejects.toBeInstanceOf(AuthenticationError);
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(2); // 1 success + 1 fail (no retry)
   });
@@ -132,7 +132,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "init", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "init", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "init" }], maxOutputTokens: 10 });
 
     // Now a logical call that:
     //   1st SDK attempt: temperature rejection (capability)
@@ -154,7 +154,7 @@ describe("Group C: transient-401 retry boundaries", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 10,
     });
@@ -171,7 +171,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "before", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "before", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "before" }], maxOutputTokens: 10 });
 
     // After this: key is revoked. Same shape as burst protection. Adapter
     // can't tell the difference. Tries 3 times, fails 3 times, gives up.
@@ -180,7 +180,7 @@ describe("Group C: transient-401 retry boundaries", () => {
     }
 
     await expect(
-      port.generateText({ taskType: "t", prompt: "after", maxOutputTokens: 10 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "after" }], maxOutputTokens: 10 }),
     ).rejects.toBeInstanceOf(AuthenticationError);
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(4);
   });

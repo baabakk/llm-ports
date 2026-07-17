@@ -55,7 +55,7 @@ describe("Group B: capability-discovery isolation", () => {
 
     await nano.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -85,7 +85,7 @@ describe("Group B: capability-discovery isolation", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "ok", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "x", temperature: 0, maxOutputTokens: 50 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "x" }], temperature: 0, maxOutputTokens: 50 });
     expect(getEffectiveCapabilities("gpt-5-nano", undefined).temperatureLocked).toBe(true);
 
     // Reset → constraint is gone
@@ -104,7 +104,7 @@ describe("Group B: capability-discovery isolation", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "again", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "y", temperature: 0, maxOutputTokens: 50 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "y" }], temperature: 0, maxOutputTokens: 50 });
     expect(getEffectiveCapabilities("gpt-5-nano", undefined).temperatureLocked).toBe(true);
   });
 
@@ -131,7 +131,7 @@ describe("Group B: capability-discovery isolation", () => {
       );
     await strict.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 50,
     });
@@ -156,7 +156,7 @@ describe("Group B: capability-discovery isolation", () => {
     const { z } = await import("zod");
     await strict.generateStructured({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       schema: z.object({ x: z.number() }),
     });
 
@@ -173,7 +173,7 @@ describe("Group B: capability-discovery isolation", () => {
       );
     await strict.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       instructions: "Be brief.",
       maxOutputTokens: 50,
     });
@@ -191,7 +191,7 @@ describe("Group B: capability-discovery isolation", () => {
     );
     await strict.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       instructions: "Be brief.",
       maxOutputTokens: 50,
@@ -231,7 +231,7 @@ describe("Group B: capability-discovery isolation", () => {
     );
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0.5,
       maxOutputTokens: 50,
     });
@@ -276,8 +276,8 @@ describe("Group B: capability-discovery isolation", () => {
       );
 
     const [r1, r2] = await Promise.all([
-      port.generateText({ taskType: "t", prompt: "1", temperature: 0, maxOutputTokens: 50 }),
-      port.generateText({ taskType: "t", prompt: "2", temperature: 0, maxOutputTokens: 50 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "1" }], temperature: 0, maxOutputTokens: 50 }),
+      port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "2" }], temperature: 0, maxOutputTokens: 50 }),
     ]);
 
     // Both succeed

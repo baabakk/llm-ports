@@ -74,7 +74,7 @@ describe("CacheControl is accepted on all 5 request option types (alpha.19)", ()
   it("GenerateTextOptions carries cacheControl", () => {
     const opts: GenerateTextOptions = {
       taskType: "triage",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       cacheControl: baseCC,
     };
     expect(opts.cacheControl?.mode).toBe("auto");
@@ -83,7 +83,7 @@ describe("CacheControl is accepted on all 5 request option types (alpha.19)", ()
   it("GenerateStructuredOptions carries cacheControl", () => {
     const opts: GenerateStructuredOptions<{ ok: boolean }> = {
       taskType: "score",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       schema: z.object({ ok: z.boolean() }),
       cacheControl: baseCC,
     };
@@ -93,7 +93,7 @@ describe("CacheControl is accepted on all 5 request option types (alpha.19)", ()
   it("StreamTextOptions carries cacheControl", () => {
     const opts: StreamTextOptions = {
       taskType: "draft",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       cacheControl: baseCC,
     };
     expect(opts.cacheControl?.mode).toBe("auto");
@@ -102,7 +102,7 @@ describe("CacheControl is accepted on all 5 request option types (alpha.19)", ()
   it("StreamStructuredOptions carries cacheControl", () => {
     const opts: StreamStructuredOptions<{ ok: boolean }> = {
       taskType: "draft",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
       schema: z.object({ ok: z.boolean() }),
       cacheControl: baseCC,
     };

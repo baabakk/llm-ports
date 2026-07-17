@@ -210,7 +210,7 @@ describe("zero-tool-call prose rescue (alpha.23+)", () => {
 
     await port.generateText({
       taskType: "test",
-      prompt: "Tell me something",
+      messages: [{ role: "user" as const, content: "Tell me something" }],
     });
 
     // No tools → text response is the correct shape → no rescue

@@ -70,14 +70,14 @@ describe("Group J: registry + budget gating offline", () => {
     });
     const llm = registry.getPort();
 
-    await llm.generateText({ taskType: "triage", prompt: "1" });
+    await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "1" }] });
 
     // Second call: only "fast" in chain, budget exhausted → no fallback,
     // and we expect NoProvidersAvailableError. Look at the reasons map
     // to confirm budget gating fired with the correct gatingKind.
     let caught: unknown;
     try {
-      await llm.generateText({ taskType: "triage", prompt: "2" });
+      await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "2" }] });
     } catch (err) {
       caught = err;
     }
@@ -101,13 +101,13 @@ describe("Group J: registry + budget gating offline", () => {
     const llm = registry.getPort();
 
     // First call: $5 incurred. Recorded after success.
-    const r1 = await llm.generateText({ taskType: "triage", prompt: "1" });
+    const r1 = await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "1" }] });
     expect(r1.providerAlias).toBe("fast");
 
     // Second call: budget already exceeded.
     let caught: unknown;
     try {
-      await llm.generateText({ taskType: "triage", prompt: "2" });
+      await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "2" }] });
     } catch (err) {
       caught = err;
     }
@@ -144,7 +144,7 @@ describe("Group J: registry + budget gating offline", () => {
     });
     const llm = registry.getPort();
 
-    const result = await llm.generateText({ taskType: "triage", prompt: "x" });
+    const result = await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "x" }] });
     expect(result.providerAlias).toBe("backup");
   });
 
@@ -188,7 +188,7 @@ describe("Group J: registry + budget gating offline", () => {
 
     let caught: unknown;
     try {
-      await llm.generateText({ taskType: "triage", prompt: "x" });
+      await llm.generateText({ taskType: "triage", messages: [{ role: "user" as const, content: "x" }] });
     } catch (err) {
       caught = err;
     }

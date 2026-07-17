@@ -47,7 +47,7 @@ describe("#3 — onRetry observability hook", () => {
     mockChatCompletionsCreate.mockResolvedValueOnce(
       buildOpenAIChatResponse({ text: "hi", promptTokens: 5, completionTokens: 5 }),
     );
-    await port.generateText({ taskType: "t", prompt: "1", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "1" }], maxOutputTokens: 10 });
 
     // Now 401 burst-protection + success on retry
     mockChatCompletionsCreate
@@ -62,7 +62,7 @@ describe("#3 — onRetry observability hook", () => {
         buildOpenAIChatResponse({ text: "ok", promptTokens: 5, completionTokens: 5 }),
       );
 
-    await port.generateText({ taskType: "t", prompt: "2", maxOutputTokens: 10 });
+    await port.generateText({ taskType: "t", messages: [{ role: "user" as const, content: "2" }], maxOutputTokens: 10 });
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -102,7 +102,7 @@ describe("#3 — onRetry observability hook", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 10,
     });
@@ -144,7 +144,7 @@ describe("#3 — onRetry observability hook", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 50,
     });
 
@@ -192,7 +192,7 @@ describe("#3 — onRetry observability hook", () => {
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "classify this",
+      messages: [{ role: "user" as const, content: "classify this" }],
       schema: z.object({ label: z.string() }),
       schemaName: "classification",
     });
@@ -233,7 +233,7 @@ describe("#3 — onRetry observability hook", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 10,
     });
@@ -269,7 +269,7 @@ describe("#3 — onRetry observability hook", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       temperature: 0,
       maxOutputTokens: 10,
     });

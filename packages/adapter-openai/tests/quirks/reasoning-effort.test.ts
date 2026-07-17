@@ -44,7 +44,7 @@ describe("reasoningEffort option", () => {
 
     await port.generateText({
       taskType: "complex-reasoning",
-      prompt: "think hard about this",
+      messages: [{ role: "user" as const, content: "think hard about this" }],
       reasoningEffort: "high",
     });
 
@@ -71,7 +71,7 @@ describe("reasoningEffort option", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "hello",
+      messages: [{ role: "user" as const, content: "hello" }],
     });
 
     const args = mockChatCompletionsCreate.mock.calls[0]![0] as Record<string, unknown>;
@@ -95,7 +95,7 @@ describe("reasoningEffort option", () => {
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "x is 1",
+      messages: [{ role: "user" as const, content: "x is 1" }],
       schema: z.object({ x: z.number() }),
       reasoningEffort: "medium",
     });
@@ -152,7 +152,7 @@ describe("reasoningEffort option", () => {
       const port = adapter.createLLMPort("test-m", "test");
       await port.generateText({
         taskType: "t",
-        prompt: "x",
+        messages: [{ role: "user" as const, content: "x" }],
         reasoningEffort: effort,
       });
       const lastIdx = mockChatCompletionsCreate.mock.calls.length - 1;
