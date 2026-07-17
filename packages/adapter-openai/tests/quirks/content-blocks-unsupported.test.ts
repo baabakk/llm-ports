@@ -34,11 +34,16 @@ describe("Phase 8: content-block unsupported (OpenAI)", () => {
     try {
       await port.generateText({
         taskType: "t",
-        prompt: [
-          { type: "text", text: "describe the audio" },
+        messages: [
           {
-            type: "audio",
-            source: { kind: "url", url: "https://example.com/clip.wav" },
+            role: "user",
+            content: [
+              { type: "text", text: "describe the audio" },
+              {
+                type: "audio",
+                source: { kind: "url", url: "https://example.com/clip.wav" },
+              },
+            ],
           },
         ],
         maxOutputTokens: 50,
@@ -59,11 +64,16 @@ describe("Phase 8: content-block unsupported (OpenAI)", () => {
     try {
       await port.generateText({
         taskType: "t",
-        prompt: [
-          { type: "text", text: "describe" },
+        messages: [
           {
-            type: "audio",
-            source: { kind: "base64", mediaType: "audio/flac", data: "AAA=" },
+            role: "user",
+            content: [
+              { type: "text", text: "describe" },
+              {
+                type: "audio",
+                source: { kind: "base64", mediaType: "audio/flac", data: "AAA=" },
+              },
+            ],
           },
         ],
         maxOutputTokens: 50,

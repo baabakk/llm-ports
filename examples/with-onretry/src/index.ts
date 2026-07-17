@@ -111,7 +111,7 @@ const llm = registry.getPort();
 console.log("\n--- happy path: no retries expected ---");
 const greeting = await llm.generateText({
   taskType: "test",
-  prompt: "In one sentence, greet a TypeScript developer.",
+  messages: [{ role: "user" as const, content: "In one sentence, greet a TypeScript developer." }],
   maxOutputTokens: 80,
 });
 console.log("Generated:", greeting.text);

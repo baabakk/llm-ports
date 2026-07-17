@@ -19,7 +19,6 @@ import {
   failValidation,
   mergeTokenUsage,
   readStreamCompleteCallback,
-  stringifyContentBlocks,
   throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
@@ -54,7 +53,6 @@ import {
   fromOpenAIAssistantMessage,
   parseHarmonyToolCalls,
   toOpenAIMessages,
-  toOpenAIUserContent,
   type OpenAIMessage,
 } from "./content.js";
 import type { LLMMessage } from "@llm-ports/core";
@@ -446,64 +444,44 @@ function writeFingerprint(
  *   - Non-contiguous system messages (system in the middle of a
  *     conversation) are passed through inline unchanged — OpenAI supports
  *     mid-conversation system messages natively as boundary markers.
- *   - If `options.messages` is unset, fall back to the pre-alpha.26 shape:
- *     `[{role: "user", content: toOpenAIUserContent(options.prompt)}]`
- *     plus `options.instructions` (added in 0.1.0-alpha.26).
  */
 function resolveMessagesFromCallOptions(options: {
-  messages?: LLMMessage[];
-  instructions?: string;
-  prompt?: MessageContent;
+  messages: LLMMessage[];
 }): { messages: OpenAIMessage[]; instructions: string | undefined } {
-  if (options.messages !== undefined && options.messages.length > 0) {
-    // Split off leading contiguous system-role messages. Concatenate their
-    // content with newline separators; that becomes the top-level system
-    // (Anthropic / Google needs the split; OpenAI keeps it inline via
-    // executeChatRequest's instructions handling — either way the behavior
-    // is consistent).
-    const arr = options.messages;
-    const leadingSystem: string[] = [];
-    let i = 0;
-    while (i < arr.length && arr[i]!.role === "system") {
-      const content = arr[i]!.content;
-      if (typeof content === "string") {
-        leadingSystem.push(content);
-      } else {
-        // Multimodal system content — flatten text blocks; other blocks
-        // fall through inline (unusual case).
-        const textFragments: string[] = [];
-        let hasNonText = false;
-        for (const block of content) {
-          if ((block as { type: string }).type === "text") {
-            textFragments.push((block as { text: string }).text);
-          } else {
-            hasNonText = true;
-          }
+  const arr = options.messages;
+  const leadingSystem: string[] = [];
+  let i = 0;
+  while (i < arr.length && arr[i]!.role === "system") {
+    const content = arr[i]!.content;
+    if (typeof content === "string") {
+      leadingSystem.push(content);
+    } else {
+      // Multimodal system content — flatten text blocks; other blocks
+      // fall through inline (unusual case).
+      const textFragments: string[] = [];
+      let hasNonText = false;
+      for (const block of content) {
+        if ((block as { type: string }).type === "text") {
+          textFragments.push((block as { text: string }).text);
+        } else {
+          hasNonText = true;
         }
-        if (hasNonText) break; // fall through with system inline; abort concatenation
-        leadingSystem.push(textFragments.join(""));
       }
-      i++;
+      if (hasNonText) break; // fall through with system inline; abort concatenation
+      leadingSystem.push(textFragments.join(""));
     }
-    const instructions = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : options.instructions;
-    const remaining = arr.slice(i);
-    const openaiMessages = remaining.length > 0 ? toOpenAIMessages(remaining) : [];
-    // If we consumed all messages as system content, fall back to a single
-    // empty user message so the provider has SOMETHING to respond to. This
-    // is a defensive edge case — most callers wouldn't do this deliberately.
-    if (openaiMessages.length === 0) {
-      openaiMessages.push({ role: "user", content: "" });
-    }
-    return { messages: openaiMessages, instructions };
+    i++;
   }
-  // Legacy shape (only reachable if the caller bypassed the Registry).
-  if (options.prompt === undefined) {
-    return { messages: [{ role: "user", content: "" }], instructions: options.instructions };
+  const instructions = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
+  const remaining = arr.slice(i);
+  const openaiMessages = remaining.length > 0 ? toOpenAIMessages(remaining) : [];
+  // If we consumed all messages as system content, fall back to a single
+  // empty user message so the provider has SOMETHING to respond to. This
+  // is a defensive edge case — most callers wouldn't do this deliberately.
+  if (openaiMessages.length === 0) {
+    openaiMessages.push({ role: "user", content: "" });
   }
-  return {
-    messages: [{ role: "user", content: toOpenAIUserContent(options.prompt) }],
-    instructions: options.instructions,
-  };
+  return { messages: openaiMessages, instructions };
 }
 
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
@@ -556,7 +534,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      if (options.prompt !== undefined) validateContent(options.prompt);
+      // alpha.27+: validation happens in resolveMessagesFromCallOptions via message content check;
       const start = Date.now();
       const { messages: chatMessages, instructions } = resolveMessagesFromCallOptions(options);
       const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
@@ -591,7 +569,6 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      if (options.prompt !== undefined) validateContent(options.prompt);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -603,37 +580,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let lastUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let lastModelId = modelId;
 
-      // alpha.26+: resolve the base messages array from either the canonical
-      // `messages` shape or the legacy `{instructions, prompt}` shape. The
-      // legacy path preserves the historical "append JSON instruction to the
-      // last user message" behavior for backwards-compat; the canonical
-      // path uses caller-provided messages verbatim, relying on strict
-      // schema mode OR the caller including their own JSON instruction.
+      // alpha.27+: canonical messages input. Caller supplies their own JSON
+      // instruction OR relies on strict-mode response_format. Correction
+      // prompts on retry rounds append as trailing user messages.
       const {
         messages: baseMessages,
         instructions: baseInstructions,
       } = resolveMessagesFromCallOptions(options);
-      const isLegacyShape = options.messages === undefined;
 
       while (attempts < maxAttempts) {
         attempts++;
-        // Build the request messages. For the legacy shape, we mimic the
-        // pre-alpha.26 behavior of augmenting the last user message with a
-        // JSON directive (and correction on retry). For the canonical
-        // messages shape, we append correction prompts as user messages on
-        // retry; the caller is responsible for their initial JSON directive.
-        let requestMessages: OpenAIMessage[];
-        if (isLegacyShape) {
-          const promptRepr = options.prompt !== undefined ? stringifyContentBlocks(options.prompt) : "";
-          const userText = correctionPrompt
-            ? `${promptRepr}\n\n${correctionPrompt}`
-            : `${promptRepr}\n\nReply with a single JSON object only. No prose, no code fences.`;
-          requestMessages = [{ role: "user", content: userText }];
-        } else {
-          requestMessages = [...baseMessages];
-          if (correctionPrompt) {
-            requestMessages.push({ role: "user", content: correctionPrompt });
-          }
+        const requestMessages: OpenAIMessage[] = [...baseMessages];
+        if (correctionPrompt) {
+          requestMessages.push({ role: "user", content: correctionPrompt });
         }
 
         // When strict mode is enabled, build the JSON Schema for the call.
@@ -744,7 +703,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      if (options.prompt !== undefined) validateContent(options.prompt);
+      // alpha.27+: validation happens in resolveMessagesFromCallOptions via message content check;
       const { messages: chatMessages, instructions } = resolveMessagesFromCallOptions(options);
       const streamStart = Date.now();
       const streamCompleteCallback = readStreamCompleteCallback(options);
@@ -792,7 +751,6 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      if (options.prompt !== undefined) validateContent(options.prompt);
       // alpha.21+: mirror generateStructured's strict-mode precedence chain
       // so streamStructured callers can also opt into strict json_schema
       // mode per call.
@@ -805,21 +763,11 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         : undefined;
       const streamStart = Date.now();
       const streamCompleteCallback = readStreamCompleteCallback(options);
-      // alpha.26+: resolve base messages from either shape. Legacy shape
-      // appends "Reply with JSON only. Stream progressively." to the user
-      // text; canonical shape uses messages verbatim + relies on strict
-      // schema mode or caller-provided JSON instruction.
+      // alpha.27+: canonical messages input.
       const {
-        messages: baseMessages,
+        messages: chatMessages,
         instructions: baseInstructions,
       } = resolveMessagesFromCallOptions(options);
-      const isLegacyShape = options.messages === undefined;
-      const chatMessages: OpenAIMessage[] = isLegacyShape
-        ? [{
-            role: "user",
-            content: `${options.prompt !== undefined ? stringifyContentBlocks(options.prompt) : ""}\n\nReply with a single JSON object only. Stream the JSON progressively.`,
-          }]
-        : baseMessages;
       const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
         modelId,
         messages: chatMessages,

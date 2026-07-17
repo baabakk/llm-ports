@@ -173,8 +173,7 @@ describe("Group B: capability-discovery isolation", () => {
       );
     await strict.generateText({
       taskType: "t",
-      messages: [{ role: "user" as const, content: "x" }],
-      instructions: "Be brief.",
+      messages: [{ role: "system" as const, content: "Be brief." }, { role: "user" as const, content: "x" }],
       maxOutputTokens: 50,
     });
 
@@ -191,9 +190,8 @@ describe("Group B: capability-discovery isolation", () => {
     );
     await strict.generateText({
       taskType: "t",
-      messages: [{ role: "user" as const, content: "x" }],
+      messages: [{ role: "system" as const, content: "Be brief." }, { role: "user" as const, content: "x" }],
       temperature: 0,
-      instructions: "Be brief.",
       maxOutputTokens: 50,
     });
     expect(mockChatCompletionsCreate).toHaveBeenCalledTimes(1);

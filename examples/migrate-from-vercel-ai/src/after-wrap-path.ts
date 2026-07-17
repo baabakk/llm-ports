@@ -46,12 +46,12 @@ const llm = registry.getPort();
 
 // ─── Call sites — minimal change ───────────────────────────────
 
-// BEFORE: const result = await generateText({ model, prompt: "...", maxOutputTokens: 50 });
-// AFTER:  const result = await llm.generateText({ taskType: "classify", prompt: "...", maxOutputTokens: 50 });
+// BEFORE: const result = await generateText({ model, messages: [{ role: "user" as const, content: "..." }], maxOutputTokens: 50 });
+// AFTER:  const result = await llm.generateText({ taskType: "classify", messages: [{ role: "user" as const, content: "..." }], maxOutputTokens: 50 });
 async function classifyEmail(body: string) {
   const result = await llm.generateText({
     taskType: "classify", // routes via LLM_TASK_ROUTE_CLASSIFY
-    prompt: `Classify this email's intent. Respond with one word: question | request | complaint | feedback.\n\n${body}`,
+    messages: [{ role: "user" as const, content: `Classify this email's intent. Respond with one word: question | request | complaint | feedback.\n\n${body}` }],
     maxOutputTokens: 50,
   });
   return result.text.trim().toLowerCase();
@@ -60,7 +60,7 @@ async function classifyEmail(body: string) {
 async function summarizeArticle(text: string) {
   const result = await llm.generateText({
     taskType: "summarize",
-    prompt: `Summarize this in 2 sentences:\n\n${text}`,
+    messages: [{ role: "user" as const, content: `Summarize this in 2 sentences:\n\n${text}` }],
     maxOutputTokens: 200,
   });
   return result.text;

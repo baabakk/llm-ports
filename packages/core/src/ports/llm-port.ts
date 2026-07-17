@@ -287,32 +287,6 @@ export interface GenerateTextOptions {
   taskType: TaskType;
   priority?: LLMPriority;
   /**
-   * @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`.
-   *
-   * Legacy single-turn shape: system-level instructions ("system" prompt).
-   * When both `instructions`+`prompt` AND `messages` are provided,
-   * `MessagesConflictError` is thrown. When only `instructions`+`prompt`
-   * are set, the Registry synthesizes `messages = toMessages(instructions,
-   * prompt)` and emits a fingerprint-deduped deprecation warning.
-   *
-   * Migration: replace `{ instructions, prompt }` with `{ messages:
-   * toMessages(instructions, prompt) }` for the mechanical one-line change,
-   * or with `{ messages: [sys(instructions), usr(prompt)] }` for the
-   * idiomatic path. See docs/migration/alpha-25-to-alpha-26.md.
-   */
-  instructions?: string;
-  /**
-   * @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`.
-   *
-   * Legacy single-turn shape: user input. Either a single string or a
-   * structured prompt. See `instructions` above for the migration path.
-   *
-   * Optional in alpha.26 (was required in alpha.25). Exactly one of `prompt`
-   * or `messages` must be set; the Registry throws `MessagesRequiredError`
-   * if both are missing.
-   */
-  prompt?: MessageContent;
-  /**
    * The canonical input shape (alpha.26+). A sequence of chat messages with
    * explicit roles that flow through to the provider's chat-completions
    * endpoint natively. Supports multi-turn conversations, multiple system
@@ -329,7 +303,7 @@ export interface GenerateTextOptions {
    * the Registry throws `MessagesConflictError` — ambiguity is a caller bug
    * worth surfacing.
    */
-  messages?: LLMMessage[];
+  messages: LLMMessage[];
   maxOutputTokens?: number;
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
@@ -376,12 +350,8 @@ export interface GenerateTextOptions {
 export interface GenerateStructuredOptions<T> {
   taskType: TaskType;
   priority?: LLMPriority;
-  /** @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`. See `GenerateTextOptions.instructions`. */
-  instructions?: string;
-  /** @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`. See `GenerateTextOptions.prompt`. */
-  prompt?: MessageContent;
   /** Canonical alpha.26+ input. See `GenerateTextOptions.messages`. */
-  messages?: LLMMessage[];
+  messages: LLMMessage[];
   schema: z.ZodType<T>;
   /** Hint for the model about what the schema represents. */
   schemaName?: string;
@@ -430,12 +400,8 @@ export interface GenerateStructuredOptions<T> {
 export interface StreamTextOptions {
   taskType: TaskType;
   priority?: LLMPriority;
-  /** @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`. See `GenerateTextOptions.instructions`. */
-  instructions?: string;
-  /** @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`. See `GenerateTextOptions.prompt`. */
-  prompt?: MessageContent;
   /** Canonical alpha.26+ input. See `GenerateTextOptions.messages`. */
-  messages?: LLMMessage[];
+  messages: LLMMessage[];
   maxOutputTokens?: number;
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
@@ -462,12 +428,8 @@ export interface StreamTextOptions {
 export interface StreamStructuredOptions<T> {
   taskType: TaskType;
   priority?: LLMPriority;
-  /** @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`. See `GenerateTextOptions.instructions`. */
-  instructions?: string;
-  /** @deprecated (alpha.26+) — removed in alpha.27. Prefer `messages`. See `GenerateTextOptions.prompt`. */
-  prompt?: MessageContent;
   /** Canonical alpha.26+ input. See `GenerateTextOptions.messages`. */
-  messages?: LLMMessage[];
+  messages: LLMMessage[];
   schema: z.ZodType<T>;
   schemaName?: string;
   maxOutputTokens?: number;

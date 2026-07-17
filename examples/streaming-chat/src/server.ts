@@ -129,8 +129,7 @@ app.post("/chat", async (req: Request, res: Response) => {
   try {
     const result = await llm.generateText({
       taskType: "chat",
-      instructions: SYSTEM,
-      prompt: lastUser.content,
+      messages: [{ role: "system", content: SYSTEM }, { role: "user", content: lastUser.content }],
       maxOutputTokens: 500,
     });
     return res.json({
@@ -168,8 +167,7 @@ app.post("/chat/stream", async (req: Request, res: Response) => {
   try {
     for await (const chunk of llm.streamText({
       taskType: "chat",
-      instructions: SYSTEM,
-      prompt: lastUser.content,
+      messages: [{ role: "system", content: SYSTEM }, { role: "user", content: lastUser.content }],
       maxOutputTokens: 500,
     })) {
       // SSE format: data: <payload>\n\n

@@ -103,7 +103,7 @@ console.log("Route chain:", routeChain);
 console.log("\n--- generateText ---");
 const draft = await llm.generateText({
   taskType: "draft",
-  prompt: "Give a one-sentence project pitch for a TypeScript LLM library.",
+  messages: [{ role: "user" as const, content: "Give a one-sentence project pitch for a TypeScript LLM library." }],
   maxOutputTokens: 80,
 });
 console.log("Text:    ", draft.text.trim());
@@ -125,11 +125,16 @@ const profile = await llm.generateStructured({
   taskType: "extract",
   schema: Profile,
   schemaName: "developer-profile",
-  prompt:
-    "Extract a developer profile from this paragraph: " +
-    "'Hi I'm Sam, I have been writing TypeScript for about 7 years " +
-    "and I'm strong at API design, type-driven testing, and refactoring " +
-    "legacy code.'",
+  messages: [
+    {
+      role: "user",
+      content:
+        "Extract a developer profile from this paragraph: " +
+        "'Hi I'm Sam, I have been writing TypeScript for about 7 years " +
+        "and I'm strong at API design, type-driven testing, and refactoring " +
+        "legacy code.'",
+    },
+  ],
   maxOutputTokens: 200,
 });
 console.log("Parsed:", profile.data);

@@ -20,7 +20,7 @@ const model = anthropic("claude-haiku-4-5");
 async function classifyEmail(body: string) {
   const result = await generateText({
     model,
-    prompt: `Classify this email's intent. Respond with one word: question | request | complaint | feedback.\n\n${body}`,
+    messages: [{ role: "user" as const, content: `Classify this email's intent. Respond with one word: question | request | complaint | feedback.\n\n${body}` }],
     maxTokens: 50,
   });
   return result.text.trim().toLowerCase();
@@ -29,7 +29,7 @@ async function classifyEmail(body: string) {
 async function summarizeArticle(text: string) {
   const result = await generateText({
     model, // ← same model bound here
-    prompt: `Summarize this in 2 sentences:\n\n${text}`,
+    messages: [{ role: "user" as const, content: `Summarize this in 2 sentences:\n\n${text}` }],
     maxTokens: 200,
   });
   return result.text;

@@ -42,7 +42,7 @@ describe("Group I: concurrency / shared-state", () => {
     const promises = Array.from({ length: N }, (_, i) =>
       port.generateText({
         taskType: "t",
-        prompt: `req-${i}`,
+        messages: [{ role: "user" as const, content: `req-${i}` }],
         maxOutputTokens: 10,
       }),
     );
@@ -90,7 +90,7 @@ describe("Group I: concurrency / shared-state", () => {
       Array.from({ length: N }, (_, i) =>
         port.generateText({
           taskType: "t",
-          prompt: `req-${i}`,
+          messages: [{ role: "user" as const, content: `req-${i}` }],
           temperature: 0,
           maxOutputTokens: 10,
         }),

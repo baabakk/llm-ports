@@ -46,7 +46,7 @@ const llm = registry.getPort();
 // Application code — completely SDK-free.
 const result = await llm.generateText({
   taskType: "greeting",
-  prompt: "In exactly one sentence, greet a TypeScript developer.",
+  messages: [{ role: "user" as const, content: "In exactly one sentence, greet a TypeScript developer." }],
   maxOutputTokens: 100,
 });
 
