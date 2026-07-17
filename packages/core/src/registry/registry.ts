@@ -792,61 +792,6 @@ function normalizeMessagesOnOptions(
   return toMessages(opts.instructions, opts.prompt as never);
 }
 
-/**
- * Alpha.26 dual-population: after synthesizing the canonical `messages`
- * array from either shape, ALSO populate the legacy `instructions` /
- * `prompt` fields so adapters that haven't yet been updated to consume
- * `messages` continue to work.
- *
- * Extraction rules:
- *   - `instructions`: concatenation of leading contiguous system-role
- *     messages (`\n\n` separator). Undefined if there are none.
- *   - `prompt`: content of the LAST user-role message in the array. For
- *     multi-turn conversations, this drops the intermediate turns — an
- *     honest degradation for legacy-shape adapters. Full multi-turn
- *     support ships in patch releases per adapter.
- *
- * The Registry attaches both the canonical and the legacy fields to the
- * options bag before adapter dispatch. Adapter-openai reads `messages`
- * (Registry-normalized) preferentially. Other adapters read the legacy
- * fields. Both paths remain functional through alpha.26.
- */
-function populateLegacyFieldsFromMessages(
-  messages: LLMMessage[],
-): { instructions: string | undefined; prompt: unknown } {
-  const leadingSystem: string[] = [];
-  let i = 0;
-  while (i < messages.length && messages[i]!.role === "system") {
-    const content = messages[i]!.content;
-    if (typeof content === "string") {
-      leadingSystem.push(content);
-    } else {
-      const textFragments: string[] = [];
-      let hasNonText = false;
-      for (const block of content) {
-        if ((block as { type: string }).type === "text") {
-          textFragments.push((block as { text: string }).text);
-        } else {
-          hasNonText = true;
-        }
-      }
-      if (hasNonText) break;
-      leadingSystem.push(textFragments.join(""));
-    }
-    i++;
-  }
-  const instructions = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
-  // Find the last user-role message for the legacy `prompt` shape.
-  let lastUserContent: unknown = "";
-  for (let j = messages.length - 1; j >= 0; j--) {
-    if (messages[j]!.role === "user") {
-      lastUserContent = messages[j]!.content;
-      break;
-    }
-  }
-  return { instructions, prompt: lastUserContent };
-}
-
 class RegistryPort implements LLMPort {
   constructor(private readonly registry: Registry) {}
 
@@ -915,8 +860,7 @@ class RegistryPort implements LLMPort {
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
     const messages = normalizeMessagesOnOptions(this.registry, "generateText", options);
-    const legacyFields = populateLegacyFieldsFromMessages(messages);
-    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
+    const normalizedOptions = { ...options, messages };
     const result = await walkChain(
       this.registry,
       normalizedOptions.taskType,
@@ -947,8 +891,7 @@ class RegistryPort implements LLMPort {
     options: GenerateStructuredOptions<T>,
   ): Promise<GenerateStructuredResult<T>> {
     const messages = normalizeMessagesOnOptions(this.registry, "generateStructured", options);
-    const legacyFields = populateLegacyFieldsFromMessages(messages);
-    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
+    const normalizedOptions = { ...options, messages };
     const result = await walkChain(
       this.registry,
       normalizedOptions.taskType,
@@ -1017,8 +960,7 @@ class RegistryPort implements LLMPort {
 
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
     const messages = normalizeMessagesOnOptions(this.registry, "streamText", options);
-    const legacyFields = populateLegacyFieldsFromMessages(messages);
-    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
+    const normalizedOptions = { ...options, messages };
     // Streaming runtime fallback is more nuanced — once we start yielding
     // chunks, switching providers mid-stream would emit a confusing mix.
     // For alpha.7 we walk the chain on the INITIAL `streamText()` call
@@ -1058,8 +1000,7 @@ class RegistryPort implements LLMPort {
 
   async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
     const messages = normalizeMessagesOnOptions(this.registry, "streamStructured", options);
-    const legacyFields = populateLegacyFieldsFromMessages(messages);
-    const normalizedOptions = { ...options, messages, ...(options.instructions === undefined && legacyFields.instructions !== undefined ? { instructions: legacyFields.instructions } : {}), ...(options.prompt === undefined ? { prompt: legacyFields.prompt as never } : {}) } as typeof options;
+    const normalizedOptions = { ...options, messages };
     const completeCallback = this.buildStreamCompleteCallback(
       "streamStructured",
       normalizedOptions.taskType,
