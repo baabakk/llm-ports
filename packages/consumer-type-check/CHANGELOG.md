@@ -1,5 +1,14 @@
 # @llm-ports/consumer-type-check
 
+## 0.1.0-alpha.27
+
+### Patch Changes
+
+- Updated dependencies [348c115]
+- Updated dependencies
+  - @llm-ports/capabilities@0.1.0-alpha.27
+  - @llm-ports/core@0.1.0-alpha.27
+
 ## 0.1.0-alpha.26
 
 ### Patch Changes

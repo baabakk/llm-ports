@@ -13,9 +13,11 @@ Multi-provider routing • fallback chains • USD cost gating • capability fa
 ![Status](https://img.shields.io/badge/status-pre--release-orange)
 ![TypeScript](https://img.shields.io/badge/TypeScript-first-blue)
 
-> **📣 Current release: `0.1.0-alpha.26`** — canonical `messages: LLMMessage[]` input on all four generation methods. The `{ instructions, prompt }` shape is **@deprecated in alpha.26 and will be removed in alpha.27** (~2 weeks). Migrate mechanically with `toMessages(instructions, prompt)` (~30 min for a 20-site consumer) or idiomatically with `sys(text)` + `usr(content)` helpers. Multi-turn workloads (chat, interview agents, coaching workflows) are now first-class. See the [alpha.25 → alpha.26 migration guide](./docs/migration/alpha-25-to-alpha-26.md).
+> **📣 Current release: `0.1.0-alpha.27`** — the `instructions?` and `prompt?` fields are **removed** from the four generation methods (`generateText`, `generateStructured`, `streamText`, `streamStructured`). `messages: LLMMessage[]` is required. Consumers who migrated during the alpha.26 window have nothing to do. Consumers who didn't: TypeScript now errors; follow the [alpha.25 → alpha.26 migration guide](./docs/migration/alpha-25-to-alpha-26.md) then bump. Also new: `NonContiguousSystemError` (Anthropic + Google throw when system-role appears mid-conversation) and `warnDeprecated` (generalized deprecation infra). See the [alpha.26 → alpha.27 migration guide](./docs/migration/alpha-26-to-alpha-27.md).
 >
-> **Previous release: `0.1.0-alpha.25`** — three additive features under an "Observability surface + reliability hardening" theme: `refs?: Record<string, ArtifactRef>` on every call ([#53](https://github.com/baabakk/llm-ports/issues/53)), `runtimeFallback: "aggressive"` preset ([#54](https://github.com/baabakk/llm-ports/issues/54)), streamed cost surfacing via `onCost` / `onTokenUsage` at stream completion ([#55](https://github.com/baabakk/llm-ports/issues/55)). See the [alpha.24 → alpha.25 migration guide](./docs/migration/alpha-24-to-alpha-25.md).
+> **Previous release: `0.1.0-alpha.26`** — canonical `messages: LLMMessage[]` input introduced with a one-cycle deprecation window; migration shim (`toMessages`) + helpers (`sys`, `usr`) landed. Hotfix `0.1.0-alpha.26.1` migrated `@llm-ports/capabilities` factories internally.
+>
+> **Coming next: `alpha.28`** — "Reliability + observability polish". Four-consumer synthesis (ADW, SalesCoach, BEPA, Dramma). Highest-leverage: per-attempt deadline triggers automatic failover via `AttemptTimeoutError`. See [planning discussion #64](https://github.com/baabakk/llm-ports/discussions/64).
 
 ---
 

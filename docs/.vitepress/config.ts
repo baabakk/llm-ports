@@ -122,7 +122,8 @@ export default defineConfig({
             { text: "alpha.22 → alpha.23 (additive)", link: "/migration/alpha-22-to-alpha-23" },
             { text: "alpha.23 → alpha.24 (additive)", link: "/migration/alpha-23-to-alpha-24" },
             { text: "alpha.24 → alpha.25 (additive)", link: "/migration/alpha-24-to-alpha-25" },
-            { text: "alpha.25 → alpha.26 (⚠ BREAKING upcoming)", link: "/migration/alpha-25-to-alpha-26" },
+            { text: "alpha.25 → alpha.26 (BREAKING deprecation)", link: "/migration/alpha-25-to-alpha-26" },
+            { text: "alpha.26 → alpha.27 (⚠ BREAKING removal)", link: "/migration/alpha-26-to-alpha-27" },
           ],
         },
         {
