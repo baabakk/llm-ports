@@ -48,6 +48,7 @@ import {
   type GenerateTextOptions,
   type MessageContent,
   type GenerateTextResult,
+  type LLMMessage,
   type LLMPort,
   type ModelPricing,
   type OnRetry,
@@ -243,6 +244,67 @@ async function generateWithStarvationRetry(
   return result;
 }
 
+/**
+ * Resolve the canonical `messages` array (alpha.27+) into the Vercel SDK's
+ * shape: a `system` string (concatenated from leading contiguous system-role
+ * messages) plus a `CoreMessage[]` array of everything else.
+ *
+ * Semantics:
+ *   - Leading contiguous system-role messages concatenate with `\n\n` and
+ *     become the top-level `system` field.
+ *   - Remaining messages convert per-message: string content passes through;
+ *     multimodal content converts via `toVercelParts`; text-only ContentBlock[]
+ *     stringifies. Matches the same mapping runAgent already performs.
+ *   - Non-contiguous system messages (mid-conversation) pass through inline;
+ *     the underlying provider decides how to handle them.
+ *   - Empty message arrays return an empty CoreMessage[]; the SDK surfaces
+ *     the resulting error naturally.
+ *
+ * Added in `0.1.0-alpha.27`.
+ */
+function resolveMessagesForVercel(options: {
+  messages: LLMMessage[];
+}): { messages: CoreMessage[]; system: string | undefined } {
+  const arr = options.messages;
+  const leadingSystem: string[] = [];
+  let i = 0;
+  while (i < arr.length && arr[i]!.role === "system") {
+    const content = arr[i]!.content;
+    if (typeof content === "string") {
+      leadingSystem.push(content);
+    } else {
+      // Multimodal / block-array system content: flatten text blocks. If any
+      // non-text blocks are present, abort concatenation and let the system
+      // message pass through inline unchanged.
+      const textFragments: string[] = [];
+      let hasNonText = false;
+      for (const block of content) {
+        if ((block as { type: string }).type === "text") {
+          textFragments.push((block as { text: string }).text);
+        } else {
+          hasNonText = true;
+        }
+      }
+      if (hasNonText) break;
+      leadingSystem.push(textFragments.join(""));
+    }
+    i++;
+  }
+  const system = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
+  const remaining = arr.slice(i);
+  const messages: CoreMessage[] = remaining.map((m) => {
+    const role = m.role === "tool" ? "user" : (m.role as "system" | "user" | "assistant");
+    if (typeof m.content === "string") {
+      return { role, content: m.content } as CoreMessage;
+    }
+    if (hasMultimodalContent(m.content)) {
+      return { role, content: toVercelParts(m.content) as never } as CoreMessage;
+    }
+    return { role, content: stringifyContentBlocks(m.content) } as CoreMessage;
+  });
+  return system !== undefined ? { messages, system } : { messages, system: undefined };
+}
+
 function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPort {
   const pricing = pricingFor(ctx, modelId);
   const model = getModel(ctx, modelId);
@@ -262,20 +324,17 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
   return {
     async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      validateMessages(options.messages!);
       const start = Date.now();
       try {
-        // alpha.8: when the prompt has non-text blocks (image / audio), route
-        // through Vercel's `messages` API with structured parts so the
-        // multimodal payload actually reaches the underlying provider. For
-        // text-only prompts, keep the simpler `prompt: string` path.
-        const multimodal = hasMultimodalContent(options.prompt!);
+        // alpha.27+: always use Vercel's `messages` API. Handles multimodal
+        // per-message; text-only messages pass through as string content;
+        // the SDK routes to the underlying provider uniformly.
+        const { messages, system } = resolveMessagesForVercel({ messages: options.messages! });
         const result = await generateWithStarvationRetry(ctx, alias, modelId, {
           model,
-          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          ...(multimodal
-            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt!) as never }] }
-            : { prompt: stringifyContentBlocks(options.prompt!) }),
+          ...(system !== undefined ? { system } : {}),
+          messages,
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -298,7 +357,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      validateMessages(options.messages!);
       const start = Date.now();
       let attempts = 0;
       const maxAttempts =
@@ -309,35 +368,26 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let lastUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
       let lastModelId = modelId;
 
+      // alpha.27+: resolve messages once outside the retry loop; append
+      // correctionPrompt as a trailing user message on retry rounds.
+      const { messages: baseMessages, system } = resolveMessagesForVercel({
+        messages: options.messages!,
+      });
+
       while (attempts < maxAttempts) {
         attempts++;
         try {
           const jsonInstruction = correctionPrompt
             ? correctionPrompt
             : "Reply with a single JSON object only. No prose, no code fences.";
-          // alpha.8 multimodal: if the prompt has image/audio blocks, keep
-          // them as structured parts + append the JSON instruction as a
-          // final text part. For text-only, keep the simpler prompt-string
-          // path with the instruction concatenated.
-          const multimodal = hasMultimodalContent(options.prompt!);
-          const userPromptString = `${stringifyContentBlocks(options.prompt!)}\n\n${jsonInstruction}`;
-          const messagesShape = multimodal
-            ? {
-                messages: [
-                  {
-                    role: "user" as const,
-                    content: [
-                      ...toVercelParts(options.prompt!),
-                      { type: "text" as const, text: `\n\n${jsonInstruction}` },
-                    ] as never,
-                  },
-                ],
-              }
-            : { prompt: userPromptString };
+          const requestMessages: CoreMessage[] = [
+            ...baseMessages,
+            { role: "user", content: jsonInstruction },
+          ];
           const result = await generateWithStarvationRetry(ctx, alias, modelId, {
             model,
-            ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-            ...messagesShape,
+            ...(system !== undefined ? { system } : {}),
+            messages: requestMessages,
             temperature: options.temperature ?? 0,
             ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
             ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -406,15 +456,13 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamText(options: StreamTextOptions): AsyncIterable<string> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      validateMessages(options.messages!);
       try {
-        const multimodal = hasMultimodalContent(options.prompt!);
+        const { messages, system } = resolveMessagesForVercel({ messages: options.messages! });
         const stream = streamText({
           model,
-          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          ...(multimodal
-            ? { messages: [{ role: "user" as const, content: toVercelParts(options.prompt!) as never }] }
-            : { prompt: stringifyContentBlocks(options.prompt!) }),
+          ...(system !== undefined ? { system } : {}),
+          messages,
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
           ...(options.signal ? { abortSignal: options.signal } : {}),
@@ -429,27 +477,20 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
     async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
       throwIfAborted(options.signal);
-      validateContent(options.prompt!);
+      validateMessages(options.messages!);
       try {
-        const multimodal = hasMultimodalContent(options.prompt!);
-        const jsonHint = "\n\nReply with a single JSON object only. Stream the JSON progressively.";
-        const messagesShape = multimodal
-          ? {
-              messages: [
-                {
-                  role: "user" as const,
-                  content: [
-                    ...toVercelParts(options.prompt!),
-                    { type: "text" as const, text: jsonHint },
-                  ] as never,
-                },
-              ],
-            }
-          : { prompt: `${stringifyContentBlocks(options.prompt!)}${jsonHint}` };
+        const { messages: baseMessages, system } = resolveMessagesForVercel({
+          messages: options.messages!,
+        });
+        const jsonHint = "Reply with a single JSON object only. Stream the JSON progressively.";
+        const requestMessages: CoreMessage[] = [
+          ...baseMessages,
+          { role: "user", content: jsonHint },
+        ];
         const stream = streamText({
           model,
-          ...(options.instructions !== undefined ? { system: options.instructions } : {}),
-          ...messagesShape,
+          ...(system !== undefined ? { system } : {}),
+          messages: requestMessages,
           ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
           temperature: options.temperature ?? 0,
           ...(options.signal ? { abortSignal: options.signal } : {}),

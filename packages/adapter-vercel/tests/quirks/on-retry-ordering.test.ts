@@ -55,7 +55,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 50,
     });
 
@@ -95,7 +95,7 @@ describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => 
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "classify",
+      messages: [{ role: "user" as const, content: "classify" }],
       schema: z.object({ label: z.string() }),
       schemaName: "c",
     });

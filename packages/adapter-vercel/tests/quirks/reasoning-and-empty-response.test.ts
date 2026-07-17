@@ -65,7 +65,7 @@ describe("#4 — reasoning-starvation expanded-budget retry", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "solve this",
+      messages: [{ role: "user" as const, content: "solve this" }],
       maxOutputTokens: 50,
     });
 
@@ -101,7 +101,7 @@ describe("#4 — reasoning-starvation expanded-budget retry", () => {
 
     const result = await port.generateText({
       taskType: "t",
-      prompt: "solve this",
+      messages: [{ role: "user" as const, content: "solve this" }],
     });
 
     expect(result.text).toBe("");
@@ -126,7 +126,7 @@ describe("#4 — reasoning-starvation expanded-budget retry", () => {
 
     await port.generateText({
       taskType: "t",
-      prompt: "x",
+      messages: [{ role: "user" as const, content: "x" }],
       maxOutputTokens: 50,
     });
 
@@ -160,7 +160,7 @@ describe("#5 — generateStructured throws EmptyResponseError instead of SyntaxE
     await expect(
       port.generateStructured({
         taskType: "t",
-        prompt: "classify",
+        messages: [{ role: "user" as const, content: "classify" }],
         schema: z.object({ label: z.string() }),
         schemaName: "c",
         maxOutputTokens: 50,
@@ -191,7 +191,7 @@ describe("#5 — generateStructured throws EmptyResponseError instead of SyntaxE
     try {
       await port.generateStructured({
         taskType: "t",
-        prompt: "classify",
+        messages: [{ role: "user" as const, content: "classify" }],
         schema: z.object({ label: z.string() }),
         schemaName: "c",
         maxOutputTokens: 50,
@@ -230,7 +230,7 @@ describe("#5 — generateStructured throws EmptyResponseError instead of SyntaxE
 
     const result = await port.generateStructured({
       taskType: "t",
-      prompt: "classify",
+      messages: [{ role: "user" as const, content: "classify" }],
       schema: z.object({ label: z.string() }),
       schemaName: "c",
       maxOutputTokens: 50,
@@ -266,7 +266,7 @@ describe("#5 — generateStructured throws EmptyResponseError instead of SyntaxE
 
     await port.generateStructured({
       taskType: "t",
-      prompt: "classify",
+      messages: [{ role: "user" as const, content: "classify" }],
       schema: z.object({ label: z.string() }),
       schemaName: "c",
     });
