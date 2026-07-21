@@ -145,6 +145,124 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-07-21T15:07:40 -07:00
+
+## llm-ports
+
+Batch of 4 TDs opened from a cross-consumer review pass. Consumer reports came from BEPA (`BabakPersonalAssistant`, LLM triage / office agents / capability wrappers) and ADW (`agentic-dev-orchestrator`, AI-to-AI review sessions via `runAgent`). Each entry names its consumer-side origin TD so the ecosystem trail is walkable. Findings verified against `@llm-ports/core@0.1.0-alpha.27` source at commit `bac6ecb`. Target for shipping fixes: alpha.28 pre-work window.
+
+### TD-LLMP-16: `adapter-openai` ContextWindowExceededError reports `model "(unknown)"` even when the model name is at request-construction time
+
+- **Severity:** Medium (operator-visibility gap on the second most common error class for LLM operators).
+- **Status:** Open.
+- **Files:** `packages/adapter-openai/src/adapter.ts` (`executeChatRequest`, around the current `dist/index.mjs:1323` line in the shipped bundle); `packages/core/src/errors.ts` (`wrapProviderError`, current `dist/index.mjs:1755`).
+- **Problem:** BEPA sent 563,962 bytes to `getLLMPort().generateStructured({ taskType: 'selector-compile', ... })`. The registry chained to `deepseek-4flash-deepinfra` (OpenAI-compatible adapter with DeepInfra baseURL, model `deepseek-ai/DeepSeek-V4-Flash`). Provider correctly returned context-window-exceeded. The adapter classified it into a `ContextWindowExceededError` but the error's `model` field is `"(unknown)"` even though the model name was in the env config `LLM_PROVIDER_DEEPSEEK_4FLASH_DEEPINFRA=deepinfra|deepseek-ai/DeepSeek-V4-Flash|cost:5/day,req:2000/hour` and available to the adapter at request-construction time.
+- **Verbatim error observed (BEPA production, 2026-07-21T09:35 UTC):**
+  ```
+  Provider "deepseek-4flash-deepinfra": context window exceeded for model "(unknown)"
+      at wrapProviderError (file:///app/node_modules/@llm-ports/core/dist/index.mjs:1755:14)
+      at executeChatRequest (file:///app/node_modules/@llm-ports/adapter-openai/dist/index.mjs:1323:13)
+      at async Object.generateStructured (file:///app/node_modules/@llm-ports/adapter-openai/dist/index.mjs:687:30)
+      at async walkChain (file:///app/node_modules/@llm-ports/core/dist/index.mjs:1185:22)
+      at async RegistryPort.generateStructured (file:///app/node_modules/@llm-ports/core/dist/index.mjs:1346:20)
+  ```
+- **Impact:** When an operator triages a context-window incident, they need to know WHICH model overflowed to decide the fix (route to a bigger model, split the payload, etc.). `(unknown)` sends them digging through env config to figure out what the provider alias maps to. This is the second most common error class for LLM operators; the error should carry the model identifier as configured.
+- **Suspected fix.** The error-classification path in `wrapProviderError` looks for `providerResponse.model` (which providers may not echo back on error) instead of `request.model` (which the adapter always has). Fix: fall back to `request.model` when `response.model` is absent; propagate as `error.modelId`. The request context is threaded through `executeChatRequest`; adding `modelId` to `wrapProviderError`'s input contract is a small change.
+- **Consumer-side origin:** BEPA `TD-LLMPORTS-DEEPINFRA-CONTEXT-EXCEEDED-MODEL-UNKNOWN-AND-SILENT-HANG-ON-RETRY` (Bug 1), filed 2026-07-21T03:06:38.
+- **Related to (feature-shaped follow-up).** This bug becomes impossible under the Plan 58 v0.4 §5 `ErrorInfo` shape from the outsider critique: adding required `model_id: string` (plus `provider_alias`, `task_type`, `request_id`) at the taxonomy level makes the "(unknown)" state a typecheck failure at error-construction time, not a runtime surprise. Consider whether this fix should be a point patch now or bundled with the ErrorInfo taxonomy work.
+- **Provenance.** Cross-consumer review pass 2026-07-21 (BEPA + ADW consumers reporting).
+
+### TD-LLMP-17: `runAgent` throws raw TypeError when `tools` omitted; local TypeErrors then get misclassified as ServiceUnavailableError, triggering futile chain-wide failover
+
+- **Severity:** Medium (defect 1 is ergonomic; defect 2 is high-impact because it burns the failover chain on client-side bugs and misdirects operator diagnostic to provider status pages).
+- **Status:** Open.
+- **Files:** `packages/core/src/registry/registry.ts` (`RegistryPort.runAgent`), `packages/adapter-openai/src/adapter.ts` (and every adapter with the same wrapping pattern); `packages/core/src/errors.ts` (add a new class).
+- **Problem — two distinct defects.**
+  1. **Missing guard.** Calling `runAgent` without a `tools` field produces a raw `TypeError: Cannot convert undefined or null to object`. An `Object.*` operation runs on `tools` with no default. Absent tools should mean "no tools" (identical to `tools: {}` which already works) or reject with a typed validation error that names the field.
+  2. **Error misclassification (the load-bearing half).** The local synchronous `TypeError` from defect 1 gets wrapped by the error-classification path as `ServiceUnavailableError`. The registry then dutifully fails over across the whole provider chain, re-throwing the identical local error at each hop, while the operator reads "service unavailable" and inspects the provider status page. Same misdirection pattern that made the 2026-06-06 Anthropic credit-exhaustion incident look like a provider outage for 24 hours.
+- **Reproduction (from ADW, live container, 2026-07-21).** Same call, only the `tools` field differs:
+  - `runAgent({ ...base, tools: {} })` => OK (normal completion).
+  - `runAgent({ ...base })` (tools omitted) => FAIL: `Provider "gptoss-cerebras" service unavailable: Cannot convert undefined or null to object`.
+- **Impact.** Defect 1 alone: consumers work around by always passing `tools: {}` (ADW has TD-LLM-21 tracking this workaround). Defect 2: a client-side bug triggers N provider API calls (N = fallback chain length), each failing identically, plus operator misdirection.
+- **Suspected fix (two parts).**
+  1. Default `tools` to `{}` at the `runAgent` entry point. Matches type-signature-suggests-optional reading and the observed `tools: {}` behavior.
+  2. Adapter code wraps ONLY the provider-call block (the network call and its immediate response handling) in the error-classification try/catch. Local synchronous throws BEFORE the network call propagate as-is. Add a new typed class `AdapterInternalError extends LLMPortError` for local throws; the walk-table treats it as `fallback_worthy: false` (does not trigger cross-provider failover). Error message distinguishes port-internal from provider-returned so operators see which side of the boundary the failure came from.
+- **Consumer-side origin:** ADW `TD-LLM-21` (`E:\Codes\adw\Development_TechDebt.md:1125-1141`); BEPA `TD-LLMPORTS-TYPEERROR-MISCLASSIFIED-AS-SERVICE-UNAVAILABLE` (BEPA is latently exposed via any local TypeError in adapter/registry code that gets misclassified and walked; BEPA's `AgentConfig.tools` type is required so the specific `runAgent` shape does not surface, but the general misclassification does).
+- **Related to (feature-shaped follow-up).** The `AdapterInternalError` class ties directly into the Plan 58 v0.4 §5 `ErrorInfo.fallback_worthy: boolean` field from the outsider critique, and into TD-LLMP-19 below (canonical walk-table publication).
+- **Provenance.** Cross-consumer review pass 2026-07-21 (BEPA + ADW consumers reporting).
+
+### TD-LLMP-18: `attemptValidationRepair` should normalize Unicode confusables (dashes, quotes, spaces) on `invalid_enum_value` Zod errors before retry
+
+- **Severity:** Medium. Silent-failure class: when a model emits a Unicode confusable of an ASCII delimiter used in an enum literal, Zod rejects with `invalid_enum_value` and the revision round is discarded with no operator-visible signal about the underlying cause.
+- **Status:** Open.
+- **Files:** `packages/core/src/utils/repair-validation.ts` (`attemptValidationRepair`, exported via `packages/core/src/index.ts:213`).
+- **Problem.** Models occasionally emit Unicode confusables of ASCII delimiter characters used in enum literals. The observed variant (ADW production, 2026-07-21): model emitted `interfaces[5].type = "shared‑lib"` using U+2011 (non-breaking hyphen) instead of ASCII U+002D hyphen-minus. The Zod enum `["api","event","shared-lib","database"]` rejected it (`invalid_enum_value ... received 'shared‑lib'`), the revision round was discarded, and 6,925 output tokens were wasted. The bug class is broader than hyphens: any Unicode confusable of a delimiter character used in an enum literal is exposed.
+- **Verified affected classes:**
+  - Hyphens: U+2010, U+2011, U+2012, U+2013, U+2014, U+2015, U+2212 vs U+002D ASCII hyphen-minus.
+  - Quotes: U+2018, U+2019, U+201C, U+201D vs U+0022, U+0027 ASCII quotes.
+  - Spaces: U+00A0, U+2007, U+2008, U+2009 vs U+0020 ASCII space.
+  - Fullwidth (rare but real; some Chinese-tuned models): U+FF0D fullwidth hyphen-minus, etc.
+- **Impact.** Silent failure across every `@llm-ports` consumer whose Zod schemas include enum values containing any of the ASCII delimiters listed above. Consumers reinvent (or fail to reinvent) their own normalization; those without it silently discard revision rounds and appear to fail convergence for reasons unrelated to content quality.
+- **Suspected fix.** Extend `attemptValidationRepair` with a schema-aware normalization step. On `invalid_enum_value` errors, walk `error.issues`, and for each issue where the received value is a string, compute the Unicode-normalized form. If the normalized value matches one of the expected options in `issue.options`, replace the received value in a cloned data object and retry `schema.safeParse(cloned)`. If no normalization would fix any issue, propagate the original error unchanged.
+- **Rationale for the design (why not other options).**
+  1. Per-call-site `.transform()` on each affected enum: N call sites per consumer, easy to miss on new enums, no ecosystem leverage. Ruled out.
+  2. Consumer-side `normalizedEnum()` helper: same one-consumer scope problem. Ruled out.
+  3. Blind Unicode normalization at `extractJSON` layer: corrupts free-text content (an em dash in a quoted user message becomes a hyphen). No schema awareness to distinguish enum-valued fields from free-text fields. Ruled out.
+  4. Prompt-side "use ASCII hyphens only" instruction: reduces frequency but does not close exposure; model drift is unreliable.
+  5. **Schema-aware repair in `attemptValidationRepair`: recommended.** Fires only on enum-validation failures for string-typed values. Never touches free-text content in `z.string()` fields. Automatic (zero-config for consumers). Bounded scope (small subset of validation errors already handled). Idempotent (ASCII stays ASCII).
+- **Implementation sketch.**
+  ```typescript
+  const UNICODE_CONFUSABLE_MAP: Array<[RegExp, string]> = [
+    [/[‐-―−－]/g, '-'],   // hyphens/dashes -> ASCII
+    [/[‘’]/g, "'"],                // curly single quotes -> ASCII apostrophe
+    [/[“”]/g, '"'],                // curly double quotes -> ASCII quote
+    [/[    ]/g, ' '],    // non-breaking / thin spaces -> ASCII space
+  ];
+  function normalizeConfusables(s: string): string {
+    return UNICODE_CONFUSABLE_MAP.reduce(
+      (acc, [pattern, replacement]) => acc.replace(pattern, replacement),
+      s
+    );
+  }
+  // Inside attemptValidationRepair: on invalid_enum_value issues, try replacing
+  // the received string with its normalized form if the normalized form is in
+  // issue.options. If any issue is repaired, retry safeParse and return the
+  // result. If none repaired, propagate original error.
+  ```
+- **Consumer-side origin:** ADW `TD-LLM-20` (`E:\Codes\adw\Development_TechDebt.md:1112`); BEPA `TD-LLMPORTS-EXTRACTJSON-UNICODE-CONFUSABLE-NORMALIZATION` (BEPA verified exposed at three hyphenated enums: `src/ai/schemas.ts:68`, `src/ai/schemas.ts:84`, `src/temporal/activities/call-triage.ts:32`).
+- **Provenance.** Cross-consumer review pass 2026-07-21 (BEPA + ADW consumers reporting).
+
+### TD-LLMP-19: publish canonical walk-table + typed `CreditExhaustionError` / `ProviderMalformed400Error` classes so consumers stop hand-coding wrong failover policies
+
+- **Severity:** Medium-High. Every `@llm-ports` consumer that operates in a multi-provider fallback chain writes a custom `runtimeFallback.shouldFallback` predicate. Two known consumers (BEPA, ADW) have walk-table misalignments today: walking on error classes that should abort (client-side bugs, true wrong-key auth) and aborting on classes that should walk (context window exceeded, content policy violation). The root cause is that `@llm-ports` does not publish a canonical walk-table policy; each consumer reinvents (and mis-invents) it. Two specific provider conditions (Anthropic credit exhaustion, Cerebras 400-no-body on complex schema) have no typed class, so consumers walk on `AuthenticationError` and generic `BadRequestError` respectively as a workaround, over-walking on true wrong-key and true malformed-request cases.
+- **Status:** Open.
+- **Files:**
+  - `packages/core/src/errors.ts` (add two new typed classes).
+  - `packages/core/src/registry/registry.ts` (canonical walk-table policy).
+  - `packages/core/src/index.ts` (export the new classes and, if introduced, a `defaultShouldFallback` predicate).
+  - Documentation: expand the runtime-fallback section of the README or a new `docs/failover-policy.md`.
+- **The canonical walk-table (proposed).**
+  - **Walk (transient / provider-varying):** `RateLimitError`, `ServiceUnavailableError`, `ProviderUnavailableError`, `ContextWindowExceededError`, `ContentPolicyViolationError`, `ImageTooLargeError`, `ContentBlockUnsupportedError`, `CreditExhaustionError` (new; see below), `ProviderMalformed400Error` (new; see below).
+  - **Do not walk (deterministic / same across providers):** `AuthenticationError` (true wrong-key), generic `BadRequestError` (unclassified 400), `MessagesRequiredError`, `EmptyMessagesError`, `MessagesConflictError`, `PromptRequiredError`, `NonContiguousSystemError`, `InvalidImageUrlError`, `AdapterInternalError` (see TD-LLMP-17), unknown error classes.
+- **Rationale for each edge.**
+  - `ContextWindowExceededError` walks: providers have different context windows (Cerebras 128k, GPT-5 400k, Claude Opus 200k, Gemini 3.5 Pro 2M). A 150k request rejected by Cerebras can succeed on GPT-5.
+  - `ContentPolicyViolationError` walks: providers apply different content policies. Anthropic refuses some things OpenAI accepts and vice versa.
+  - `AuthenticationError` does not walk: wrong key won't fix on the next provider (each provider has its own key). Walking wastes calls AND leaks the failure pattern across vendors.
+  - Generic `BadRequestError` does not walk: unclassified 400 is most likely identical across providers (missing field, invalid JSON, malformed message role).
+- **The two new typed classes (needed to remove the current workarounds).**
+  - `CreditExhaustionError extends LLMPortError`: surface for provider-billing-exhausted conditions. Today BEPA and ADW walk on `AuthenticationError` as a workaround for Anthropic credit exhaustion (which surfaces as HTTP 401 with a credit-exhaustion body). Once `CreditExhaustionError` exists, the classifier walks on it (recovers via a different vendor's fresh billing state) while true wrong-key `AuthenticationError` aborts. Classification hook: the existing `AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS` array in `packages/core/src/errors.ts` already carries the message-body patterns; converting it into a typed-error classification is straightforward.
+  - `ProviderMalformed400Error extends LLMPortError`: surface for the "provider returned 400 with empty or malformed body" condition (Cerebras exhibits this on complex-schema structured-output requests). Today BEPA walks on generic `BadRequestError` as a workaround. Once `ProviderMalformed400Error` exists, the classifier walks on it while true generic 400 (client-side bugs) aborts. Classification: detect empty response body or unparseable JSON error body with 400 status code.
+- **Impact.** Multi-provider consumers stop hand-coding walk policies. BEPA's classifier at `src/ai/llm.ts:357-379` becomes the exported `defaultShouldFallback` (or is replaced by it). ADW's classifier at `registry.ts:170` same. The four-way misalignment BEPA has today (walks on Auth + generic 400; aborts on Context + ContentPolicy) is corrected in one release. ADW's TD-LLM-18 walk-on-BadRequestError is also corrected.
+- **Suspected fix.** Add the two new classes to `errors.ts` with their classification patterns. Add `defaultShouldFallback` to `registry.ts` exports. Document the walk-table policy explicitly (e.g. add a section to the getting-started guide or a new `docs/failover-policy.md`). Update the two example consumers (BEPA and ADW have already opened parallel BEPA-side / ADW-side TDs to adopt the new API once shipped).
+- **Consumer-side origin:**
+  - BEPA `TD-LLMPORTS-CLASSIFIER-WALK-TABLE-4-WAY-MISALIGNMENT` (BEPA-side classifier defects and adoption plan).
+  - ADW `TD-LLM-18` (audit finding — Severity High "likely bug": ADW's `shouldFallback` walks on `BadRequestError` deliberately).
+  - ADW `TD-LLM-21` "related policy question" section (failover-on-400 explicitly).
+- **Ties into Plan 58 v0.4 §4.10 (walk-table publication as part of the observability contract).** This TD is the concrete implementation deliverable. The Plan 58 §4.10 contract specifies the walk-table shape; TD-LLMP-19 lands the two new typed classes and the `defaultShouldFallback` export in `@llm-ports/core`.
+- **Provenance.** Cross-consumer review pass 2026-07-21 (BEPA + ADW consumers reporting).
+
+---
+
 ## Convention reminder
 
 When resolving an entry, append a "Resolved YYYY-MM-DD: <commit-sha> — <one-line note>" to the entry. Do not delete it. The historical context is what makes this log useful.
