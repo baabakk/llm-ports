@@ -261,6 +261,71 @@ Batch of 4 TDs opened from a cross-consumer review pass. Consumer reports came f
 - **Ties into Plan 58 v0.4 §4.10 (walk-table publication as part of the observability contract).** This TD is the concrete implementation deliverable. The Plan 58 §4.10 contract specifies the walk-table shape; TD-LLMP-19 lands the two new typed classes and the `defaultShouldFallback` export in `@llm-ports/core`.
 - **Provenance.** Cross-consumer review pass 2026-07-21 (BEPA + ADW consumers reporting).
 
+### TD-LLMP-20: Registry needs a capability-based router: declarative task requirements + declarative provider capabilities + boot-time chain resolution (replaces the current manual-chain LLM_TASK_ROUTE_* model)
+
+- **Severity:** Medium-High. Every multi-provider consumer today writes provider-alias chains by hand for every task type and hopes they picked providers with adequate context window / structured-output support / cost tier. Adding a task type is silent: no compile-time signal that a route is missing; the registry falls through to whatever default chain resolution picks. Adding a provider is silent: it does not automatically become a candidate for tasks whose requirements it satisfies. Removing a provider leaves dangling chain refs. Payload-that-exceeds-fleet-capability catches at runtime (after N wasted API calls across the whole chain) instead of at boot.
+- **Status:** Open.
+- **Files:** Would live in the standalone `@llm-ports/observability-contract` package (per Plan 58 v0.4 §4.10 architectural decision) with runtime integration in `packages/core/src/registry/`. New exports: `TaskRequirements`, `ProviderCapabilities`, `resolveChain`, plus a `capabilityChain` option on `createRegistryFromEnv`.
+- **Problem — the current manual-chain model in detail.** BEPA hit the trap on 2026-07-21T09:35 UTC (Plan 55 Phase 1 smoke test). The `selector-compile` task type had no `LLM_TASK_ROUTE_SELECTOR_COMPILE` set, so the registry fell through to a default chain that included `deepseek-4flash-deepinfra` (32K context window) at a position where a 564KB payload would land. The provider correctly returned context-window-exceeded, the registry walked to the next provider, that provider also returned context-window-exceeded, and the whole chain exhausted before the operator saw anything but "provider failed" errors. A boot-time capability match against a declared `minContextTokens: 32_000` requirement would have caught this before the first API call.
+- **Consumer report — the shape of the proposal (BEPA-authored 2026-07-21).**
+  - Task types declare what they need:
+    ```typescript
+    export const TASK_REQUIREMENTS = {
+      "selector-compile": {
+        minContextTokens: 32_000,
+        needsStructuredOutput: true,
+        needsStrictJson: true,
+        costTier: "medium",
+        latencyTolerance: "patient",
+      },
+      "triage": {
+        minContextTokens: 4_000,
+        needsStructuredOutput: true,
+        costTier: "cheap",
+        latencyTolerance: "fast",
+      },
+      // ~13 task types in BEPA today
+    };
+    ```
+  - Providers declare what they can do:
+    ```typescript
+    export const PROVIDER_CAPABILITIES = {
+      "claude-sonnet":   { contextTokens: 200_000, structuredOutput: true, strictJson: true,  costPerMOutTokens: 15,  latencyP50Ms: 2000, reliability: 0.99 },
+      "gpt5":            { contextTokens: 128_000, structuredOutput: true, strictJson: true,  costPerMOutTokens: 10,  latencyP50Ms: 1500, reliability: 0.98 },
+      "deepseek-4flash": { contextTokens:  32_000, structuredOutput: true, strictJson: false, costPerMOutTokens:  0.4, latencyP50Ms: 1000, reliability: 0.85 },
+      // ...
+    };
+    ```
+  - Router matches at boot:
+    ```typescript
+    function resolveChain(taskType, providers) {
+      const reqs = TASK_REQUIREMENTS[taskType];
+      return providers
+        .filter(p => p.contextTokens >= reqs.minContextTokens)
+        .filter(p => !reqs.needsStructuredOutput || p.structuredOutput)
+        .filter(p => !reqs.needsStrictJson || p.strictJson)
+        .filter(p => costMatchesTier(p, reqs.costTier))
+        .sort(byReliabilityThenCost);
+    }
+    ```
+- **What this buys.**
+  - Adding a task type: declare requirements → router auto-picks matching providers. No env edit.
+  - Adding a provider: declare capabilities → router auto-includes it for matching tasks. No per-task-type env edit.
+  - Removing a provider: no dangling chain refs to prune.
+  - Misconfigured payload catches early: task type's `minContextTokens` fires an error BEFORE any provider is invoked. "This task needs 32K but the largest available in your fleet is 8K." Today's failure mode (call provider, get context-exceeded back, walk chain, get context-exceeded again, exhaust chain, error) becomes a startup-time signal.
+  - Operator visibility at boot: `task=selector-compile matched 3 providers: [claude-sonnet, gpt5, mimo-parasail]`. Every task type's chain is deterministic and visible.
+  - `LLM_TASK_ROUTE_*` env vars become an OVERRIDE mechanism, set only when a specific chain is needed (A/B testing, kill switches, cost experiments). Default is capability-matched.
+- **Suspected fix (implementation shape).**
+  1. Add `TaskRequirements` and `ProviderCapabilities` types to `@llm-ports/observability-contract` (or to a `capability-routing` sub-module).
+  2. Add `resolveChain(taskType, providers, taskRequirements)` as a pure function.
+  3. Add a `capabilityChain?: { requirements: Record<TaskType, TaskRequirements> }` option on `createRegistryFromEnv`. When present, the registry resolves each task type's chain via `resolveChain` at boot; existing `LLM_TASK_ROUTE_*` env vars override the resolved chain per-task-type.
+  4. Emit boot-time log lines: `task=<taskType> matched N providers: [<alias1>, <alias2>, ...]` for every task type, so operators see the resolution.
+  5. Fail-fast if any task type has zero matching providers. Error message names the task type, its requirements, and the closest-matching providers with the reasons they failed the match.
+- **Alternate placement (rejected, documented for the record).** BEPA-side layer above the registry that does the matching and feeds the resolved chain to the registry via `LLM_TASK_ROUTE_*` env vars. Rejected because `@llm-ports` IS the routing library; capability-based matching belongs there. Every downstream consumer would otherwise reinvent the same logic. See consumer origin below for the full BEPA-side analysis.
+- **Consumer-side origin.** BEPA Firefox-side proposal 2026-07-21 (BEPA `Development_Logs.md` entry same date). BEPA's short-term stopgap: `LLM_TASK_ROUTE_SELECTOR_COMPILE` set manually on 2026-07-21 as an env-var patch. Long-term migration path is capability-based routing once this TD lands upstream.
+- **Related to (feature-shaped follow-up).** Plan 58 v0.4 §4.12 (capability-based routing spec) documents the contract from the consumer side; this TD is the upstream implementation deliverable. Ties into §4.10 (walk-table publication) because both live in `@llm-ports/observability-contract` as declarative substrates.
+- **Provenance.** Cross-consumer review pass 2026-07-21 (BEPA firefox proposal reporting).
+
 ---
 
 ## Convention reminder
