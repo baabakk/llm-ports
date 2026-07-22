@@ -558,6 +558,9 @@ importers:
         specifier: ^3.14.0
         version: 3.14.0
     devDependencies:
+      '@llm-ports/observability-contract':
+        specifier: workspace:*
+        version: link:../observability-contract
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)

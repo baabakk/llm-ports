@@ -232,3 +232,9 @@ export { resolveCanonicalMessages } from "./utils/resolve-messages.js";
 // ─── Generic deprecation-warning surface (alpha.27+) ─────────────────
 export type { WarningState, DeprecationDetails } from "./utils/deprecation.js";
 export { createWarningState, warnDeprecated } from "./utils/deprecation.js";
+
+// ─── Observability scoped-port wrapper (alpha.28+, Plan 58 §4.2) ─────
+export {
+  getObservabilityContext,
+  withObservabilityContext,
+} from "./observability-context.js";

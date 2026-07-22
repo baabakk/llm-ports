@@ -33,9 +33,11 @@
     "jsonrepair": "^3.14.0"
   },
   "peerDependencies": {
+    "@llm-ports/observability-contract": "workspace:*",
     "zod": ">=3.24.0 <5"
   },
   "devDependencies": {
+    "@llm-ports/observability-contract": "workspace:*",
     "tsup": "^8.3.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4",
