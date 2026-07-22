@@ -1,0 +1,395 @@
+{
+  "spec": {
+    "normalization_version": "1",
+    "hmac_key": "0123456789abcdef0123456789abcdef",
+    "hmac_key_notes": "The HMAC key here is fixed for cross-implementation reproducibility. Do NOT use it as a production secret.",
+    "generated_by": "packages/observability-contract/scripts/generate-vectors.mjs"
+  },
+  "vectors": [
+    {
+      "name": "empty-messages",
+      "description": "Empty messages array; edge case.",
+      "input": {
+        "messages": []
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 2,
+        "message_hash_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "request_hash_sha256": "5e4ce7b36ba37b78a5d5f9fd08e6b7b54ba6879d651aa46ec9e1d6fa24ebe30a",
+        "message_hash_hmac_sha256": "ad12fdb13ff0ab86ff6c711867d7134adcf79d33f834a741be12988ff846b7e2",
+        "request_hash_hmac_sha256": "05c80e1c6df16696ddf7b010df051ef4801a3e1a14007007bda4cd32bd53d47c"
+      }
+    },
+    {
+      "name": "single-user-message",
+      "description": "One user message; the simplest non-empty case.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 35,
+        "message_hash_sha256": "013cf0c05f083773340d61c256a32240e92171b332a25ed7521733a86c129a37",
+        "request_hash_sha256": "ebd51c78a443a93c27a9cad55a0276650fc6cc9c7190e9232f63e9905594d2da",
+        "message_hash_hmac_sha256": "386671a7904101a57692adf79367570fe46e6a72d484253ebbebeebaf1c478ef",
+        "request_hash_hmac_sha256": "b004982874bbcc37d6b075f4f53c67f3030fab61db851f64e04746b519dee87e"
+      }
+    },
+    {
+      "name": "multi-turn-conversation",
+      "description": "Alternating user + assistant turns.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is 2+2?"
+          },
+          {
+            "role": "assistant",
+            "content": "4"
+          },
+          {
+            "role": "user",
+            "content": "And 3+3?"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 114,
+        "message_hash_sha256": "559b6262581524f6e1d64e4d87451d088aabf6a1b613d0a5ef10478ced7f0031",
+        "request_hash_sha256": "6adcea47064d7d7f298552f78e0155b7db8f5fb234405c2ccb47aa31b8212aa6",
+        "message_hash_hmac_sha256": "23aa0a31e21a8f71f4fadbc58e22632328877931dff61af71c9aea62c9328668",
+        "request_hash_hmac_sha256": "e62303a30e1a55a7c94026e8d7d1416b48168e5bff115595cfa308cee02e96a6"
+      }
+    },
+    {
+      "name": "with-system-message",
+      "description": "System message included in request_hash but not message_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Say hi"
+          }
+        ],
+        "system": "You are a laconic assistant."
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 36,
+        "message_hash_sha256": "a1678b226a4357527f5839a223ea4fc87c0571c30f31f4de53c7cd8490edb642",
+        "request_hash_sha256": "848333a3d6a787c035d4a57fb80744100ed8c033aa364e45b41e3985100d567a",
+        "message_hash_hmac_sha256": "14cdd3c210b83fc572d6e33c63d6e0f8cf18a0374fc6ab9677c0ab03aace46ff",
+        "request_hash_hmac_sha256": "d00a6913e65ef4ecb3c5897d0628dd25c010a5cbfeceaf85866a1648f080be0d"
+      }
+    },
+    {
+      "name": "with-sampling-params",
+      "description": "Sampling params change request_hash, not message_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Roll a die"
+          }
+        ],
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_tokens": 100,
+        "seed": 42
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 40,
+        "message_hash_sha256": "f7051a43f35dd599b79acb724886d5882bb2b63b8218c5dbb10e12a382f504ab",
+        "request_hash_sha256": "e72eb36a5165b671750b92b2ecc94f822d6c26c7eaa417c478048efc2915d180",
+        "message_hash_hmac_sha256": "849cd2ab3a2b9c8ecb33697381b895a8fc06f2f1b3141378c4845a000f23a8b2",
+        "request_hash_hmac_sha256": "5ff46ec627e5b991d3ec674b4d33a8f2ea930b68dc5d5f8fdebc2ea38426e94a"
+      }
+    },
+    {
+      "name": "with-tools",
+      "description": "Tool definitions participate in request_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Read a file for me"
+          }
+        ],
+        "tools": [
+          {
+            "name": "readFile",
+            "description": "Read a file",
+            "parameters": {
+              "path": "string"
+            }
+          },
+          {
+            "name": "writeFile",
+            "description": "Write a file",
+            "parameters": {
+              "path": "string",
+              "content": "string"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 48,
+        "message_hash_sha256": "06437bbef65b491b76e8f62c0e683c2bd13eff65dd999610d9bda07f3c67e8a0",
+        "request_hash_sha256": "8d1c0d8ee3693ce3d861645c372fde61e46965ee9248cd470752193d1a3a122e",
+        "message_hash_hmac_sha256": "c99a4f549982f9ffdc64511e7e77118105ce9d6fa1d5e3da98fa7df5da336a4c",
+        "request_hash_hmac_sha256": "0f78003d9fe455b1ee5ba5d27b910fc484d9d2c9b5b2c661e0a668c62524d0d5"
+      }
+    },
+    {
+      "name": "with-schema",
+      "description": "Structured-output schema participates in request_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Give me a JSON summary"
+          }
+        ],
+        "schema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 52,
+        "message_hash_sha256": "4b568730c25eabf7537fe69be4058d6d4b1911618c96282c640df72eff1ef156",
+        "request_hash_sha256": "19b395501d30f4b893fdba2943ce526cf52029f1594ced2d932bc2ce287990be",
+        "message_hash_hmac_sha256": "6f304c60c7fb5fbad03fc6656463d772dfd213a2458cbbcfefe26e9612a93457",
+        "request_hash_hmac_sha256": "79d9a7a31870363b4763d89e48a591e4b0a6081398742611779b1a3da077f05c"
+      }
+    },
+    {
+      "name": "unicode-nfc-decomposed",
+      "description": "Decomposed characters (e + combining acute) normalize to NFC.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "café résumé"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 41,
+        "message_hash_sha256": "29c137904162122280ef8bb81566eac34644a0cd282e275a73878c615a0e87c3",
+        "request_hash_sha256": "cb5e49dee36210c215829be9eb31b57f7f574e3375ad75fa7ee6197f9d22fcf6",
+        "message_hash_hmac_sha256": "0be57d97361612da36f9e80adeb40046c6cdeef3f230190a25fe6dc37c771847",
+        "request_hash_hmac_sha256": "5a19c8a6498ddbe0851ca7ac952d865718a02b028857843ee9da25daf0a56829"
+      }
+    },
+    {
+      "name": "unicode-nfc-composed",
+      "description": "Precomposed characters (single-code-point é); same hash as decomposed variant.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "café résumé"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 41,
+        "message_hash_sha256": "29c137904162122280ef8bb81566eac34644a0cd282e275a73878c615a0e87c3",
+        "request_hash_sha256": "cb5e49dee36210c215829be9eb31b57f7f574e3375ad75fa7ee6197f9d22fcf6",
+        "message_hash_hmac_sha256": "0be57d97361612da36f9e80adeb40046c6cdeef3f230190a25fe6dc37c771847",
+        "request_hash_hmac_sha256": "5a19c8a6498ddbe0851ca7ac952d865718a02b028857843ee9da25daf0a56829"
+      }
+    },
+    {
+      "name": "line-endings-crlf",
+      "description": "CRLF line endings normalize to LF.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "line1\r\nline2\r\nline3"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 49,
+        "message_hash_sha256": "5c0fc6c8a1679d86c9fc5b1f0144992bc48f23120a6587960c993ceff259088f",
+        "request_hash_sha256": "9acb6898c10708158569f94f06d7553dfa6ae46579ebea49c88a05da088f3a6a",
+        "message_hash_hmac_sha256": "2ece13f225ce28df0dcbe085211b9a11be95e4fc1905f98c4b63a572950be295",
+        "request_hash_hmac_sha256": "c26a2a0c51179478123b57229c593a8182ec9499462d3ccc0a1768cfa96bf2b3"
+      }
+    },
+    {
+      "name": "line-endings-lf",
+      "description": "LF line endings; same hash as CRLF variant.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "line1\nline2\nline3"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 49,
+        "message_hash_sha256": "5c0fc6c8a1679d86c9fc5b1f0144992bc48f23120a6587960c993ceff259088f",
+        "request_hash_sha256": "9acb6898c10708158569f94f06d7553dfa6ae46579ebea49c88a05da088f3a6a",
+        "message_hash_hmac_sha256": "2ece13f225ce28df0dcbe085211b9a11be95e4fc1905f98c4b63a572950be295",
+        "request_hash_hmac_sha256": "c26a2a0c51179478123b57229c593a8182ec9499462d3ccc0a1768cfa96bf2b3"
+      }
+    },
+    {
+      "name": "key-ordering-a-b-c",
+      "description": "Message keys in one order; canonicalized identically to reverse order.",
+      "input": {
+        "messages": [
+          {
+            "content": "test",
+            "role": "user"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 34,
+        "message_hash_sha256": "9cdf1b2a9095ad3f9556af25e6ed8a83bf577276fa43f585a39bab2c5b276a70",
+        "request_hash_sha256": "089ea70cb69b8bb7151e792ddef8e0352c9ebf9ce57cf0c1d3fd47d68156ad89",
+        "message_hash_hmac_sha256": "3524ff26f2d08a4cf4bc1b8a6e1a35b9afb0fc4f446792adfe0fc3989160768d",
+        "request_hash_hmac_sha256": "2bb355af1a284a984880601c0df3eabba95fbe04c8c4d68ea64f2c9681a24404"
+      }
+    },
+    {
+      "name": "key-ordering-c-b-a",
+      "description": "Message keys in reverse order; same hash as forward variant.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "test"
+          }
+        ]
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 34,
+        "message_hash_sha256": "9cdf1b2a9095ad3f9556af25e6ed8a83bf577276fa43f585a39bab2c5b276a70",
+        "request_hash_sha256": "089ea70cb69b8bb7151e792ddef8e0352c9ebf9ce57cf0c1d3fd47d68156ad89",
+        "message_hash_hmac_sha256": "3524ff26f2d08a4cf4bc1b8a6e1a35b9afb0fc4f446792adfe0fc3989160768d",
+        "request_hash_hmac_sha256": "2bb355af1a284a984880601c0df3eabba95fbe04c8c4d68ea64f2c9681a24404"
+      }
+    },
+    {
+      "name": "instructions-vs-system",
+      "description": "Instructions field distinct from system; both participate in request_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Do the thing"
+          }
+        ],
+        "instructions": "Be brief."
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 42,
+        "message_hash_sha256": "c6d277681ae548c2da8d4b55e0b76e1d177b93de50ee20798961fe55108bc264",
+        "request_hash_sha256": "9268e9dcf7ecc09dbaf2c800d680c08f9308557f62785b7e91e196d35c865abb",
+        "message_hash_hmac_sha256": "d3802942d6096bb824918fe5696b3afa25dc85b930c675a9b6850b4bb353f08a",
+        "request_hash_hmac_sha256": "f39b30b15157d0becea2e826cdaf20204095811475b69281c5a008a7fe908124"
+      }
+    },
+    {
+      "name": "response-format-json",
+      "description": "response_format participates in request_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Output JSON"
+          }
+        ],
+        "response_format": {
+          "type": "json_object"
+        }
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 41,
+        "message_hash_sha256": "77713b066525f8e2ed73b48e7cc4a4d08163120b727db63eb430692bf5998cd5",
+        "request_hash_sha256": "12c7e6888aae914cbd7c62ef15f298d17ba32bc34515cff93ea7c8e575727fe4",
+        "message_hash_hmac_sha256": "ecdec842883a3e9f8ed8ac5e8a1e839121bb52c36961262104cb95b5d4df31e7",
+        "request_hash_hmac_sha256": "93215ff93844e76937ebf52461a054078f8c7572a8d16f8d7c235075dc1dfb21"
+      }
+    },
+    {
+      "name": "reasoning-effort-high",
+      "description": "reasoning_effort participates in request_hash.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Think hard about this"
+          }
+        ],
+        "reasoning_effort": "high"
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 51,
+        "message_hash_sha256": "22d48a64211f3ec00d7c44c796231c539bbab891f0c4a73b5a4763b6e7ffd1cd",
+        "request_hash_sha256": "2b2750ce7dcc3a4ac812471449bc87b9978f22f515a47a3d002cde72c4e700d4",
+        "message_hash_hmac_sha256": "aca088f45a6c219b906750e03b18c8c22a581f685f1cebd116e72f214840e834",
+        "request_hash_hmac_sha256": "12ac76f4a38e1267a418eb521a19e2dc9154e7c7264021f10f813b737c5abd9c"
+      }
+    },
+    {
+      "name": "metadata-excluded",
+      "description": "metadata + providerExtras + signal excluded from BOTH hashes. Same hash as single-user-message.",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ],
+        "metadata": {
+          "tenant": "acme",
+          "user": "42"
+        },
+        "providerExtras": {
+          "anything": true
+        }
+      },
+      "expected": {
+        "normalization_version": "1",
+        "input_char_count": 35,
+        "message_hash_sha256": "013cf0c05f083773340d61c256a32240e92171b332a25ed7521733a86c129a37",
+        "request_hash_sha256": "ebd51c78a443a93c27a9cad55a0276650fc6cc9c7190e9232f63e9905594d2da",
+        "message_hash_hmac_sha256": "386671a7904101a57692adf79367570fe46e6a72d484253ebbebeebaf1c478ef",
+        "request_hash_hmac_sha256": "b004982874bbcc37d6b075f4f53c67f3030fab61db851f64e04746b519dee87e"
+      }
+    }
+  ]
+}

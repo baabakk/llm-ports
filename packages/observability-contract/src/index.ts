@@ -70,6 +70,12 @@ export {
 } from "./canonicalize.js";
 export { hash, hmacSha256Hex, sha256Hex } from "./hash.js";
 export type { HashAlgorithm } from "./hash.js";
+export { computeRequestFingerprint } from "./fingerprint.js";
+export type {
+  ComputeRequestFingerprintOptions,
+  FingerprintableRequest,
+  RequestFingerprint,
+} from "./fingerprint.js";
 
 // ─── CacheStats (§4.5) ──────────────────────────────────────────────
 export { anyCacheHit, totalProviderCacheReadTokens } from "./cache-stats.js";
