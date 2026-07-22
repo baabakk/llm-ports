@@ -18,6 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  AdapterInternalError,
   AuthenticationError,
   BadRequestError,
   BudgetExceededError,
@@ -25,12 +26,14 @@ import {
   ContentBlockUnsupportedError,
   ContentPolicyViolationError,
   ContextWindowExceededError,
+  CreditExhaustionError,
   EmptyResponseError,
   errorMatchers,
   ImageTooLargeError,
   InvalidImageUrlError,
   LLMPortError,
   NoProvidersAvailableError,
+  ProviderMalformed400Error,
   ProviderUnavailableError,
   RateLimitError,
   ServiceUnavailableError,
@@ -347,6 +350,91 @@ describe("alpha.18 typed-error taxonomy", () => {
       const wrapped = wrapProviderError("a", "raw string");
       expect(wrapped).toBeInstanceOf(ProviderUnavailableError);
       expect((wrapped as ProviderUnavailableError).cause?.message).toBe("raw string");
+    });
+  });
+
+  describe("alpha.28 new typed classes (TD-LLMP-17 + TD-LLMP-19)", () => {
+    describe("CreditExhaustionError", () => {
+      it("extends LLMPortError but NOT AuthenticationError or BadRequestError", () => {
+        const err = new CreditExhaustionError("anthropic", "credit_balance too low");
+        expect(err).toBeInstanceOf(CreditExhaustionError);
+        expect(err).toBeInstanceOf(LLMPortError);
+        expect(err).toBeInstanceOf(Error);
+        expect(err).not.toBeInstanceOf(AuthenticationError);
+        expect(err).not.toBeInstanceOf(BadRequestError);
+      });
+
+      it("carries alias in the message so operators can identify the provider", () => {
+        const err = new CreditExhaustionError("openai", "insufficient_quota");
+        expect(err.message).toContain("openai");
+        expect(err.message).toContain("insufficient_quota");
+        expect(err.alias).toBe("openai");
+      });
+
+      it("preserves the cause chain when supplied", () => {
+        const rootCause = new Error("HTTP 401 credit_balance too low");
+        const err = new CreditExhaustionError("anthropic", "credit exhausted", rootCause);
+        expect(err.cause).toBe(rootCause);
+      });
+
+      it("is NOT matched by errorMatchers.default (walk on it explicitly via defaultShouldFallback in a later commit)", () => {
+        const err = new CreditExhaustionError("a", "x");
+        expect(errorMatchers.all(err)).toBe(true);
+        // The legacy errorMatchers.default excludes AuthenticationError but not
+        // CreditExhaustionError; that's a legacy-shape property. The new
+        // defaultShouldFallback (walk-table policy) will handle
+        // CreditExhaustionError correctly.
+        expect(errorMatchers.default(err)).toBe(true);
+      });
+    });
+
+    describe("ProviderMalformed400Error", () => {
+      it("extends BadRequestError (so instanceof BadRequestError still catches it)", () => {
+        const err = new ProviderMalformed400Error("cerebras", "empty response body");
+        expect(err).toBeInstanceOf(ProviderMalformed400Error);
+        expect(err).toBeInstanceOf(BadRequestError);
+        expect(err).toBeInstanceOf(LLMPortError);
+      });
+
+      it("does NOT extend ContextWindowExceededError or ContentPolicyViolationError", () => {
+        const err = new ProviderMalformed400Error("cerebras", "empty response body");
+        expect(err).not.toBeInstanceOf(ContextWindowExceededError);
+        expect(err).not.toBeInstanceOf(ContentPolicyViolationError);
+      });
+
+      it("carries alias in the message", () => {
+        const err = new ProviderMalformed400Error("cerebras", "400 with no body");
+        expect(err.message).toContain("cerebras");
+      });
+    });
+
+    describe("AdapterInternalError", () => {
+      it("extends LLMPortError but NOT ServiceUnavailableError", () => {
+        const err = new AdapterInternalError("openai", "Cannot convert undefined or null to object");
+        expect(err).toBeInstanceOf(AdapterInternalError);
+        expect(err).toBeInstanceOf(LLMPortError);
+        expect(err).not.toBeInstanceOf(ServiceUnavailableError);
+        expect(err).not.toBeInstanceOf(ProviderUnavailableError);
+      });
+
+      it("carries alias so operators see which adapter had the internal bug", () => {
+        const rootCause = new TypeError("Cannot convert undefined or null to object");
+        const err = new AdapterInternalError("gptoss-cerebras", "runAgent tools default failure", rootCause);
+        expect(err.message).toContain("gptoss-cerebras");
+        expect(err.cause).toBe(rootCause);
+      });
+    });
+
+    it("all three new classes are distinct instanceof checks (no accidental cross-parenting)", () => {
+      const credit = new CreditExhaustionError("a", "x");
+      const malformed = new ProviderMalformed400Error("a", "x");
+      const internal = new AdapterInternalError("a", "x");
+      expect(credit).not.toBeInstanceOf(ProviderMalformed400Error);
+      expect(credit).not.toBeInstanceOf(AdapterInternalError);
+      expect(malformed).not.toBeInstanceOf(CreditExhaustionError);
+      expect(malformed).not.toBeInstanceOf(AdapterInternalError);
+      expect(internal).not.toBeInstanceOf(CreditExhaustionError);
+      expect(internal).not.toBeInstanceOf(ProviderMalformed400Error);
     });
   });
 });

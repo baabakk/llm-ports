@@ -481,6 +481,99 @@ export class InvalidImageUrlError extends LLMPortError {
   }
 }
 
+// ─── alpha.28 new typed classes (cross-consumer review 2026-07-21) ────
+
+/**
+ * Thrown when the provider's account or billing headroom is exhausted.
+ * Distinct from `AuthenticationError` (which reflects a genuine wrong-key
+ * or invalid-credential problem) because the credential is valid; the
+ * account just has no billing headroom. Distinct from
+ * `BudgetExceededError` (which is port-internal gating) because this
+ * fires on the provider's side.
+ *
+ * Walk-worthy: a different vendor with a fresh billing state can succeed.
+ * A single provider's credit-exhaustion surface today varies across
+ * response shapes (401 with a credit-exhaustion body, 403, 429 with
+ * "credit_balance too low", 400 with a "your account has no credit"
+ * message). Adapters classify into this typed class using the same
+ * message patterns collected in `AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS`.
+ *
+ * Added in alpha.28 pre-work (TD-LLMP-19). Prior to alpha.28, downstream
+ * consumers walked on `AuthenticationError` as a proxy for this condition;
+ * that over-walked on genuine wrong-key auth failures. Separating the
+ * classes lets `defaultShouldFallback` walk on `CreditExhaustionError`
+ * while aborting on true `AuthenticationError`.
+ */
+export class CreditExhaustionError extends LLMPortError {
+  public override readonly name: string = "CreditExhaustionError";
+  constructor(
+    public readonly alias: string,
+    message: string,
+    public override readonly cause?: Error,
+  ) {
+    super(`Provider "${alias}" credit exhausted: ${message}`);
+  }
+}
+
+/**
+ * Thrown when a provider returns HTTP 400 with an empty or unparseable
+ * body (no descriptive error body explaining what was malformed). This
+ * condition surfaces on Cerebras when a structured-output request uses
+ * a strict schema the provider cannot handle, and on some OpenAI-compat
+ * providers when the payload triggers an upstream provider-side bug that
+ * short-circuits before the descriptive error is emitted.
+ *
+ * Walk-worthy: another provider may accept the same request. Distinct
+ * from generic `BadRequestError` (which is unclassified 400 and most
+ * likely identical across providers) because this specific mode has an
+ * observed pattern of provider-specific quirks that walking recovers
+ * from.
+ *
+ * Added in alpha.28 pre-work (TD-LLMP-19). Prior to alpha.28, downstream
+ * consumers walked on generic `BadRequestError` as a proxy for this
+ * condition; that over-walked on genuine malformed requests that fail
+ * identically on every provider. Separating the classes lets
+ * `defaultShouldFallback` walk on `ProviderMalformed400Error` while
+ * aborting on true generic `BadRequestError`.
+ */
+export class ProviderMalformed400Error extends BadRequestError {
+  public override readonly name: string = "ProviderMalformed400Error";
+}
+
+/**
+ * Thrown when the adapter or registry code itself throws synchronously
+ * (TypeError, ReferenceError, JS runtime bug, unchecked precondition
+ * violation) BEFORE reaching the provider. Distinct from
+ * `ServiceUnavailableError` (which reflects a provider-side failure)
+ * because this is a bug in the port library, not a problem with the
+ * provider.
+ *
+ * NOT walk-worthy: another provider will produce the same local error
+ * at every hop. Walking the chain for a client-side bug multiplies
+ * latency and cost, and misdirects operator diagnostic to provider
+ * status pages when the fix is inside `@llm-ports`.
+ *
+ * Adapter code SHOULD wrap only the provider-call block (network call
+ * plus immediate response handling) in the `errorMatchers` try/catch.
+ * Local synchronous throws before the network call SHOULD propagate as
+ * `AdapterInternalError` so the registry does not fail over on them.
+ *
+ * Added in alpha.28 pre-work (TD-LLMP-17). Prior to alpha.28, local
+ * TypeErrors from adapter code were wrapped as `ServiceUnavailableError`
+ * by `wrapProviderError`'s fallback branch, which then triggered futile
+ * chain-wide failover with the same error re-thrown at every hop.
+ */
+export class AdapterInternalError extends LLMPortError {
+  public override readonly name: string = "AdapterInternalError";
+  constructor(
+    public readonly alias: string,
+    message: string,
+    public override readonly cause?: Error,
+  ) {
+    super(`Adapter "${alias}" internal error: ${message}`);
+  }
+}
+
 // ─── errorMatchers helper (typed-error-driven failover predicates) ────
 
 /**

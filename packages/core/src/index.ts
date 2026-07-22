@@ -119,6 +119,7 @@ export {
 
 // ─── Errors ──────────────────────────────────────────────────────────
 export {
+  AdapterInternalError,
   AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS,
   aggressiveShouldFallback,
   AuthenticationError,
@@ -128,6 +129,7 @@ export {
   ContentBlockUnsupportedError,
   ContentPolicyViolationError,
   ContextWindowExceededError,
+  CreditExhaustionError,
   EmptyMessagesError,
   EmptyResponseError,
   errorMatchers,
@@ -139,6 +141,7 @@ export {
   NonContiguousSystemError,
   NoProvidersAvailableError,
   PromptRequiredError,
+  ProviderMalformed400Error,
   ProviderUnavailableError,
   RateLimitError,
   ServiceUnavailableError,
