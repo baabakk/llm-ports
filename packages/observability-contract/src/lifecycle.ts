@@ -18,6 +18,7 @@
  * Aggregation is `operation_id`; per-attempt accounting is `attempt_id`.
  */
 
+import type { ErrorInfo } from "./error-info.js";
 import type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
 
 // ─── Enum types used across lifecycle payloads ──────────────────────
@@ -62,25 +63,9 @@ export type TerminationStatus = "completed" | "failed" | "cancelled";
 
 // ─── Placeholder shapes filled by subsequent steps ──────────────────
 //
-// These are defined here as minimal shapes so lifecycle events compile.
-// Full ErrorInfo (step 5c), CacheStats (5d), and RequestFingerprint
-// (5e) shapes replace these placeholders in follow-up commits.
-
-/**
- * @internal Placeholder for the ErrorInfo shape (Plan 58 v0.4 §4.4).
- * Full shape lands in the ErrorInfo commit; sinks tolerant of unknown
- * fields already handle the mature version.
- */
-export type ErrorInfoPlaceholder = {
-  /** e.g. "AuthenticationError"; string form of the typed error class. */
-  error_type: string;
-  /** Human-readable; redactable per CapturePolicy. */
-  message?: string;
-  /** True: same-provider retry may succeed. */
-  retryable?: boolean;
-  /** True: walk to next provider in chain. */
-  fallback_worthy?: boolean;
-};
+// CacheStats (5d) and RequestFingerprint (5e) still have placeholder
+// shapes here; those follow-up commits replace them with the mature
+// definitions. ErrorInfo (5c) is imported from error-info.ts.
 
 /**
  * @internal Placeholder for CacheStats (Plan 58 v0.4 §4.5). Full shape
@@ -190,7 +175,7 @@ export interface FallbackSelectedData {
  */
 export interface AttemptFailedData {
   /** Structured error data (ErrorInfo shape from §4.4). */
-  error: ErrorInfoPlaceholder;
+  error: ErrorInfo;
 
   /** Adapter-observed wall-clock latency for the attempt, milliseconds. */
   latency_ms: number;
@@ -264,7 +249,7 @@ export interface OperationCompletedData {
  */
 export interface OperationFailedData {
   /** The terminal error that caused the operation to abort. */
-  error: ErrorInfoPlaceholder;
+  error: ErrorInfo;
 
   /** How many attempts were made before the operation failed. */
   attempts_made: number;
@@ -361,7 +346,7 @@ export interface AgentToolReturnedData {
   duration_ms: number;
 
   /** Set when the tool threw or returned an error. */
-  error?: ErrorInfoPlaceholder;
+  error?: ErrorInfo;
 }
 
 // ─── Union of all lifecycle event types (for switch narrowing) ───────

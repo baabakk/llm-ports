@@ -55,6 +55,10 @@ export {
 // ─── Primitive shapes (usage / cost / priority) ─────────────────────
 export type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
 
+// ─── ErrorInfo (§4.4) ───────────────────────────────────────────────
+export { CAUSE_CATEGORIES, ERROR_TYPE_TO_CATEGORY, errorTypeToCauseCategory } from "./error-info.js";
+export type { CauseCategory, ErrorInfo } from "./error-info.js";
+
 // ─── Lifecycle events (§4.3 + §4.7 agent steps) ─────────────────────
 export {
   LIFECYCLE_EVENT_TYPES,
@@ -70,7 +74,6 @@ export type {
   AttemptRetryScheduledData,
   AttemptStartedData,
   CacheStatsPlaceholder,
-  ErrorInfoPlaceholder,
   FallbackCause,
   FallbackSelectedData,
   LifecycleEventDataByType,
