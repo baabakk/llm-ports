@@ -168,8 +168,10 @@ function applyFix(root: Record<string, unknown>, issue: ZodIssue): void {
       //   "**low**"       → "low"  (markdown wrap)
       //   '"medium"'      → "medium"  (model quoted the value)
       //   "`low`"         → "low"  (model code-fenced it)
+      //   "shared‑lib"    → "shared-lib"  (U+2011 non-breaking hyphen → ASCII;
+      //                    added alpha.28 pre-work TD-LLMP-18)
       if (typeof current === "string") {
-        obj[key] = stripEnumDecorators(current);
+        obj[key] = stripEnumDecorators(normalizeUnicodeConfusables(current));
       }
       break;
 
@@ -181,6 +183,40 @@ function applyFix(root: Record<string, unknown>, issue: ZodIssue): void {
       }
       break;
   }
+}
+
+/**
+ * Normalize Unicode confusables of ASCII delimiter characters used in
+ * enum literals. Models occasionally emit typographic variants
+ * (U+2011 non-breaking hyphen instead of U+002D ASCII hyphen-minus,
+ * curly quotes instead of straight, non-breaking spaces instead of
+ * ASCII spaces, fullwidth punctuation on Chinese-tuned models) that
+ * break Zod's byte-exact enum matching without any semantic
+ * difference to the caller's intent.
+ *
+ * Content-preserving: only fires inside the `invalid_enum_value` /
+ * `invalid_value` repair branch, so free-text `z.string()` fields
+ * where an em dash or curly quote is deliberate are never touched.
+ *
+ * Added in alpha.28 pre-work (TD-LLMP-18) after ADW production
+ * observed U+2011 non-breaking hyphen in `"shared-lib"` breaking
+ * their guardrails Zod enum validation. BEPA has three parallel
+ * exposures (venture / interaction-type / call-triage-category
+ * enums with hyphenated values).
+ */
+function normalizeUnicodeConfusables(s: string): string {
+  return s
+    // Hyphens / dashes: U+2010..U+2015 (hyphen through horizontal bar) +
+    // U+2212 minus sign + U+FF0D fullwidth hyphen-minus → ASCII '-'
+    .replace(/[‐‑‒–—―−－]/g, "-")
+    // Single quotes: U+2018 left / U+2019 right → ASCII apostrophe
+    .replace(/[‘’]/g, "'")
+    // Double quotes: U+201C left / U+201D right → ASCII quote
+    .replace(/[“”]/g, '"')
+    // Spaces: U+00A0 non-breaking + U+2007 figure + U+2008 punctuation +
+    // U+2009 thin + U+202F narrow-no-break + U+205F medium-math + U+3000
+    // ideographic → ASCII space
+    .replace(/[      　]/g, " ");
 }
 
 /**

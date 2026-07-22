@@ -244,4 +244,133 @@ describe("attemptValidationRepair", () => {
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.priority).toBe(expected);
   });
+
+  // ─── Pattern 9 (alpha.28, TD-LLMP-18): Unicode confusable normalization ─────
+
+  describe("Unicode confusable normalization on invalid_enum_value", () => {
+    it("U+2011 non-breaking hyphen → ASCII hyphen (the ADW production reproduction)", () => {
+      // The exact ADW production case from 2026-07-21: model emitted
+      // "shared‑lib" using U+2011 instead of ASCII "-" in a Zod enum
+      // whose expected literal is "shared-lib" using U+002D.
+      const schema = z.object({
+        type: z.enum(["api", "event", "shared-lib", "database"]),
+      });
+      const raw = { type: "shared‑lib" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.type).toBe("shared-lib");
+    });
+
+    it.each([
+      // Hyphens / dashes: normalize to ASCII '-'
+      ["shared‐lib", "shared-lib"], // U+2010 hyphen
+      ["shared‑lib", "shared-lib"], // U+2011 non-breaking hyphen
+      ["shared‒lib", "shared-lib"], // U+2012 figure dash
+      ["shared–lib", "shared-lib"], // U+2013 en dash
+      ["shared—lib", "shared-lib"], // U+2014 em dash
+      ["shared―lib", "shared-lib"], // U+2015 horizontal bar
+      ["shared−lib", "shared-lib"], // U+2212 minus sign
+      ["shared－lib", "shared-lib"], // U+FF0D fullwidth hyphen-minus
+    ])("hyphen variant %s → %s", (input, expected) => {
+      const schema = z.object({
+        type: z.enum(["shared-lib", "other"]),
+      });
+      const raw = { type: input };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.type).toBe(expected);
+    });
+
+    it("BEPA venture enum: U+2011 in noble-cortex is repaired", () => {
+      const schema = z.object({
+        venture: z.enum(["voxr", "noble-cortex", "healthcheck", "personal", "speaking", "other"]),
+      });
+      const raw = { venture: "noble‑cortex" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.venture).toBe("noble-cortex");
+    });
+
+    it("BEPA interaction-type enum: U+2013 en dash in email-sent is repaired", () => {
+      const schema = z.object({
+        type: z.enum(["email-sent", "email-received", "meeting", "linkedin", "slack", "phone", "other"]),
+      });
+      const raw = { type: "email–sent" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.type).toBe("email-sent");
+    });
+
+    it("curly single quote U+2019 → ASCII apostrophe in enum values", () => {
+      const schema = z.object({
+        state: z.enum(["can't", "won't", "should"]),
+      });
+      const raw = { state: "can’t" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.state).toBe("can't");
+    });
+
+    it("non-breaking space U+00A0 → ASCII space in multi-word enum values", () => {
+      const schema = z.object({
+        state: z.enum(["in progress", "done"]),
+      });
+      const raw = { state: "in progress" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.state).toBe("in progress");
+    });
+
+    it("composes with existing decorator strip: markdown-bolded + U+2011 → matches enum", () => {
+      const schema = z.object({
+        priority: z.enum(["low-urgency", "high-urgency"]),
+      });
+      const raw = { priority: "**low‑urgency**" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.priority).toBe("low-urgency");
+    });
+
+    it("CONTENT PRESERVATION: free-text z.string() with em dash is NOT touched", () => {
+      // Critical property: the normalization fires only inside the
+      // invalid_enum_value branch. A z.string() field carrying an em
+      // dash as legitimate content is never touched — either the parse
+      // succeeds outright (no repair fires) or a different repair path
+      // triggers that ignores this content.
+      const schema = z.object({
+        quote: z.string(),
+      });
+      const raw = { quote: "It's — well — complicated" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      // The em dashes in the quote are preserved verbatim.
+      if (result.success) expect(result.data.quote).toBe("It's — well — complicated");
+    });
+
+    it("normalization is idempotent (ASCII input stays ASCII)", () => {
+      const schema = z.object({
+        type: z.enum(["shared-lib", "other"]),
+      });
+      const raw = { type: "shared-lib" };
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.type).toBe("shared-lib");
+    });
+
+    it("normalization can't help when no ASCII form matches (falls through to retry-with-feedback)", () => {
+      // If normalizing produces a value that still doesn't match any enum
+      // option, the outer safeParse fails and the caller retries with
+      // feedback. attemptValidationRepair does its best-effort fix but
+      // does not force a false-positive match.
+      const schema = z.object({
+        type: z.enum(["shared-lib", "other"]),
+      });
+      const raw = { type: "totally-different-value" };
+      // safeParse would fail; the repair pass returns the raw with
+      // stripEnumDecorators applied (lowercase), but "totally-different-value"
+      // is still not a valid enum member, so the outer parse still fails.
+      const result = schema.safeParse(runRepair(schema, raw));
+      expect(result.success).toBe(false);
+    });
+  });
 });
