@@ -51,3 +51,34 @@ export {
   newOperationId,
   OPERATION_ID_LENGTH,
 } from "./ids.js";
+
+// ─── Primitive shapes (usage / cost / priority) ─────────────────────
+export type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
+
+// ─── Lifecycle events (§4.3 + §4.7 agent steps) ─────────────────────
+export {
+  LIFECYCLE_EVENT_TYPES,
+  OPERATION_TERMINATOR_TYPES,
+} from "./lifecycle.js";
+export type {
+  AgentStepCompletedData,
+  AgentStepStartedData,
+  AgentToolCalledData,
+  AgentToolReturnedData,
+  AttemptCompletedData,
+  AttemptFailedData,
+  AttemptRetryScheduledData,
+  AttemptStartedData,
+  CacheStatsPlaceholder,
+  ErrorInfoPlaceholder,
+  FallbackCause,
+  FallbackSelectedData,
+  LifecycleEventDataByType,
+  LifecycleEventType,
+  OperationCancelledData,
+  OperationCompletedData,
+  OperationFailedData,
+  OperationStartedData,
+  RetryReason,
+  TerminationStatus,
+} from "./lifecycle.js";
