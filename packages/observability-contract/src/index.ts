@@ -59,6 +59,18 @@ export type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
 export { CAUSE_CATEGORIES, ERROR_TYPE_TO_CATEGORY, errorTypeToCauseCategory } from "./error-info.js";
 export type { CauseCategory, ErrorInfo } from "./error-info.js";
 
+// ─── Canonicalization + hash primitives (§4.6) ──────────────────────
+export {
+  canonicalize,
+  canonicalizeString,
+  canonicalMessagesForm,
+  canonicalRequestForm,
+  NORMALIZATION_VERSION,
+  REQUEST_HASH_ALLOWED_KEYS,
+} from "./canonicalize.js";
+export { hash, hmacSha256Hex, sha256Hex } from "./hash.js";
+export type { HashAlgorithm } from "./hash.js";
+
 // ─── CacheStats (§4.5) ──────────────────────────────────────────────
 export { anyCacheHit, totalProviderCacheReadTokens } from "./cache-stats.js";
 export type {
