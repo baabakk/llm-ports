@@ -59,6 +59,16 @@ export type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
 export { CAUSE_CATEGORIES, ERROR_TYPE_TO_CATEGORY, errorTypeToCauseCategory } from "./error-info.js";
 export type { CauseCategory, ErrorInfo } from "./error-info.js";
 
+// ─── CacheStats (§4.5) ──────────────────────────────────────────────
+export { anyCacheHit, totalProviderCacheReadTokens } from "./cache-stats.js";
+export type {
+  CacheStats,
+  ProviderCacheStats,
+  ProviderCacheStatus,
+  SemanticCacheStats,
+  SemanticCacheStatus,
+} from "./cache-stats.js";
+
 // ─── Lifecycle events (§4.3 + §4.7 agent steps) ─────────────────────
 export {
   LIFECYCLE_EVENT_TYPES,
@@ -73,7 +83,6 @@ export type {
   AttemptFailedData,
   AttemptRetryScheduledData,
   AttemptStartedData,
-  CacheStatsPlaceholder,
   FallbackCause,
   FallbackSelectedData,
   LifecycleEventDataByType,

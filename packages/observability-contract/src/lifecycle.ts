@@ -18,6 +18,7 @@
  * Aggregation is `operation_id`; per-attempt accounting is `attempt_id`.
  */
 
+import type { CacheStats } from "./cache-stats.js";
 import type { ErrorInfo } from "./error-info.js";
 import type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
 
@@ -61,26 +62,12 @@ export type FallbackCause =
  */
 export type TerminationStatus = "completed" | "failed" | "cancelled";
 
-// ─── Placeholder shapes filled by subsequent steps ──────────────────
+// ─── Types imported from adjacent modules ───────────────────────────
 //
-// CacheStats (5d) and RequestFingerprint (5e) still have placeholder
-// shapes here; those follow-up commits replace them with the mature
-// definitions. ErrorInfo (5c) is imported from error-info.ts.
-
-/**
- * @internal Placeholder for CacheStats (Plan 58 v0.4 §4.5). Full shape
- * lands in the CacheStats commit.
- */
-export type CacheStatsPlaceholder = {
-  provider_cache?: {
-    status: "hit" | "miss" | "partial" | "ineligible" | "unknown";
-    read_input_tokens?: number;
-    write_input_tokens?: number;
-  };
-  semantic_cache?: {
-    status: "hit" | "miss" | "bypassed" | "unknown";
-  };
-};
+// ErrorInfo (§4.4) is imported from error-info.ts; CacheStats (§4.5)
+// is imported from cache-stats.ts. RequestFingerprint (§4.6) will
+// arrive in a subsequent commit but is not carried on any lifecycle
+// event payload — it lives on result objects.
 
 // ─── Operation-level events (nine total: 3 operation + 6 attempt) ────
 
@@ -198,7 +185,7 @@ export interface AttemptCompletedData {
   latency_ms: number;
 
   /** Cache accounting per §4.5 (placeholder shape until CacheStats commit). */
-  cache_stats?: CacheStatsPlaceholder;
+  cache_stats?: CacheStats;
 
   /**
    * Provider-issued response identifier when present (e.g. OpenAI's
