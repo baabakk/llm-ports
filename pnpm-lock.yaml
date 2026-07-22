@@ -340,6 +340,24 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
+  packages/adapter-codex:
+    devDependencies:
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
+      '@llm-ports/observability-contract':
+        specifier: workspace:*
+        version: link:../observability-contract
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.39)
+
   packages/adapter-contract-tests:
     dependencies:
       '@llm-ports/core':
