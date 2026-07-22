@@ -242,6 +242,32 @@ describe("alpha.18 typed-error taxonomy", () => {
       expect(wrapped).toBeInstanceOf(BadRequestError);
     });
 
+    it("TD-LLMP-16: propagates modelId into ContextWindowExceededError when adapter passes it", () => {
+      const sdkErr = Object.assign(new Error("prompt is too long"), { status: 400 });
+      const wrapped = wrapProviderError("deepseek-4flash-deepinfra", sdkErr, "deepseek-ai/DeepSeek-V4-Flash");
+      expect(wrapped).toBeInstanceOf(ContextWindowExceededError);
+      const cwe = wrapped as ContextWindowExceededError;
+      expect(cwe.modelId).toBe("deepseek-ai/DeepSeek-V4-Flash");
+      expect(cwe.message).toContain('for model "deepseek-ai/DeepSeek-V4-Flash"');
+      expect(cwe.message).not.toContain('"(unknown)"');
+    });
+
+    it("TD-LLMP-16: falls back to (unknown) when modelId is omitted (backwards compat)", () => {
+      const sdkErr = Object.assign(new Error("prompt is too long"), { status: 400 });
+      const wrapped = wrapProviderError("a", sdkErr);
+      expect(wrapped).toBeInstanceOf(ContextWindowExceededError);
+      const cwe = wrapped as ContextWindowExceededError;
+      expect(cwe.modelId).toBe("(unknown)");
+    });
+
+    it("TD-LLMP-16: propagates modelId into ContentPolicyViolationError when adapter passes it", () => {
+      const sdkErr = Object.assign(new Error("Content policy violation"), { status: 400 });
+      const wrapped = wrapProviderError("openai", sdkErr, "gpt-5");
+      expect(wrapped).toBeInstanceOf(ContentPolicyViolationError);
+      const cpv = wrapped as ContentPolicyViolationError;
+      expect(cpv.message).toContain('gpt-5');
+    });
+
     it("classifies status=400 with content-policy message as ContentPolicyViolationError", () => {
       const sdkErr = Object.assign(new Error("This content was flagged by our safety classifier."), {
         status: 400,

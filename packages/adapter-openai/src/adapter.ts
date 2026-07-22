@@ -945,7 +945,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           conversation.push({ role: "user", content: toolResults });
         }
       } catch (err) {
-        throw wrapProviderError(alias, err);
+        throw wrapProviderError(alias, err, lastModelId);
       }
 
       return {
@@ -1017,7 +1017,7 @@ function createEmbeddings(
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapProviderError(alias, err);
+        throw wrapProviderError(alias, err, modelId);
       }
     },
 
@@ -1046,7 +1046,7 @@ function createEmbeddings(
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        throw wrapProviderError(alias, err);
+        throw wrapProviderError(alias, err, modelId);
       }
     },
   };
@@ -1581,7 +1581,7 @@ async function executeChatRequest(
           learnFromResponse(req.modelId, retried);
           return { response: retried, modelId: req.modelId };
         } catch (retryErr) {
-          throw wrapProviderError(alias, retryErr);
+          throw wrapProviderError(alias, retryErr, req.modelId);
         }
       }
 
@@ -1624,7 +1624,7 @@ async function executeChatRequest(
           learnFromResponse(req.modelId, retried);
           return { response: retried, modelId: req.modelId };
         } catch (retryErr) {
-          throw wrapProviderError(alias, retryErr);
+          throw wrapProviderError(alias, retryErr, req.modelId);
         }
       }
 
@@ -1660,7 +1660,7 @@ async function executeChatRequest(
         triedCapabilityFallback = true;
         continue;
       }
-      throw wrapProviderError(alias, err);
+      throw wrapProviderError(alias, err, req.modelId);
     }
   }
 }
@@ -1742,7 +1742,7 @@ async function executeChatStream(
         triedCapabilityFallback = true;
         continue;
       }
-      throw wrapProviderError(alias, err);
+      throw wrapProviderError(alias, err, streamReq.modelId);
     }
   }
 }

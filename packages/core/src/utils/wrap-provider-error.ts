@@ -126,8 +126,21 @@ function detectBadRequestKind(
  * SDK-specific error fields (e.g. OpenAI's `param`, Anthropic's
  * `error.type`) and constructing the typed error directly; this helper is
  * the catch-all fallback when adapters haven't customized.
+ *
+ * The optional `modelId` argument, added in alpha.28 pre-work (TD-LLMP-16),
+ * is threaded into the `ContextWindowExceededError` and
+ * `ContentPolicyViolationError` constructors so the resulting error carries
+ * the model name that was in play at request-construction time. Adapter
+ * authors should pass `req.modelId` (or equivalent) at every call site
+ * inside a per-call code path; call sites outside a per-call path (e.g.
+ * `listModels`) may omit it. When omitted, the error's `modelId` field
+ * falls back to the legacy `"(unknown)"` placeholder for backwards compat.
  */
-export function wrapProviderError(alias: string, err: unknown): Error {
+export function wrapProviderError(
+  alias: string,
+  err: unknown,
+  modelId?: string,
+): Error {
   // Pass-through: any LLMPortError subclass is already typed.
   if (err instanceof LLMPortError) return err;
 
@@ -144,20 +157,26 @@ export function wrapProviderError(alias: string, err: unknown): Error {
   // Classify by HTTP status when available.
   const status = extractStatus(err);
   const message = err.message ?? String(err);
+  const resolvedModelId = modelId ?? "(unknown)";
 
   if (status === 400) {
     const kind = detectBadRequestKind(message);
     if (kind === "context-window") {
       return new ContextWindowExceededError(
         alias,
-        "(unknown)",
+        resolvedModelId,
         undefined,
         undefined,
         err,
       );
     }
     if (kind === "content-policy") {
-      return new ContentPolicyViolationError(alias, "(unknown)", message, err);
+      return new ContentPolicyViolationError(
+        alias,
+        resolvedModelId,
+        message,
+        err,
+      );
     }
     // Generic 400 → BadRequest with raw message.
     return new BadRequestError(alias, message, err);
