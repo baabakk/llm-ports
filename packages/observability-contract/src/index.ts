@@ -87,6 +87,24 @@ export type {
   SemanticCacheStatus,
 } from "./cache-stats.js";
 
+// ─── CapturePolicy (§4.10) ──────────────────────────────────────────
+export {
+  contentEverExposed,
+  DEFAULT_CAPTURE_POLICY,
+  filterBaggageKeys,
+  filterMetadataKeys,
+  fingerprintingEnabled,
+  PERMISSIVE_CAPTURE_POLICY,
+} from "./capture-policy.js";
+export type {
+  CapturePolicy,
+  ContentCapture,
+  ErrorBodyCapture,
+  FingerprintCapture,
+  Redactor,
+  StreamChunkCapture,
+} from "./capture-policy.js";
+
 // ─── Evaluation (§4.9) ──────────────────────────────────────────────
 export {
   EVALUATION_EVENT_TYPE,
