@@ -152,6 +152,16 @@ export type {
   StreamChunkCapture,
 } from "./capture-policy.js";
 
+// ─── Emitter helpers (§4.13) ────────────────────────────────────────
+export {
+  buildEvent,
+  correlationFromContext,
+  emitEvaluation,
+  emitLifecycleEvent,
+  emitRaw,
+} from "./emitters.js";
+export type { EmitterConfig } from "./emitters.js";
+
 // ─── Evaluation (§4.9) ──────────────────────────────────────────────
 export {
   EVALUATION_EVENT_TYPE,
