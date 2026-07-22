@@ -87,6 +87,20 @@ export type {
   SemanticCacheStatus,
 } from "./cache-stats.js";
 
+// ─── Evaluation (§4.9) ──────────────────────────────────────────────
+export {
+  EVALUATION_EVENT_TYPE,
+  EVALUATION_SCORE_TYPES,
+  EVALUATION_TARGET_KINDS,
+} from "./evaluation.js";
+export type {
+  EvaluationEventType,
+  EvaluationRef,
+  EvaluationScore,
+  EvaluationSource,
+  EvaluationTarget,
+} from "./evaluation.js";
+
 // ─── Lifecycle events (§4.3 + §4.7 agent steps) ─────────────────────
 export {
   LIFECYCLE_EVENT_TYPES,
