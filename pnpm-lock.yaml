@@ -583,6 +583,25 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.39)
 
+  packages/observability-contract:
+    dependencies:
+      nanoid:
+        specifier: ^5.0.9
+        version: 5.1.16
+    devDependencies:
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.39)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+
 packages:
 
   '@ai-sdk/anthropic@1.2.12':
@@ -2478,6 +2497,11 @@ packages:
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
+
+  nanoid@5.1.16:
+    resolution: {integrity: sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==}
+    engines: {node: ^18 || >=20}
     hasBin: true
 
   natural-compare@1.4.0:
@@ -5209,6 +5233,8 @@ snapshots:
       thenify-all: 1.6.0
 
   nanoid@3.3.11: {}
+
+  nanoid@5.1.16: {}
 
   natural-compare@1.4.0: {}
 
