@@ -714,3 +714,123 @@ export function aggressiveShouldFallback(err: unknown): boolean {
 
   return false;
 }
+
+// ─── Canonical walk-table policy (alpha.28+, TD-LLMP-19) ──────────────
+
+/**
+ * The canonical walk-table policy for `RegistryOptions.runtimeFallback:
+ * "default"` starting alpha.28. Codifies the outcome of the 2026-07-21
+ * cross-consumer review pass; supersedes hand-rolled per-consumer
+ * classifiers (BEPA `src/ai/llm.ts:357-379`, ADW `registry.ts:170`, etc.)
+ * that each mis-attributed one or more error classes.
+ *
+ * **Walks (transient / provider-varying):** the caller has a reasonable
+ * chance of success on a different provider.
+ *
+ *   - `RateLimitError` — this provider's 429; another provider may have
+ *     headroom.
+ *   - `ServiceUnavailableError` (and subclasses `ProviderUnavailableError`,
+ *     `EmptyResponseError`) — transient 5xx / SDK errors; walk.
+ *   - `ContextWindowExceededError` — different providers have different
+ *     context windows. A 150k-token request rejected by a 128k-window
+ *     provider can succeed on a 400k-window provider.
+ *   - `ContentPolicyViolationError` — different providers apply different
+ *     content policies. Anthropic refuses some things OpenAI accepts and
+ *     vice versa.
+ *   - `ImageTooLargeError` — different attachment size limits per provider.
+ *   - `ContentBlockUnsupportedError` — different multimodal capabilities.
+ *   - `CreditExhaustionError` — this provider's billing headroom is spent;
+ *     a different vendor's account is unaffected.
+ *   - `ProviderMalformed400Error` — provider returned 400 with an empty
+ *     or unparseable body (typically a provider-side bug on complex
+ *     schemas); another provider may accept the same request.
+ *
+ * **Aborts (deterministic / same across providers):** walking wastes N
+ * provider API calls with the same identical error at every hop.
+ *
+ *   - `AuthenticationError` — a truly wrong or expired credential does
+ *     not fix on the next provider, and each hop leaks the failure across
+ *     vendors.
+ *   - Generic `BadRequestError` (unclassified 400) — most likely identical
+ *     across providers (missing field, invalid JSON, malformed message
+ *     role). Consumers who observe a specific provider-quirk 400 that
+ *     walking recovers from should upgrade `wrapProviderError`'s
+ *     classification to emit `ProviderMalformed400Error` (or another
+ *     narrower typed class) instead of over-walking on the generic parent.
+ *   - `MessagesRequiredError`, `EmptyMessagesError`, `MessagesConflictError`,
+ *     `PromptRequiredError`, `NonContiguousSystemError` — contract-level
+ *     violations. Deterministic. Walking is pure waste.
+ *   - `InvalidImageUrlError` — universally invalid URL. Walking is waste.
+ *   - `AdapterInternalError` — port library's own bug. Walking multiplies
+ *     latency and cost, and misdirects operator diagnostic. The fix lives
+ *     inside `@llm-ports`, not in another provider.
+ *   - Unknown error classes — default is conservative: unclassified failures
+ *     are, empirically, most likely identical across providers.
+ *
+ * Consumers wire this via `runtimeFallback: { shouldFallback:
+ * defaultShouldFallback }` on `createRegistryFromEnv`. To extend (e.g. add
+ * a consumer-specific typed class), wrap:
+ *
+ * ```ts
+ * shouldFallback: (err) => defaultShouldFallback(err) || (err instanceof MyClass)
+ * ```
+ *
+ * To narrow (e.g. abort on `ContentPolicyViolationError` because policy
+ * variance is not useful for your workload), wrap:
+ *
+ * ```ts
+ * shouldFallback: (err) =>
+ *   err instanceof ContentPolicyViolationError
+ *     ? false
+ *     : defaultShouldFallback(err)
+ * ```
+ *
+ * Distinct from `aggressiveShouldFallback` (bundled with
+ * `runtimeFallback: "aggressive"`): the aggressive preset matches on
+ * message-body patterns (via `AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS`)
+ * rather than the typed `CreditExhaustionError` class; use aggressive when
+ * an adapter has not yet upgraded to emit the typed class, and use
+ * `defaultShouldFallback` when your adapter stack emits the typed classes
+ * consistently.
+ */
+export function defaultShouldFallback(err: unknown): boolean {
+  // Fast pass-through for non-LLMPortError inputs: only walk on 5xx-shaped
+  // raw errors (defensive; adapters SHOULD have wrapped these already).
+  if (!(err instanceof LLMPortError)) {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "status" in err &&
+      typeof (err as { status: unknown }).status === "number" &&
+      (err as { status: number }).status >= 500
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Walk-worthy classes.
+  if (err instanceof RateLimitError) return true;
+  if (err instanceof ServiceUnavailableError) return true;
+  if (err instanceof CreditExhaustionError) return true;
+  if (err instanceof ProviderMalformed400Error) return true;
+  if (err instanceof ContextWindowExceededError) return true;
+  if (err instanceof ContentPolicyViolationError) return true;
+  if (err instanceof ImageTooLargeError) return true;
+  if (err instanceof ContentBlockUnsupportedError) return true;
+
+  // Abort-worthy classes: explicit for readability + safety against
+  // future subclasses inheriting the wrong parent.
+  if (err instanceof AuthenticationError) return false;
+  if (err instanceof AdapterInternalError) return false;
+  if (err instanceof InvalidImageUrlError) return false;
+
+  // Contract-level errors (MessagesRequiredError, EmptyMessagesError,
+  // MessagesConflictError, PromptRequiredError, NonContiguousSystemError,
+  // ValidationError, ConfigError) all extend LLMPortError directly and
+  // fall through to the default-abort branch below.
+
+  // Any other LLMPortError (including generic BadRequestError that did not
+  // match a walk-worthy subclass above): abort.
+  return false;
+}

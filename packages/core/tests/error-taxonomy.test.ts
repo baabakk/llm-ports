@@ -27,6 +27,7 @@ import {
   ContentPolicyViolationError,
   ContextWindowExceededError,
   CreditExhaustionError,
+  defaultShouldFallback,
   EmptyResponseError,
   errorMatchers,
   ImageTooLargeError,
@@ -435,6 +436,116 @@ describe("alpha.18 typed-error taxonomy", () => {
       expect(malformed).not.toBeInstanceOf(AdapterInternalError);
       expect(internal).not.toBeInstanceOf(CreditExhaustionError);
       expect(internal).not.toBeInstanceOf(ProviderMalformed400Error);
+    });
+  });
+
+  describe("defaultShouldFallback (alpha.28 canonical walk-table policy; TD-LLMP-19)", () => {
+    describe("walk-worthy error classes return true", () => {
+      it("RateLimitError → walks (provider-varying: another provider may have headroom)", () => {
+        expect(defaultShouldFallback(new RateLimitError("a", "429", 1000))).toBe(true);
+      });
+
+      it("ServiceUnavailableError → walks (transient 5xx)", () => {
+        expect(defaultShouldFallback(new ServiceUnavailableError("a", "503"))).toBe(true);
+        expect(defaultShouldFallback(new ProviderUnavailableError("a", new Error("SDK error")))).toBe(true);
+        expect(defaultShouldFallback(new EmptyResponseError("a", "empty"))).toBe(true);
+      });
+
+      it("ContextWindowExceededError → walks (different providers have different windows)", () => {
+        expect(defaultShouldFallback(new ContextWindowExceededError("cerebras-128k", "gpt-oss-120b"))).toBe(true);
+      });
+
+      it("ContentPolicyViolationError → walks (different providers have different policies)", () => {
+        expect(defaultShouldFallback(new ContentPolicyViolationError("anthropic", "claude"))).toBe(true);
+      });
+
+      it("ImageTooLargeError → walks (different attachment size limits per provider)", () => {
+        expect(defaultShouldFallback(new ImageTooLargeError("a", 20 * 1024 * 1024, 5 * 1024 * 1024))).toBe(true);
+      });
+
+      it("ContentBlockUnsupportedError → walks (different multimodal capabilities)", () => {
+        expect(defaultShouldFallback(new ContentBlockUnsupportedError("a", "pdf"))).toBe(true);
+      });
+
+      it("CreditExhaustionError → walks (fresh billing on another vendor)", () => {
+        expect(defaultShouldFallback(new CreditExhaustionError("anthropic", "credit_balance too low"))).toBe(true);
+      });
+
+      it("ProviderMalformed400Error → walks (provider-specific quirk; another provider may accept)", () => {
+        expect(defaultShouldFallback(new ProviderMalformed400Error("cerebras", "empty response body"))).toBe(true);
+      });
+    });
+
+    describe("abort-worthy error classes return false", () => {
+      it("AuthenticationError → aborts (wrong key does not fix on next provider)", () => {
+        expect(defaultShouldFallback(new AuthenticationError("openai", "invalid key"))).toBe(false);
+      });
+
+      it("generic BadRequestError → aborts (unclassified 400; likely identical across providers)", () => {
+        expect(defaultShouldFallback(new BadRequestError("a", "invalid parameter"))).toBe(false);
+      });
+
+      it("AdapterInternalError → aborts (port library's own bug; multiplying calls is waste)", () => {
+        expect(defaultShouldFallback(new AdapterInternalError("openai", "TypeError in adapter"))).toBe(false);
+      });
+
+      it("InvalidImageUrlError → aborts (universally invalid URL)", () => {
+        expect(defaultShouldFallback(new InvalidImageUrlError("a", "invalid://url", "no scheme"))).toBe(false);
+      });
+
+      it("ConfigError → aborts (contract-level violation)", () => {
+        expect(defaultShouldFallback(new ConfigError("env malformed"))).toBe(false);
+      });
+
+      it("ValidationError → aborts (schema failure; will fail identically on next provider)", () => {
+        expect(defaultShouldFallback(new ValidationError([], 3))).toBe(false);
+      });
+    });
+
+    describe("non-LLMPortError inputs", () => {
+      it("raw Error with 5xx status → walks (defensive; adapters should have wrapped)", () => {
+        const rawErr = Object.assign(new Error("upstream 502"), { status: 502 });
+        expect(defaultShouldFallback(rawErr)).toBe(true);
+      });
+
+      it("raw Error with 4xx status → aborts", () => {
+        const rawErr = Object.assign(new Error("bad request"), { status: 400 });
+        expect(defaultShouldFallback(rawErr)).toBe(false);
+      });
+
+      it("raw Error with no status → aborts", () => {
+        expect(defaultShouldFallback(new Error("plain error"))).toBe(false);
+      });
+
+      it("string → aborts", () => {
+        expect(defaultShouldFallback("something bad")).toBe(false);
+      });
+
+      it("null / undefined → aborts", () => {
+        expect(defaultShouldFallback(null)).toBe(false);
+        expect(defaultShouldFallback(undefined)).toBe(false);
+      });
+    });
+
+    it("the canonical walk-table extension pattern (BEPA-style consumer-specific class) works", () => {
+      class MyCustomWalkError extends LLMPortError {
+        public override readonly name: string = "MyCustomWalkError";
+      }
+      const extended = (err: unknown): boolean =>
+        defaultShouldFallback(err) || err instanceof MyCustomWalkError;
+
+      expect(extended(new MyCustomWalkError("custom"))).toBe(true);
+      expect(extended(new RateLimitError("a", "429", 1000))).toBe(true);
+      expect(extended(new AuthenticationError("a", "x"))).toBe(false);
+    });
+
+    it("the canonical walk-table narrowing pattern (abort on ContentPolicyViolationError) works", () => {
+      const narrowed = (err: unknown): boolean =>
+        err instanceof ContentPolicyViolationError ? false : defaultShouldFallback(err);
+
+      expect(narrowed(new ContentPolicyViolationError("a", "m"))).toBe(false);
+      expect(narrowed(new RateLimitError("a", "429", 1000))).toBe(true);
+      expect(narrowed(new AuthenticationError("a", "x"))).toBe(false);
     });
   });
 });

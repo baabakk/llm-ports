@@ -130,6 +130,7 @@ export {
   ContentPolicyViolationError,
   ContextWindowExceededError,
   CreditExhaustionError,
+  defaultShouldFallback,
   EmptyMessagesError,
   EmptyResponseError,
   errorMatchers,
