@@ -22,7 +22,10 @@
     "@llm-ports/capabilities": "0.1.0-alpha.13",
     "@llm-ports/consumer-type-check": "0.0.0",
     "@llm-ports/core": "0.1.0-alpha.13",
-    "@llm-ports/migrate": "0.1.0-alpha.20.1"
+    "@llm-ports/migrate": "0.1.0-alpha.20.1",
+    "@llm-ports/adapter-aider": "0.1.0-alpha.27",
+    "@llm-ports/adapter-codex": "0.1.0-alpha.27",
+    "@llm-ports/observability-contract": "0.1.0-alpha.27"
   },
   "changesets": [
     "abort-signal-options",
@@ -55,6 +58,7 @@
     "alpha-26-1-capabilities-internal-migration",
     "alpha-26-messages-canonical",
     "alpha-27-legacy-removal",
+    "alpha-28-observability-contract-foundation",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",

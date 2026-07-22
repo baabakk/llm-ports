@@ -7,5 +7,5 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@llm-ports/adapter-contract-tests", "@llm-ports/benchmarks"]
+  "ignore": ["@llm-ports/adapter-contract-tests", "@llm-ports/benchmarks", "@llm-ports/migrate"]
 }
