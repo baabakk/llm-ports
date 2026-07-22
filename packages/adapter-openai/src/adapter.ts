@@ -810,6 +810,11 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async runAgent(options: RunAgentOptions): Promise<AgentResult> {
       throwIfAborted(options.signal);
       validateMessages(options.messages);
+      // Defensive default: absent tools = no tools. The public options
+      // type declares tools as required, but consumers occasionally omit
+      // it (see toOpenAITools' equivalent guard). Alpha.28 pre-work
+      // TD-LLMP-17.
+      const toolsMap: Record<string, ToolDefinition> = options.tools ?? {};
       const start = Date.now();
       const maxSteps = options.maxSteps ?? 10;
       const conversation = [...options.messages];
@@ -828,7 +833,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           throwIfAborted(options.signal);
           stepsTaken = step + 1;
           const turnMessages = toOpenAIMessages(conversation);
-          const tools = toOpenAITools(options.tools);
+          const tools = toOpenAITools(toolsMap);
 
           const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
             modelId,
@@ -902,7 +907,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
           const toolResults: ContentBlock[] = [];
           for (const tc of calls) {
-            const def = options.tools[tc.function.name];
+            const def = toolsMap[tc.function.name];
             if (!def) {
               toolResults.push({
                 type: "tool_result",
@@ -1820,7 +1825,18 @@ interface OpenAITool {
   };
 }
 
-function toOpenAITools(tools: Record<string, ToolDefinition>): OpenAITool[] {
+function toOpenAITools(
+  tools: Record<string, ToolDefinition> | undefined | null,
+): OpenAITool[] {
+  // Defensive normalization: `runAgent`'s public options type declares
+  // `tools` as required, but consumers occasionally pass `undefined`
+  // explicitly or omit the field. Treating absent tools as "no tools" is
+  // the natural reading of the type signature (matches the behavior of
+  // `tools: {}` which already works). Added in alpha.28 pre-work
+  // (TD-LLMP-17). Prior to this defense, `Object.entries(undefined)`
+  // threw a raw TypeError which then got misclassified as
+  // ServiceUnavailableError, triggering futile chain-wide failover.
+  if (!tools) return [];
   return Object.entries(tools).map(([name, def]) => ({
     type: "function",
     function: {

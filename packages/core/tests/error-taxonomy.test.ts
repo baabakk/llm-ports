@@ -352,6 +352,42 @@ describe("alpha.18 typed-error taxonomy", () => {
       expect(wrapped).toBeInstanceOf(ProviderUnavailableError);
       expect((wrapped as ProviderUnavailableError).cause?.message).toBe("raw string");
     });
+
+    describe("TD-LLMP-17: local JS runtime errors → AdapterInternalError (not ServiceUnavailableError)", () => {
+      it("TypeError → AdapterInternalError (the ADW runAgent tools reproduction)", () => {
+        const localBug = new TypeError("Cannot convert undefined or null to object");
+        const wrapped = wrapProviderError("gptoss-cerebras", localBug);
+        expect(wrapped).toBeInstanceOf(AdapterInternalError);
+        expect(wrapped).not.toBeInstanceOf(ServiceUnavailableError);
+        expect(wrapped).not.toBeInstanceOf(ProviderUnavailableError);
+        expect((wrapped as AdapterInternalError).cause).toBe(localBug);
+        expect(wrapped.message).toContain("gptoss-cerebras");
+        expect(wrapped.message).toContain("Cannot convert undefined or null to object");
+      });
+
+      it("ReferenceError → AdapterInternalError", () => {
+        const localBug = new ReferenceError("foo is not defined");
+        const wrapped = wrapProviderError("openai", localBug);
+        expect(wrapped).toBeInstanceOf(AdapterInternalError);
+        expect((wrapped as AdapterInternalError).cause).toBe(localBug);
+      });
+
+      it("SyntaxError → AdapterInternalError", () => {
+        const localBug = new SyntaxError("Unexpected token");
+        const wrapped = wrapProviderError("anthropic", localBug);
+        expect(wrapped).toBeInstanceOf(AdapterInternalError);
+        expect((wrapped as AdapterInternalError).cause).toBe(localBug);
+      });
+
+      it("defaultShouldFallback correctly aborts on the wrapped AdapterInternalError", () => {
+        const localBug = new TypeError("adapter bug");
+        const wrapped = wrapProviderError("openai", localBug);
+        // The walk-table policy sees AdapterInternalError and aborts,
+        // preventing the futile chain-wide failover that TD-LLMP-17
+        // was filed to fix.
+        expect(defaultShouldFallback(wrapped)).toBe(false);
+      });
+    });
   });
 
   describe("alpha.28 new typed classes (TD-LLMP-17 + TD-LLMP-19)", () => {

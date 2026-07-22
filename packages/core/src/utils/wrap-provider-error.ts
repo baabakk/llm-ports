@@ -23,6 +23,7 @@
  */
 
 import {
+  AdapterInternalError,
   AuthenticationError,
   BadRequestError,
   ContentPolicyViolationError,
@@ -148,6 +149,23 @@ export function wrapProviderError(
   // by-name check as a safety net for any code paths still constructing
   // it without the base class.
   if (err instanceof Error && err.name === "ValidationError") return err;
+
+  // Local JS runtime errors (TypeError, ReferenceError, SyntaxError) are
+  // almost always adapter or registry bugs, not provider-side failures.
+  // Wrap them as AdapterInternalError so the walk-table policy aborts
+  // rather than triggering futile chain-wide failover. Added in alpha.28
+  // pre-work (TD-LLMP-17). Prior to this fix, a local TypeError from
+  // adapter code was misclassified as ServiceUnavailableError, causing
+  // the registry to walk the entire chain re-throwing the same identical
+  // local error at every hop while operators saw "service unavailable"
+  // and checked the provider status page.
+  if (
+    err instanceof TypeError ||
+    err instanceof ReferenceError ||
+    err instanceof SyntaxError
+  ) {
+    return new AdapterInternalError(alias, err.message, err);
+  }
 
   // Stringify non-Error inputs.
   if (!(err instanceof Error)) {
