@@ -1,0 +1,51 @@
+{
+  "name": "@llm-ports/adapter-aider",
+  "version": "0.1.0-alpha.28",
+  "description": "Subprocess-driven Aider CLI adapter for @llm-ports (Shape A passthrough governance).",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@llm-ports/core": "workspace:*",
+    "@llm-ports/observability-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@llm-ports/core": "workspace:*",
+    "@llm-ports/observability-contract": "workspace:*"
+  },
+  "keywords": [
+    "llm-ports",
+    "aider",
+    "adapter",
+    "subprocess",
+    "agent"
+  ],
+  "author": "Babak Abbaschian",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baabakk/llm-ports.git",
+    "directory": "packages/adapter-aider"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

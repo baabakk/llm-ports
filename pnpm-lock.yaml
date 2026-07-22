@@ -312,6 +312,15 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/adapter-aider:
+    devDependencies:
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
+      '@llm-ports/observability-contract':
+        specifier: workspace:*
+        version: link:../observability-contract
+
   packages/adapter-anthropic:
     dependencies:
       '@anthropic-ai/sdk':
