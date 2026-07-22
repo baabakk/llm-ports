@@ -393,7 +393,8 @@ async function spawnCodex(req: SpawnRequest): Promise<SpawnOutcome> {
 
 // ─── Option extraction + arg building ───────────────────────────────
 
-function extractCodexOptions(options: RunAgentOptions): CodexRunAgentOptions {
+/** @internal exported for tests, not part of the public API surface. */
+export function extractCodexOptions(options: RunAgentOptions): CodexRunAgentOptions {
   const bag = (options as unknown as { providerExtras?: { codex?: CodexRunAgentOptions } })
     .providerExtras?.codex;
   if (!bag || typeof bag.workingDirectory !== "string" || bag.workingDirectory.length === 0) {
@@ -405,7 +406,8 @@ function extractCodexOptions(options: RunAgentOptions): CodexRunAgentOptions {
   return bag;
 }
 
-function extractPromptFromMessages(options: RunAgentOptions): string {
+/** @internal exported for tests, not part of the public API surface. */
+export function extractPromptFromMessages(options: RunAgentOptions): string {
   // Concatenate every user message (in order) into a single prompt.
   // Codex takes one prompt argument; multi-turn context flows via
   // codex's own session state, not through our messages array.
@@ -418,7 +420,8 @@ function extractPromptFromMessages(options: RunAgentOptions): string {
     .join("\n\n");
 }
 
-interface BuildArgsInput {
+/** @internal exported for tests. */
+export interface BuildArgsInput {
   prompt: string;
   workingDirectory: string;
   model?: string;
@@ -427,7 +430,8 @@ interface BuildArgsInput {
   imageFiles?: string[];
 }
 
-function buildCodexArgs(input: BuildArgsInput): string[] {
+/** @internal exported for tests, not part of the public API surface. */
+export function buildCodexArgs(input: BuildArgsInput): string[] {
   const args: string[] = ["exec", "--json", "--cd", input.workingDirectory];
   if (input.model) {
     args.push("-m", input.model);
@@ -452,12 +456,14 @@ function buildCodexArgs(input: BuildArgsInput): string[] {
  * we treat it as an opaque record for observability + best-effort
  * extraction.
  */
-interface CodexJsonEvent {
+/** @internal exported for tests. */
+export interface CodexJsonEvent {
   [key: string]: unknown;
   type?: string;
 }
 
-function parseCodexJsonLines(stdout: string): CodexJsonEvent[] {
+/** @internal exported for tests, not part of the public API surface. */
+export function parseCodexJsonLines(stdout: string): CodexJsonEvent[] {
   const events: CodexJsonEvent[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -480,7 +486,8 @@ function parseCodexJsonLines(stdout: string): CodexJsonEvent[] {
  * completion-shaped event when the underlying provider returns one.
  * When absent, return zeros.
  */
-function deriveUsage(events: CodexJsonEvent[]): TokenUsage {
+/** @internal exported for tests, not part of the public API surface. */
+export function deriveUsage(events: CodexJsonEvent[]): TokenUsage {
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i]!;
     const usage = (ev as { usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } })
@@ -495,7 +502,8 @@ function deriveUsage(events: CodexJsonEvent[]): TokenUsage {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 }
 
-function deriveFinalText(events: CodexJsonEvent[]): string | null {
+/** @internal exported for tests, not part of the public API surface. */
+export function deriveFinalText(events: CodexJsonEvent[]): string | null {
   // Walk backwards looking for a final assistant message or a
   // response-complete-shaped event carrying `text` or `content`.
   for (let i = events.length - 1; i >= 0; i--) {
@@ -510,7 +518,8 @@ function deriveFinalText(events: CodexJsonEvent[]): string | null {
   return null;
 }
 
-function deriveModelId(events: CodexJsonEvent[]): string | null {
+/** @internal exported for tests, not part of the public API surface. */
+export function deriveModelId(events: CodexJsonEvent[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i]!;
     const model = (ev as { model?: string }).model;

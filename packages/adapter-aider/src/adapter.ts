@@ -401,7 +401,8 @@ async function spawnAider(req: SpawnRequest): Promise<SpawnOutcome> {
 
 // ─── Option extraction + arg building ───────────────────────────────
 
-function extractAiderOptions(options: RunAgentOptions): AiderRunAgentOptions {
+/** @internal exported for tests, not part of the public API surface. */
+export function extractAiderOptions(options: RunAgentOptions): AiderRunAgentOptions {
   const bag = (options as unknown as { providerExtras?: { aider?: AiderRunAgentOptions } })
     .providerExtras?.aider;
   if (!bag || typeof bag.workingDirectory !== "string" || bag.workingDirectory.length === 0) {
@@ -413,7 +414,8 @@ function extractAiderOptions(options: RunAgentOptions): AiderRunAgentOptions {
   return bag;
 }
 
-function extractPromptFromMessages(options: RunAgentOptions): string {
+/** @internal exported for tests, not part of the public API surface. */
+export function extractPromptFromMessages(options: RunAgentOptions): string {
   // Concatenate every user message (in order) into a single prompt.
   // Aider takes one --message argument; multi-turn context flows via
   // aider's own chat history, not through our messages array.
@@ -426,7 +428,8 @@ function extractPromptFromMessages(options: RunAgentOptions): string {
     .join("\n\n");
 }
 
-interface BuildArgsInput {
+/** @internal exported for tests. */
+export interface BuildArgsInput {
   prompt: string;
   files: string[];
   model?: string;
@@ -436,7 +439,8 @@ interface BuildArgsInput {
   mapTokens?: number;
 }
 
-function buildAiderArgs(input: BuildArgsInput): string[] {
+/** @internal exported for tests, not part of the public API surface. */
+export function buildAiderArgs(input: BuildArgsInput): string[] {
   const args: string[] = ["--no-stream"];
   if (input.yesAlways) {
     args.push("--yes-always");
