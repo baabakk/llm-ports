@@ -121,7 +121,65 @@ Not in alpha.29:
 - Changeset entry lives at `.changeset/alpha-29-runtime-instrumentation.md`. It lists every `@llm-ports/*` publishable package at `patch` per the same linked-bump pattern alpha.28 used.
 - All planning documents for this release live in this repo (`plans/`), not in the BEPA repo.
 
-## §7 Changelog
+## §7 Release completion checklist
+
+This checklist is durable — every future release plan doc should copy or reference it. Alpha.29's shipping day surfaced enough missing items post-publish that we now capture the workflow explicitly so nothing gets missed on later releases.
+
+Order matters. Run through in-file the day of release; check each box.
+
+### Verification (before writing the changeset entry)
+
+- [ ] `pnpm -r test` — full offline test suite green across the workspace.
+- [ ] `pnpm typecheck` — every package's `tsc --noEmit` clean. This is a separate gate from `pnpm test` and is easy to skip; running it caught a pre-existing legacy-field TD-worthy state during the alpha.29 verification pass. If a private/non-published package fails typecheck for pre-existing reasons unrelated to the release, file a TD entry linking to the failing files and proceed — don't block the release on pre-existing debt.
+- [ ] `pnpm lint` — 0 errors. Warnings are acceptable; errors are not. Fix new errors in the release before shipping.
+- [ ] Every new package has an in-package `README.md` covering: install, quick-start usage, options reference, non-goals, license.
+- [ ] Every new capability has a test (unit or integration).
+- [ ] Edge cases the compute path documents (e.g. HMAC key length minimums, canonicalization boundaries) have an error-path test.
+
+### Ship the code (changeset flow)
+
+- [ ] Changeset `.md` entry at `.changeset/<release-slug>.md`. Lists every publishable `@llm-ports/*` at the appropriate bump level (patch for pre-release cycle). Body has: what changed (one-sentence summary), new packages, new public API, fixed, changed / breaking (if any), verification, deferred / carve-outs.
+- [ ] If new packages are pre-baked at the target version, roll them back to the current version so `changeset version` produces a uniform bump across the linked group. (See alpha.28 and alpha.29 release logs for the alignment dance.)
+- [ ] `pnpm changeset status` — confirms every intended package is in the bump list.
+- [ ] `pnpm changeset version` — applies the bump. Verify every `@llm-ports/*` package.json arrived at the target version uniformly; verify migrate stays put; verify every touched CHANGELOG.md file has the new entry.
+- [ ] `pnpm -r --workspace-concurrency=1 build` — clean.
+- [ ] `pnpm -r --workspace-concurrency=1 test` — clean.
+- [ ] Commit release-mechanic files by explicit pattern: `.changeset packages/*/CHANGELOG.md packages/*/package.json examples/*/CHANGELOG.md examples/*/package.json`. Never use `git add -A` on release day.
+- [ ] `git push origin main` — all commits since the previous release land.
+- [ ] `pnpm release:alpha` — publishes to npm, retags the `alpha` dist-tag forward via `scripts/retag-alpha.mjs`.
+- [ ] Push all new git tags to origin explicitly by name (never `--tags` alone).
+- [ ] Verify a couple of packages via `npm view <pkg> dist-tags`. New scoped packages may show 404 from read replicas for a few minutes due to CDN lag; the retag script's `retagged: N, failed: 0` line is the definitive proof the publish landed.
+
+### Docs and consumer-facing material (before the release feels "done")
+
+- [ ] **Root `README.md`** — update the current-release banner (`📣 Current release`), the previous-release banner, and the coming-next banner. Update the Packages inventory table for any new package.
+- [ ] **Root `CHANGELOG.md`** — add a top-level release entry summarizing what changed across all packages (not just the per-package auto-generated entries). Cover: What changed, New, Fixed, Changed / breaking, Migration notes, Deferred, Known limitations.
+- [ ] **Root `MIGRATION.md`** — add a row to the release table.
+- [ ] **`docs/migration/alpha-N-to-alpha-M.md`** — create the migration page. Even for fully-additive releases, at minimum: install command, one-sentence summary of what changed, migration steps (bump peer deps, run `pnpm install`, `pnpm build`), and adoption / downgrade guidance.
+- [ ] **`docs/concepts/*.md`** — update any concept doc that discusses a surface the release changed. Alpha.29 case: the observability concept doc had to be extended to cover the new contract surface alongside the alpha.21 hooks.
+- [ ] **New concept docs** — new packages that touch a distinct concept area deserve their own concept page (in addition to the in-package README).
+- [ ] **`docs/.vitepress/config.ts` sidebar** — add entries for any new doc pages (concepts, migrations, guides). Sidebar entries drive discoverability; a doc without a sidebar entry is nearly invisible.
+- [ ] **`docs/getting-started.md` and `docs/guides/`** — spot-check for stale code samples that reference removed or renamed surfaces.
+- [ ] **In-package `README.md` files** — if a package's public API changed, update its README.
+
+### GitHub Release
+
+- [ ] `gh release create <tag> --title "<title>" --notes-file <path>` for the flagship package (typically `@llm-ports/core@<version>`). The notes body: link to the root CHANGELOG entry, link to the migration page, list any deferred items. For a multi-package wave, a single release on the core tag is usually enough; individual per-package releases are optional.
+
+### Downstream signals
+
+- [ ] Verify any downstream projects that consume `@llm-ports/*` peer deps get told to bump. For the alpha line the convention is: consumer projects update peer dep pins in their own repos on their own schedule.
+- [ ] File a follow-up TD entry for anything you discovered during the verification pass that's pre-existing (not caused by this release). Alpha.29 discovered the legacy-field cleanup in `packages/benchmarks/*` — filed as `TD-BENCHMARKS-LEGACY-INPUT-FIELDS`.
+
+### Plan doc close-out
+
+- [ ] Update the release's plan doc `§8 Changelog` with a `SHIPPED YYYY-MM-DD` entry linking to the commit sha of the version-bump commit and the `alpha` dist-tag URL on npm.
+
+---
+
+## §8 Changelog
 
 - **2026-08-10T17:14:09 -07:00** — Filed as approved plan. Scope frozen: the seven §2 sub-tasks plus the SalesCoach fix. Cross-repo consumer cutovers explicitly out of scope.
 - **2026-08-11 — Scope adjustment: Option A for §2.1 emission placement.** Discovered during Registry wiring (commit `a31b1ed`): the plan's original §2.1 model ("Registry wraps operations, adapters wrap attempts, `opCtx` flows through as a first-class argument") is impractical without a breaking change to `LLMPort`'s method signatures, because there's no clean channel to pass an `OperationContext` from the Registry into the adapter. The `withObservabilityContext(port, ctx)` helper only carries correlation IDs, not the mutable counter object. Rather than break the port API or double-emit at both layers, alpha.29 ships **Registry-only instrumentation**. The Registry's `walkChain` wraps every attempt with `withAttempt` using its own `OperationContext`. Adapters emit nothing at the operation or attempt level via the shared service. Consumers who bypass the Registry and import a raw adapter directly see no contract events. Filed as `TD-ALPHA29-ADAPTER-EMIT-DEFERRED` (see `TECH-DEBT.md`); adapter-level attempt emission is deferred to alpha.30 alongside streaming instrumentation, where the port-signature question can be revisited more holistically. **Consequence:** the §2.4 (provider cache normalization inside adapters) and §2.5 (agent step + tool events inside `runAgent`) sub-tasks also move to alpha.30 — they both require adapter-level emission. Alpha.29's shipped scope is now: shared service (§2.1 service; `withOperation`, `withAttempt`, retry/fallback helpers, manual escape hatch); Registry-only wire-up of the three non-streaming methods (§2.1 as revised); Registry-exclusive `retry_scheduled` + `fallback.selected` events (§2.2); prompt fingerprint compute at the Registry's `attempt.completed` (§2.3); `@llm-ports/eval@0.1.0` new package (§2.6); SalesCoach task-type fix (§2.7). Deferred: §2.4, §2.5, and the codex/aider inline-emission refactor.
+- **2026-08-11 — SHIPPED.** Published to npm at `0.1.0-alpha.29` via `e9a766a` (version-bump commit). 11 shipping `@llm-ports/*` packages + `@llm-ports/migrate` retagged forward on the `alpha` dist-tag. Tags pushed to `origin`. 89 new alpha.29 vitest cases across 4 new test files. Core suite 477/477 total; eval package 37/37; full workspace clean.
+- **2026-08-11 — Doc + verification gaps closed post-publish.** Verification pass added: `pnpm typecheck` (surfaced pre-existing legacy-field TD in `packages/benchmarks/*`, filed as `TD-BENCHMARKS-LEGACY-INPUT-FIELDS`; fixed `packages/consumer-type-check/src/budget-scope.ts`); `pnpm lint` (2 errors → 0). One missed edge test added (HMAC too-short-key error path). Doc gaps filled: root `README.md` release banners + packages table; root `CHANGELOG.md` with alpha.28 + alpha.29 release entries; root `MIGRATION.md` with alpha.28 + alpha.29 rows; new `docs/migration/alpha-27-to-alpha-28.md` and `docs/migration/alpha-28-to-alpha-29.md`; extended `docs/concepts/observability.md` to cover the alpha.28/.29 contract surface alongside the alpha.21 hooks; new `docs/concepts/evaluations.md`; VitePress sidebar updated. Added the release-completion checklist above (§7) as a durable artifact so future releases catch these same items at ship time rather than post-publish.

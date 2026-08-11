@@ -172,6 +172,10 @@ export function createSqliteEvaluationStore(
 
 function loadBetterSqlite3(): BetterSqlite3Constructor {
   try {
+    // Dynamic-load a CJS optional peer-dep. If the peer is not installed
+    // we want to catch the error and re-throw a helpful message; a static
+    // import would fail at module load time before the catch can run.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = require("better-sqlite3");
     return (mod?.default ?? mod) as BetterSqlite3Constructor;
   } catch (err) {

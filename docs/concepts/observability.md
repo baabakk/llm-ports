@@ -1,8 +1,163 @@
-# Observability hooks
+# Observability
+
+`llm-ports` exposes two coexisting observability surfaces. Both are opt-in; both fire from the same runtime paths. Pick whichever fits your consumer, or use them together.
+
+- **The observability contract surface (alpha.28+, primary).** Structured, versioned event stream defined by [`@llm-ports/observability-contract`](../../packages/observability-contract/README.md). Events flow through an `ObservabilitySink { emit(event) }` interface. Every event carries a full envelope (`spec_version`, `event_id`, timestamps, `source`, `operation_id`, `attempt_id`, correlation, W3C Trace Context). Lifecycle events at operation and attempt granularity, plus `retry_scheduled` / `fallback.selected` / `evaluation.recorded`. Registry-driven emission lives at `RegistryOptions.instrumentation`.
+
+- **The alpha.21 fire-and-forget hooks surface (still supported).** Five typed callbacks on `RegistryOptions.observability` — `onCost`, `onTokenUsage`, `onFallback`, `onValidationRetry`, `onCacheHit`. Simple, low-ceremony, aligned with OpenTelemetry `gen_ai.*` semconv naming where applicable. Suitable when you only need "did the call succeed and what did it cost."
+
+If you're new, start with the contract surface — it's the direction the library is heading, and the contract package can also be used by non-port callers (e.g. your own retry loops, subprocess-driven agents). The alpha.21 hooks stay stable for existing consumers and receive no deprecation timeline in this alpha line.
+
+---
+
+## Contract surface (alpha.28 + alpha.29)
+
+The contract ships as a standalone package with zero runtime dependency on `@llm-ports/core`. Any caller can construct conformant events using the package's `buildEvent` / `emitLifecycleEvent` helpers and forward them to any `ObservabilitySink`. The Registry uses this same shape when its `instrumentation` handle is configured.
+
+### Wiring the Registry (alpha.29)
+
+```ts
+import { createRegistryFromEnv } from "@llm-ports/core";
+import { createCollectingSink } from "@llm-ports/observability-contract";
+
+const sink = createCollectingSink();
+
+const registry = createRegistryFromEnv({
+  env: process.env as Record<string, string>,
+  adapters: { /* ... */ },
+  instrumentation: {
+    config: {
+      sink,
+      source: { library: "my-app", library_version: "1.0.0" },
+    },
+    // Optional: caller-plumbed correlation. When context.operation_id is set,
+    // withOperation reuses it instead of minting a fresh one — useful when
+    // an outer scope (e.g. a long-horizon agent run) wants to pin the
+    // operation_id across many Registry calls.
+    // context: { operation_id: "op-outer-123" },
+    //
+    // Optional: opt into prompt fingerprint compute at attempt.completed.
+    // Off by default per the contract's CapturePolicy default.
+    // fingerprint: { algorithm: "sha256", promptId: "triage-classifier" },
+  },
+});
+```
+
+With `instrumentation` supplied, every call on the Registry's `LLMPort` for `generateText`, `generateStructured`, and `runAgent` emits the full contract lifecycle:
+
+- `llm.operation.started` — before any provider attempt fires. Carries `task_type`, `method`, `provider_chain` (the intended fallback chain).
+- `llm.attempt.started` — before each provider attempt. Carries `provider_alias`, `model_id`, `attempt_number` (1-indexed), `is_retry`, `is_fallback`.
+- `llm.attempt.completed` — on a successful attempt. Carries `usage`, `cost`, `latency_ms`, `final_model_id`, optional `cache_stats`, `provider_response_id`, `request_fingerprint`.
+- `llm.attempt.failed` — on a failed attempt. Carries `error: ErrorInfo` (with `error_type`, `message`, `cause_category`, `retryable`, `fallback_worthy`) and `latency_ms`.
+- `llm.attempt.retry_scheduled` — between a failed attempt and the next same-provider retry. Carries `retry_reason`, `backoff_ms`, `next_attempt_number`. Registry-only.
+- `llm.fallback.selected` — between a failed attempt and the next chain-provider try. Carries `from_provider_alias`, `to_provider_alias`, `cause: FallbackCause`. Registry-only.
+- `llm.operation.completed` — on success. Carries `aggregate_usage`, `aggregate_cost`, `attempts_made`, `final_provider_alias`, `total_duration_ms`, optional `result_summary`.
+- `llm.operation.failed` — when the whole chain failed. Carries `error`, `attempts_made`, `providers_tried`, `total_duration_ms`.
+- `llm.operation.cancelled` — when an `AbortError` propagated. Carries `cancelled_at_attempt`, `providers_tried_before_cancel`, `total_duration_ms`.
+
+Every event across one operation shares a single `operation_id`. Every attempt within an operation gets its own `attempt_id`. Streams (`streamText`, `streamStructured`) are not instrumented yet; alpha.30 wires the streaming path.
+
+### The shared instrumentation service
+
+The Registry uses helpers from `@llm-ports/core`'s `instrumentation.ts` module. You can call the same helpers directly to instrument your own retry loops or subprocess-driven adapters:
+
+```ts
+import {
+  withOperation,
+  withAttempt,
+  type Instrumentation,
+} from "@llm-ports/core";
+
+const instrumentation: Instrumentation = {
+  config: { sink, source: { library: "my-loop", library_version: "0.1.0" } },
+};
+
+const result = await withOperation(
+  instrumentation,
+  { taskType: "triage", method: "runAgent", providerChain: ["openai"] },
+  async (opCtx) => {
+    return withAttempt(
+      opCtx,
+      { providerAlias: "openai", modelId: "gpt-4o" },
+      async () => {
+        const response = await myProviderCall();
+        return {
+          value: response,
+          usage: response.usage,
+          cost: response.cost,
+          modelId: response.model,
+        };
+      },
+    );
+  },
+);
+```
+
+`withOperation` owns the `operation.started` / `.completed` / `.failed` / `.cancelled` lifecycle (detecting `AbortError` → cancelled). `withAttempt` owns `attempt.started` / `.completed` / `.failed` and updates the operation-level counters so `operation.completed` fills in `aggregate_usage`, `final_provider_alias`, and friends correctly. Sink failures never break the primary path (sync throws swallowed; async rejections caught). When `instrumentation` is undefined, both wrappers no-op and just call the inner work.
+
+For streaming, use the manual escape hatch `startAttempt` / `completeAttempt` / `failAttempt`.
+
+### Prompt fingerprint
+
+Setting `Instrumentation.fingerprint` enables per-attempt request fingerprinting. The Registry computes a `RequestFingerprint` once per operation (before any attempt runs) and attaches it to every `attempt.completed` via the optional `AttemptCompletedData.request_fingerprint` field.
+
+```ts
+instrumentation: {
+  config: { sink, source },
+  fingerprint: {
+    algorithm: "sha256",         // or "hmac-sha256" (requires hmacKey ≥16 UTF-8 bytes)
+    promptId: "triage-classifier",
+    promptVersion: "v3.2",
+  },
+}
+```
+
+Two calls with identical messages + sampling params produce identical `message_hash` and `request_hash`. Different content produces different hashes. Useful for drift detection, template-version tracking, or A/B analysis across attempts.
+
+### Persistent evaluation storage (`@llm-ports/eval`)
+
+Evaluations arrive late — LLM-judge scores after the fact, human annotations hours later, dataset replays days later. The [`@llm-ports/eval`](../../packages/eval/README.md) package provides durable storage keyed on the contract's `EvaluationRef` shape.
+
+Bridge the store to the Registry's sink:
+
+```ts
+import { createSqliteEvaluationStore, toObservabilitySink } from "@llm-ports/eval";
+
+const store = createSqliteEvaluationStore({ dbPath: "./evaluations.db" });
+const sink = toObservabilitySink(store);
+
+const registry = createRegistryFromEnv({
+  env: process.env as Record<string, string>,
+  adapters: { /* ... */ },
+  instrumentation: {
+    config: { sink, source: { library: "my-app", library_version: "1.0.0" } },
+  },
+});
+```
+
+Only `evaluation.recorded` events land in the store; lifecycle events are silently ignored. For BOTH lifecycle capture AND evaluation storage, compose a fan-out sink yourself.
+
+See [`docs/concepts/evaluations.md`](./evaluations.md) for the full write / query surface.
+
+### Deferred to alpha.30
+
+- **Adapter-level operation/attempt emission.** Direct-adapter callers (bypassing the Registry) see no contract events yet.
+- **Agent step + tool events** (`agent.step.*`, `agent.tool.*`) inside `runAgent`.
+- **Provider cache normalization** (`CacheStats.provider_cache`) across in-process adapters.
+- **Streaming instrumentation** for `streamText` / `streamStructured`.
+- **OpenTelemetry semconv adapter** (`@llm-ports/telemetry-otel`).
+
+Filed in the repo's `TECH-DEBT.md` as `TD-ALPHA29-ADAPTER-EMIT-DEFERRED` and `TD-ALPHA29-AGENT-STEP-EVENTS-DEFERRED`.
+
+---
+
+## Alpha.21 fire-and-forget hooks
 
 `llm-ports` exposes five fire-and-forget observability hooks on `RegistryOptions.observability` (alpha.21+). Event shapes align with the [OpenTelemetry `gen_ai.*` semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) so downstream pipelines (Honeycomb, Datadog, OTel Collector, custom OTLP exporters) can map them onto spans and metrics without re-deriving fields.
 
 The hooks complement the existing per-adapter `onRetry` hook (alpha.17+). `onRetry` covers "the adapter decided to retry an in-flight request"; the Registry-level hooks below cover "the Registry decided to move on" and "a successful call is interesting to observe."
+
+Both the alpha.21 hooks and the alpha.28/.29 contract surface can coexist on the same Registry — they observe overlapping runtime paths and are independent choices about how to receive the data.
 
 ## Quick start
 

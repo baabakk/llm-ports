@@ -12,6 +12,15 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ## llm-ports
 
+### TD-BENCHMARKS-LEGACY-INPUT-FIELDS: `packages/benchmarks/` still uses alpha.27-removed `prompt` / `instructions` fields
+
+- **Severity:** Low
+- **Status:** Open
+- **Files:** `packages/benchmarks/src/latency.bench.ts`, `packages/benchmarks/src/live/anthropic.test.ts`, `packages/benchmarks/src/live/capabilities.test.ts`, `packages/benchmarks/src/live/ollama.test.ts`, `packages/benchmarks/src/live/openai.test.ts`, `packages/benchmarks/src/live/vercel.test.ts`, `packages/benchmarks/src/memory.bench.ts`
+- **Problem:** Alpha.27 removed the legacy `{ instructions, prompt }` input shape from every generation-method options interface (see the alpha.27 changeset). The `benchmarks` package was not migrated at the time; ~30-50 call sites across the files listed above still pass `prompt: "..."` and `instructions: "..."` and TypeScript refuses them under `tsc --noEmit`. Discovered during the alpha.29 release-verification pass when `pnpm typecheck` was run for the first time in a while.
+- **Impact:** `pnpm typecheck` fails workspace-wide on `packages/benchmarks/`. `benchmarks` is `private: true` (not published), and every failing file is under `src/live/*.test.ts` or a `.bench.ts` — both offline test discovery and the offline `pnpm test` suite skip these, so nothing at runtime is broken. The impact is one broken typecheck gate + a small blocker for anyone wanting to run the benchmarks with `RUN_LIVE_TESTS=1`.
+- **Resolution path:** Mechanical migration to the `messages: LLMMessage[]` shape. Roughly: `prompt: "text"` → `messages: [{ role: "user", content: "text" }]`; `instructions: "text"` alongside a `prompt` → prepend a `{ role: "system", content: "text" }` message. A ~30-minute pass. Sibling packages already migrated: `consumer-type-check/src/budget-scope.ts` (fixed 2026-08-11 during this same verification pass; see `packages/consumer-type-check/src/budget-scope.ts`).
+
 ### TD-ALPHA29-ADAPTER-EMIT-DEFERRED: adapter-level contract event emission deferred to alpha.30
 
 - **Severity:** Medium

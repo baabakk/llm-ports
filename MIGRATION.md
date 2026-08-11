@@ -6,6 +6,8 @@
 
 | Release | Date | Headline | Migration impact | Details |
 |---|---|---|---|---|
+| alpha.29 | 2026-08-11 | Runtime observability instrumentation, prompt fingerprint compute, `@llm-ports/eval` new package, SalesCoach task-type case-mismatch fix | None — additive only. Bump peer deps. Opting into the new observability surface is optional. | [docs/migration/alpha-28-to-alpha-29.md](docs/migration/alpha-28-to-alpha-29.md) |
+| alpha.28 | 2026-07-22 | Observability contract foundation (`@llm-ports/observability-contract`), scoped-port wrapper, 3 new typed error classes (`CreditExhaustionError`, `ProviderMalformed400Error`, `AdapterInternalError`), 2 new subprocess adapters (`adapter-codex`, `adapter-aider`) | None — additive only. Bump peer deps. | [docs/migration/alpha-27-to-alpha-28.md](docs/migration/alpha-27-to-alpha-28.md) |
 | alpha.20.1 | 2026-06-15 | Migration safeguards (this file + per-release pages + codemod + postinstall banner) | None — additive only | (no code change) |
 | alpha.20 | 2026-06-13 | `BudgetScope` + minute / session gating grammar | **TypeScript-only**: `BudgetLimit.requestsPerHour` is now optional. One-line fix or codemod. Runtime behavior identical. | [docs/migration/alpha-19-to-alpha-20.md](docs/migration/alpha-19-to-alpha-20.md) |
 | alpha.19.1 | 2026-06-12 | CacheControl behavior end-to-end (close-out of alpha.19 promise) | None — additive only | (no migration page needed) |

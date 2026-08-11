@@ -13,11 +13,11 @@ Multi-provider routing • fallback chains • USD cost gating • capability fa
 ![Status](https://img.shields.io/badge/status-pre--release-orange)
 ![TypeScript](https://img.shields.io/badge/TypeScript-first-blue)
 
-> **📣 Current release: `0.1.0-alpha.27`** — the `instructions?` and `prompt?` fields are **removed** from the four generation methods (`generateText`, `generateStructured`, `streamText`, `streamStructured`). `messages: LLMMessage[]` is required. Consumers who migrated during the alpha.26 window have nothing to do. Consumers who didn't: TypeScript now errors; follow the [alpha.25 → alpha.26 migration guide](./docs/migration/alpha-25-to-alpha-26.md) then bump. Also new: `NonContiguousSystemError` (Anthropic + Google throw when system-role appears mid-conversation) and `warnDeprecated` (generalized deprecation infra). See the [alpha.26 → alpha.27 migration guide](./docs/migration/alpha-26-to-alpha-27.md).
+> **📣 Current release: `0.1.0-alpha.29`** — runtime observability instrumentation. The Registry now emits the full alpha.28 observability contract lifecycle (`llm.operation.started` / `.completed` / `.failed` / `.cancelled`, per-attempt `.started` / `.completed` / `.failed`, `llm.attempt.retry_scheduled`, `llm.fallback.selected`) for every `generateText` / `generateStructured` / `runAgent` call when `RegistryOptions.instrumentation` is configured. Opt-in prompt fingerprint at `attempt.completed` (`Instrumentation.fingerprint`, off by default). New package [`@llm-ports/eval`](./packages/eval) — durable storage for post-hoc evaluations, in-memory + SQLite backends. Fully additive: existing consumers see identical behavior when they don't opt into the new fields. See the [alpha.28 → alpha.29 migration guide](./docs/migration/alpha-28-to-alpha-29.md).
 >
-> **Previous release: `0.1.0-alpha.26`** — canonical `messages: LLMMessage[]` input introduced with a one-cycle deprecation window; migration shim (`toMessages`) + helpers (`sys`, `usr`) landed. Hotfix `0.1.0-alpha.26.1` migrated `@llm-ports/capabilities` factories internally.
+> **Previous release: `0.1.0-alpha.28`** — observability contract foundation. Ships the standalone `@llm-ports/observability-contract` package with the event envelope, correlation model, lifecycle event catalog, error info + cause categories, cache stats, request fingerprint + canonicalization spec, evaluation refs, capture policy, and W3C Trace Context — for callers to construct and emit conformant events. Also new: `withObservabilityContext(port, ctx)` scoped-port wrapper in `@llm-ports/core`, three new typed error classes (`CreditExhaustionError`, `ProviderMalformed400Error`, `AdapterInternalError`), and two subprocess-driven agent adapters `@llm-ports/adapter-codex` and `@llm-ports/adapter-aider`.
 >
-> **Coming next: `alpha.28`** — "Reliability + observability polish". Four-consumer synthesis (ADW, SalesCoach, BEPA, Dramma). Highest-leverage: per-attempt deadline triggers automatic failover via `AttemptTimeoutError`. See [planning discussion #64](https://github.com/baabakk/llm-ports/discussions/64).
+> **Coming next: `alpha.30`** — streaming instrumentation, adapter-level attempt emission (`TD-ALPHA29-ADAPTER-EMIT-DEFERRED`), agent step + tool events (`TD-ALPHA29-AGENT-STEP-EVENTS-DEFERRED`), provider cache normalization across in-process adapters, and the OpenTelemetry semconv adapter (`@llm-ports/telemetry-otel`).
 
 ---
 
@@ -206,15 +206,17 @@ The key shift:
 
 | Package | Purpose |
 |--------|---------|
-| `@llm-ports/core` | Port interfaces, registry, routing, cost gating, validation strategies, content blocks |
+| `@llm-ports/core` | Port interfaces, registry, routing, cost gating, validation strategies, content blocks, shared instrumentation service |
 | `@llm-ports/capabilities` | Reusable LLM operation factories |
+| `@llm-ports/observability-contract` | Standalone data contract for observability: event envelope, correlation, lifecycle events, error info, cache stats, request fingerprint + canonicalization, evaluation refs, W3C Trace Context. Zero peer dep on core. |
+| `@llm-ports/eval` | Durable storage for post-hoc evaluations (LLM-judge scores, human annotations, rule-based verdicts). In-memory store (default, no deps) + SQLite backend (opt-in peer-dep on `better-sqlite3`). |
 | `@llm-ports/adapter-openai` | OpenAI SDK adapter with `baseURL` support for compatible providers |
 | `@llm-ports/adapter-anthropic` | Anthropic SDK adapter |
 | `@llm-ports/adapter-google` | Google Gemini native adapter (@google/genai SDK) — full multimodal, bundled pricing |
 | `@llm-ports/adapter-ollama` | Ollama native adapter with model management |
 | `@llm-ports/adapter-vercel` | Vercel AI SDK adapter for migration and compatibility |
-
-> `@llm-ports/observability` (quality tracking hooks, sinks, deterministic edit-diff helpers) is planned for v0.2.
+| `@llm-ports/adapter-codex` | Subprocess-driven adapter for OpenAI Codex CLI. Shape A (passthrough governance). |
+| `@llm-ports/adapter-aider` | Subprocess-driven adapter for Aider CLI. Shape A (passthrough governance). |
 
 ---
 

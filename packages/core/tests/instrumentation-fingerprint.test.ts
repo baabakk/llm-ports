@@ -309,6 +309,34 @@ describe("Registry fingerprint — HMAC variant", () => {
       | undefined;
     expect(completed!.data.request_fingerprint.hash_algorithm).toBe("hmac-sha256");
   });
+
+  it("throws when hmac-sha256 hmacKey is shorter than the contract's 16-byte minimum", async () => {
+    const sink = createCollectingSink();
+    const instr: Instrumentation = {
+      config: { sink, source: testSource },
+      fingerprint: {
+        algorithm: "hmac-sha256",
+        hmacKey: "short", // 5 UTF-8 bytes — below contract minimum
+      },
+    };
+    const registry = createRegistryFromEnv({
+      env: {
+        LLM_PROVIDER_FAST: "anthropic|claude-haiku-4-5|req:100/hour",
+        LLM_TASK_ROUTE_TRIAGE: "fast",
+      },
+      adapters: { anthropic: goodA },
+      instrumentation: instr,
+    });
+    // The compute helper throws inside maybeComputeFingerprint before any
+    // attempt runs; the Registry surfaces it to the caller (contract's
+    // "no silent short keys" rule).
+    await expect(
+      registry.getPort().generateText({
+        taskType: "triage",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    ).rejects.toBeDefined();
+  });
 });
 
 // ─── Reference: goodB in a second-route smoke test ──────────────────

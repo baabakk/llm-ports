@@ -66,23 +66,23 @@ declare const port: LLMPort;
 async function callEvery(): Promise<void> {
   const textOpts: GenerateTextOptions = {
     taskType: "triage",
-    prompt: "hi",
+    messages: [{ role: "user", content: "hi" }],
     budgetScope: ref,
   };
   const structOpts: GenerateStructuredOptions<{ ok: boolean }> = {
     taskType: "triage",
-    prompt: "hi",
+    messages: [{ role: "user", content: "hi" }],
     schema: { _output: { ok: true } } as unknown as GenerateStructuredOptions<{ ok: boolean }>["schema"],
     budgetScope: { scope: "session", scopeId: "cs-001" },
   };
   const streamTextOpts: StreamTextOptions = {
     taskType: "x",
-    prompt: "hi",
+    messages: [{ role: "user", content: "hi" }],
     budgetScope: { scope: "agent", scopeId: "research-agent-7" },
   };
   const streamStructOpts: StreamStructuredOptions<{ ok: boolean }> = {
     taskType: "x",
-    prompt: "hi",
+    messages: [{ role: "user", content: "hi" }],
     schema: structOpts.schema,
     budgetScope: { scope: "customer", scopeId: "cust-42" },
   };

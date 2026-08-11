@@ -64,7 +64,8 @@ export default defineConfig({
             { text: "Content Blocks", link: "/concepts/content-blocks" },
             { text: "Cache Control", link: "/concepts/cache" },
             { text: "Validation Strategies", link: "/concepts/validation-strategies" },
-            { text: "Observability Hooks", link: "/concepts/observability" },
+            { text: "Observability", link: "/concepts/observability" },
+            { text: "Evaluations", link: "/concepts/evaluations" },
             { text: "Capability Detection", link: "/concepts/capability-detection" },
           ],
         },
@@ -124,6 +125,8 @@ export default defineConfig({
             { text: "alpha.24 → alpha.25 (additive)", link: "/migration/alpha-24-to-alpha-25" },
             { text: "alpha.25 → alpha.26 (BREAKING deprecation)", link: "/migration/alpha-25-to-alpha-26" },
             { text: "alpha.26 → alpha.27 (⚠ BREAKING removal)", link: "/migration/alpha-26-to-alpha-27" },
+            { text: "alpha.27 → alpha.28 (additive)", link: "/migration/alpha-27-to-alpha-28" },
+            { text: "alpha.28 → alpha.29 (additive)", link: "/migration/alpha-28-to-alpha-29" },
           ],
         },
         {

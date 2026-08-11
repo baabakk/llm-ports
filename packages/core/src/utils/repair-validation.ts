@@ -216,6 +216,7 @@ function normalizeUnicodeConfusables(s: string): string {
     // Spaces: U+00A0 non-breaking + U+2007 figure + U+2008 punctuation +
     // U+2009 thin + U+202F narrow-no-break + U+205F medium-math + U+3000
     // ideographic → ASCII space
+    // eslint-disable-next-line no-irregular-whitespace -- intentional match
     .replace(/[      　]/g, " ");
 }
 
