@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-codex",
-  "version": "0.1.0-alpha.28",
+  "version": "0.1.0-alpha.29",
   "description": "Subprocess-driven adapter for OpenAI Codex CLI. Runs `codex exec --json` as a subprocess, parses its JSON event stream, and emits @llm-ports contract events. Shape A: passthrough governance (operator supplies OpenAI credentials to codex directly; @llm-ports does NOT route the LLM traffic).",
   "license": "MIT",
   "author": "Babak Abbaschian",

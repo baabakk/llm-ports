@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/observability-contract",
-  "version": "0.1.0-alpha.28",
+  "version": "0.1.0-alpha.29",
   "description": "Standalone data contract for LLM observability: event envelope, correlation model, lifecycle events, error info, cache stats, prompt fingerprint, evaluation refs, capture policy, W3C Trace Context + Baggage. Zero runtime dependencies on @llm-ports/core so non-port callers can emit conformant events without pulling in the registry.",
   "license": "MIT",
   "author": "Babak Abbaschian",

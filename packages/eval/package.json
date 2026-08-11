@@ -28,7 +28,9 @@
     "better-sqlite3": ">=11 <13"
   },
   "peerDependenciesMeta": {
-    "better-sqlite3": { "optional": true }
+    "better-sqlite3": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@llm-ports/observability-contract": "workspace:*",
