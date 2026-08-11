@@ -238,3 +238,22 @@ export {
   getObservabilityContext,
   withObservabilityContext,
 } from "./observability-context.js";
+
+// ─── Observability instrumentation service (alpha.29+, plans/alpha.29 §2.1) ─
+export {
+  completeAttempt,
+  emitFallbackSelected,
+  emitRetryScheduled,
+  failAttempt,
+  startAttempt,
+  withAttempt,
+  withOperation,
+} from "./instrumentation.js";
+export type {
+  AttemptStartParams,
+  AttemptWorkResult,
+  Instrumentation,
+  ManualAttemptHandle,
+  OperationContext,
+  OperationStartParams,
+} from "./instrumentation.js";
