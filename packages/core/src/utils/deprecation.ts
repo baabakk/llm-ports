@@ -98,3 +98,23 @@ export function warnDeprecated(state: WarningState, details: DeprecationDetails)
   if (details.migrationUrl) parts.push(`See ${details.migrationUrl}.`);
   (state.handler ?? console.warn.bind(console))(parts.join(" "));
 }
+
+/**
+ * Fire a generic warn-once message through a shared WarningState.
+ *
+ * Sister function to `warnDeprecated`, sharing the same dedup +
+ * suppression + handler infrastructure but without the DEPRECATED
+ * framing. Use for non-deprecation runtime warnings the library
+ * wants to surface exactly once per unique `key` per WarningState.
+ *
+ * Introduced in alpha.29 for the Registry's unknown-task-type
+ * fallback warning (SalesCoach TD-LLM-TASKTYPE-CASE-MISMATCH-SILENT-
+ * GENERAL-FALLBACK). The `key` is the dedup handle; the `message`
+ * is the fully-formatted body written to the handler.
+ */
+export function warnOnce(state: WarningState, key: string, message: string): void {
+  if (state.suppressed) return;
+  if (state.warned.has(key)) return;
+  state.warned.add(key);
+  (state.handler ?? console.warn.bind(console))(message);
+}

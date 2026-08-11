@@ -59,3 +59,22 @@ export function getTaskConfig<T extends Record<string, TaskConfig>>(
 ): TaskConfig | undefined {
   return declared.__meta[taskName];
 }
+
+/**
+ * Canonicalize a caller-supplied `taskType` for lookup.
+ *
+ * The env-var parser (`loadRegistryConfig`) lowercases and hyphenates
+ * task names (`LLM_TASK_ROUTE_STRUCTURED_OUTPUT` → key `structured-output`).
+ * The Registry uses this same transform on the caller-supplied `taskType`
+ * before the table lookup so `"STRUCTURED_OUTPUT"`, `"Structured_Output"`,
+ * `"structured-output"` all resolve to the same route.
+ *
+ * Without this, callers passing SCREAMING_SNAKE fell silently through
+ * to the `"general"` chain — a footgun surfaced by SalesCoach in
+ * `TD-LLM-TASKTYPE-CASE-MISMATCH-SILENT-GENERAL-FALLBACK` (2026-08-10).
+ *
+ * Idempotent: `normalizeTaskType(normalizeTaskType(x)) === normalizeTaskType(x)`.
+ */
+export function normalizeTaskType(taskType: string): string {
+  return taskType.toLowerCase().replace(/_/g, "-");
+}

@@ -86,6 +86,7 @@ export {
 export {
   declareTasks,
   getTaskConfig,
+  normalizeTaskType,
   type TaskConfig,
 } from "./registry/tasks.js";
 
@@ -229,9 +230,9 @@ export { throwIfAborted } from "./utils/abort.js";
 export { toMessages, sys, usr } from "./utils/to-messages.js";
 export { resolveCanonicalMessages } from "./utils/resolve-messages.js";
 
-// ─── Generic deprecation-warning surface (alpha.27+) ─────────────────
+// ─── Generic deprecation-warning surface (alpha.27+, warnOnce alpha.29+) ─
 export type { WarningState, DeprecationDetails } from "./utils/deprecation.js";
-export { createWarningState, warnDeprecated } from "./utils/deprecation.js";
+export { createWarningState, warnDeprecated, warnOnce } from "./utils/deprecation.js";
 
 // ─── Observability scoped-port wrapper (alpha.28+, Plan 58 §4.2) ─────
 export {

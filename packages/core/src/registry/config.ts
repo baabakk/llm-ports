@@ -25,6 +25,7 @@
 
 import type { BudgetLimit, CostLimit, SessionGrainLimits } from "../budget/types.js";
 import { ConfigError } from "../errors.js";
+import { normalizeTaskType } from "./tasks.js";
 
 export interface ProviderEntry {
   /** User-chosen alias (lowercase, derived from env var name). */
@@ -82,7 +83,7 @@ export function parseRegistryConfig(opts: ParseConfigOptions = {}): RegistryConf
         ...(sessionLimits ? { sessionLimits } : {}),
       };
     } else if (key.startsWith(`${prefix}TASK_ROUTE_`)) {
-      const taskName = key.slice(`${prefix}TASK_ROUTE_`.length).toLowerCase().replace(/_/g, "-");
+      const taskName = normalizeTaskType(key.slice(`${prefix}TASK_ROUTE_`.length));
       const chain = value
         .split(",")
         .map((s) => s.trim())

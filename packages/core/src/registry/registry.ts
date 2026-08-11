@@ -61,11 +61,12 @@ import {
   NoProvidersAvailableError,
   ProviderUnavailableError,
 } from "../errors.js";
-import { createWarningState, type WarningState } from "../utils/deprecation.js";
+import { createWarningState, warnOnce, type WarningState } from "../utils/deprecation.js";
 import type { LLMMessage } from "../ports/llm-port.js";
 import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
 import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
+import { normalizeTaskType } from "./tasks.js";
 
 // ─── Adapter contract used internally by the registry ────────────────
 
@@ -289,13 +290,45 @@ export class Registry {
     return `${alias}|${budgetScope.scope}:${budgetScope.scopeId}`;
   }
 
+  /**
+   * Resolve the fallback chain for a caller-supplied `taskType`.
+   *
+   * Applies the same lowercase-and-hyphenate normalization the env-var
+   * parser uses at load time (so `"STRUCTURED_OUTPUT"`,
+   * `"Structured_Output"`, and `"structured-output"` all resolve to the
+   * same route). When the normalized key isn't in the table, falls back
+   * to `"general"` — same behavior as pre-alpha.29 — but fires a
+   * warn-once through the shared WarningState so silent config drift
+   * becomes visible.
+   *
+   * Introduced alpha.29 for TD-LLM-TASKTYPE-CASE-MISMATCH-SILENT-GENERAL-
+   * FALLBACK (SalesCoach, 2026-08-10).
+   */
+  private resolveTaskChain(taskType: string): string[] {
+    const normalized = normalizeTaskType(taskType);
+    const direct = this.config.taskRoutes[normalized];
+    if (direct) return direct;
+
+    const general = this.config.taskRoutes["general"];
+    if (general) {
+      const known = Object.keys(this.config.taskRoutes);
+      warnOnce(
+        this.warningState,
+        `unknown-task-type:${normalized}`,
+        `[llm-ports] Unknown task type "${taskType}" (normalized "${normalized}") — falling back to the "general" chain. Configured routes: ${known.length === 0 ? "(none)" : known.join(", ")}. Add LLM_TASK_ROUTE_${normalized.toUpperCase().replace(/-/g, "_")}=... to your environment, or pass a task type that matches a configured route.`,
+      );
+      return general;
+    }
+    return [];
+  }
+
   /** Resolve the first usable provider in the task's fallback chain. */
   async selectModel(
     taskType: string,
     priority: 0 | 1 | 2 | 3 = 2,
     budgetScope?: BudgetScopeRef,
   ): Promise<ModelSelection> {
-    const chain = this.config.taskRoutes[taskType] ?? this.config.taskRoutes["general"] ?? [];
+    const chain = this.resolveTaskChain(taskType);
     if (chain.length === 0) {
       throw new NoProvidersAvailableError(taskType, [], {
         general: `No fallback chain configured for task "${taskType}" or "general"`,
@@ -421,7 +454,7 @@ export class Registry {
     priority: 0 | 1 | 2 | 3 = 2,
     budgetScope?: BudgetScopeRef,
   ): Promise<ModelSelection[]> {
-    const chain = this.config.taskRoutes[taskType] ?? this.config.taskRoutes["general"] ?? [];
+    const chain = this.resolveTaskChain(taskType);
     if (chain.length === 0) {
       throw new NoProvidersAvailableError(taskType, [], {
         general: `No fallback chain configured for task "${taskType}" or "general"`,
