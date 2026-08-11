@@ -1,0 +1,57 @@
+{
+  "name": "@llm-ports/eval",
+  "version": "0.1.0-alpha.29",
+  "description": "Durable storage for post-hoc evaluations (LLM-judge scores, human annotations, rule-based verdicts) keyed on the @llm-ports/observability-contract EvaluationRef shape. Ships an in-memory store (default) and an opt-in SQLite writer (peer-dep on better-sqlite3).",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@llm-ports/observability-contract": "workspace:*",
+    "better-sqlite3": ">=11 <13"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": { "optional": true }
+  },
+  "devDependencies": {
+    "@llm-ports/observability-contract": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.4.1"
+  },
+  "keywords": [
+    "llm-ports",
+    "evaluation",
+    "observability",
+    "llm-judge",
+    "sqlite",
+    "eval-storage",
+    "post-hoc-scoring"
+  ],
+  "author": "Babak Abbaschian",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baabakk/llm-ports.git",
+    "directory": "packages/eval"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
