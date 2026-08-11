@@ -67,6 +67,14 @@ import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
 import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
 import { normalizeTaskType } from "./tasks.js";
+import {
+  emitFallbackSelected,
+  withAttempt,
+  withOperation,
+  type Instrumentation,
+  type OperationContext,
+} from "../instrumentation.js";
+import type { CostUsage, TokenUsage } from "@llm-ports/observability-contract";
 
 // ─── Adapter contract used internally by the registry ────────────────
 
@@ -160,6 +168,22 @@ export interface RegistryOptions {
    */
   observability?: ObservabilityHooks;
   /**
+   * Alpha.29 shared instrumentation service handle. When supplied, every
+   * `generateText` / `generateStructured` / `runAgent` call on the Registry's
+   * port emits the contract lifecycle events (`llm.operation.started`,
+   * `llm.attempt.started`, `.completed` / `.failed`, `llm.operation.*`) via
+   * the shared service in `packages/core/src/instrumentation.ts`. Every
+   * fallback advancement also emits `llm.fallback.selected`. Streaming
+   * methods are not yet instrumented (alpha.30 handles the streaming path).
+   *
+   * When omitted, no contract events fire — the alpha.21 fire-and-forget
+   * hooks continue to work as before. Both surfaces coexist during the
+   * observability contract's rollout.
+   *
+   * Added in `0.1.0-alpha.29`.
+   */
+  instrumentation?: Instrumentation;
+  /**
    * Per-attempt timeout, in milliseconds. When set, every provider attempt
    * within `walkChain` is wrapped in an `AbortController` that fires after
    * this many milliseconds. The abort propagates to the adapter's HTTP
@@ -239,6 +263,12 @@ export class Registry {
   public readonly perAttemptTimeoutMs: number | undefined;
   /** Deprecation-warning dedup state for the alpha.26+ legacy `{instructions, prompt}` path. */
   public readonly warningState: WarningState;
+  /**
+   * Alpha.29 shared instrumentation service handle. Undefined when the
+   * caller did not opt into observability at Registry construction.
+   * Read by `RegistryPort` methods and threaded through `walkChain`.
+   */
+  public readonly instrumentation: Instrumentation | undefined;
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -256,6 +286,7 @@ export class Registry {
       suppressed: opts.suppressDeprecationWarnings ?? false,
       ...(opts.deprecationWarningHandler ? { handler: opts.deprecationWarningHandler } : {}),
     });
+    this.instrumentation = opts.instrumentation;
     this.validateConfig();
   }
 
@@ -303,8 +334,11 @@ export class Registry {
    *
    * Introduced alpha.29 for TD-LLM-TASKTYPE-CASE-MISMATCH-SILENT-GENERAL-
    * FALLBACK (SalesCoach, 2026-08-10).
+   *
+   * Public so `RegistryPort` can read the intended `provider_chain` for
+   * emission on `llm.operation.started`.
    */
-  private resolveTaskChain(taskType: string): string[] {
+  resolveTaskChain(taskType: string): string[] {
     const normalized = normalizeTaskType(taskType);
     const direct = this.config.taskRoutes[normalized];
     if (direct) return direct;
@@ -698,6 +732,22 @@ export function createRegistryFromEnv(opts: RegistryOptions): Registry {
  * `NoProvidersAvailableError` whose `reasons` map carries the per-alias
  * fallback error for diagnostics.
  */
+/**
+ * Metrics an alpha.29 attempt exposes to the shared instrumentation
+ * service. `walkChain` calls the caller-supplied `extractMetrics` on
+ * every successful attempt result to fill in `attempt.completed`'s
+ * usage + cost + final_model_id + optional provider_response_id.
+ *
+ * Streams don't provide metrics at return time, so streaming methods
+ * do not opt into instrumented `walkChain` — alpha.30 wires them.
+ */
+interface AttemptMetrics {
+  usage: TokenUsage;
+  cost: CostUsage;
+  modelId: string;
+  providerResponseId?: string;
+}
+
 async function walkChain<R>(
   registry: Registry,
   taskType: string,
@@ -713,7 +763,35 @@ async function walkChain<R>(
     | "streamStructured"
     | "runAgent" = "generateText",
   refs?: Record<string, ArtifactRef>,
+  opCtx?: OperationContext,
+  extractMetrics?: (r: R) => AttemptMetrics,
 ): Promise<R> {
+  // ─── Helper: run one attempt, optionally wrapped in withAttempt ────
+  const runAttempt = async (sel: ModelSelection, isFallback: boolean): Promise<R> => {
+    if (!opCtx || !extractMetrics) {
+      return attempt(sel);
+    }
+    return withAttempt(
+      opCtx,
+      {
+        providerAlias: sel.alias,
+        modelId: sel.modelId,
+        ...(isFallback ? { isFallback: true } : {}),
+      },
+      async () => {
+        const raw = await attempt(sel);
+        const m = extractMetrics(raw);
+        return {
+          value: raw,
+          usage: m.usage,
+          cost: m.cost,
+          modelId: m.modelId,
+          ...(m.providerResponseId ? { providerResponseId: m.providerResponseId } : {}),
+        };
+      },
+    );
+  };
+
   // forceProviderAlias short-circuit: bypass task routing entirely. Single-
   // element chain. Runtime fallback does NOT engage — caller explicitly asked
   // for this provider; falling back would defeat the point.
@@ -724,7 +802,7 @@ async function walkChain<R>(
         [sel.alias]: `adapter "${sel.adapter.name}" does not implement LLMPort`,
       });
     }
-    const result = await attempt(sel);
+    const result = await runAttempt(sel, false);
     const key = registry.scopedKey(sel.alias, budgetScope);
     await registry.budget.recordRequest(key);
     await recordCost(sel, result, key);
@@ -751,9 +829,15 @@ async function walkChain<R>(
         reason: lastErr,
         ...(refs ? { refs } : {}),
       });
+      // Alpha.29 contract event.
+      emitFallbackSelected(opCtx, {
+        fromProviderAlias: prevSelForFallback.alias,
+        toProviderAlias: sel.alias,
+        cause: "provider_unavailable",
+      });
     }
     try {
-      const result = await attempt(sel);
+      const result = await runAttempt(sel, prevSelForFallback !== undefined);
       const key = registry.scopedKey(sel.alias, budgetScope);
       await registry.budget.recordRequest(key);
       await recordCost(sel, result, key);
@@ -878,30 +962,43 @@ class RegistryPort implements LLMPort {
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
     const messages = normalizeMessagesOnOptions("generateText", options);
     const normalizedOptions = { ...options, messages };
-    const result = await walkChain(
-      this.registry,
-      normalizedOptions.taskType,
-      normalizedOptions.priority,
-      (sel) =>
-        withPerAttemptTimeout(
-          this.registry.perAttemptTimeoutMs,
-          normalizedOptions.signal,
-          (signal) => sel.port!.generateText(signal ? { ...normalizedOptions, signal } : normalizedOptions),
-        ),
-      (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
-      normalizedOptions.forceProviderAlias,
-      normalizedOptions.budgetScope,
-      "generateText",
-      normalizedOptions.refs,
+    const taskType = normalizedOptions.taskType ?? "general";
+    const providerChain = normalizedOptions.forceProviderAlias
+      ? [normalizedOptions.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+
+    return withOperation(
+      this.registry.instrumentation,
+      { taskType, method: "generateText", providerChain },
+      async (opCtx) => {
+        const result = await walkChain(
+          this.registry,
+          normalizedOptions.taskType,
+          normalizedOptions.priority,
+          (sel) =>
+            withPerAttemptTimeout(
+              this.registry.perAttemptTimeoutMs,
+              normalizedOptions.signal,
+              (signal) => sel.port!.generateText(signal ? { ...normalizedOptions, signal } : normalizedOptions),
+            ),
+          (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
+          normalizedOptions.forceProviderAlias,
+          normalizedOptions.budgetScope,
+          "generateText",
+          normalizedOptions.refs,
+          opCtx,
+          toContractMetrics,
+        );
+        this.emitResultEvents(
+          result,
+          "generateText",
+          normalizedOptions.taskType,
+          normalizedOptions.budgetScope,
+          normalizedOptions.refs,
+        );
+        return result;
+      },
     );
-    this.emitResultEvents(
-      result,
-      "generateText",
-      normalizedOptions.taskType,
-      normalizedOptions.budgetScope,
-      normalizedOptions.refs,
-    );
-    return result;
   }
 
   async generateStructured<T>(
@@ -909,30 +1006,43 @@ class RegistryPort implements LLMPort {
   ): Promise<GenerateStructuredResult<T>> {
     const messages = normalizeMessagesOnOptions("generateStructured", options);
     const normalizedOptions = { ...options, messages };
-    const result = await walkChain(
-      this.registry,
-      normalizedOptions.taskType,
-      normalizedOptions.priority,
-      (sel) =>
-        withPerAttemptTimeout(
-          this.registry.perAttemptTimeoutMs,
-          normalizedOptions.signal,
-          (signal) => sel.port!.generateStructured(signal ? { ...normalizedOptions, signal } : normalizedOptions),
-        ),
-      (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
-      normalizedOptions.forceProviderAlias,
-      normalizedOptions.budgetScope,
-      "generateStructured",
-      normalizedOptions.refs,
+    const taskType = normalizedOptions.taskType ?? "general";
+    const providerChain = normalizedOptions.forceProviderAlias
+      ? [normalizedOptions.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+
+    return withOperation(
+      this.registry.instrumentation,
+      { taskType, method: "generateStructured", providerChain },
+      async (opCtx) => {
+        const result = await walkChain(
+          this.registry,
+          normalizedOptions.taskType,
+          normalizedOptions.priority,
+          (sel) =>
+            withPerAttemptTimeout(
+              this.registry.perAttemptTimeoutMs,
+              normalizedOptions.signal,
+              (signal) => sel.port!.generateStructured(signal ? { ...normalizedOptions, signal } : normalizedOptions),
+            ),
+          (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
+          normalizedOptions.forceProviderAlias,
+          normalizedOptions.budgetScope,
+          "generateStructured",
+          normalizedOptions.refs,
+          opCtx,
+          toContractMetrics,
+        );
+        this.emitResultEvents(
+          result,
+          "generateStructured",
+          normalizedOptions.taskType,
+          normalizedOptions.budgetScope,
+          normalizedOptions.refs,
+        );
+        return result;
+      },
     );
-    this.emitResultEvents(
-      result,
-      "generateStructured",
-      normalizedOptions.taskType,
-      normalizedOptions.budgetScope,
-      normalizedOptions.refs,
-    );
-    return result;
   }
 
   /**
@@ -1045,31 +1155,85 @@ class RegistryPort implements LLMPort {
   }
 
   async runAgent(options: RunAgentOptions): Promise<AgentResult> {
-    const result = await walkChain(
-      this.registry,
-      options.taskType,
-      options.priority,
-      (sel) =>
-        withPerAttemptTimeout(
-          this.registry.perAttemptTimeoutMs,
-          options.signal,
-          (signal) => sel.port!.runAgent(signal ? { ...options, signal } : options),
-        ),
-      (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
-      options.forceProviderAlias,
-      options.budgetScope,
-      "runAgent",
-      options.refs,
+    const taskType = options.taskType ?? "general";
+    const providerChain = options.forceProviderAlias
+      ? [options.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+
+    return withOperation(
+      this.registry.instrumentation,
+      { taskType, method: "runAgent", providerChain },
+      async (opCtx) => {
+        const result = await walkChain(
+          this.registry,
+          options.taskType,
+          options.priority,
+          (sel) =>
+            withPerAttemptTimeout(
+              this.registry.perAttemptTimeoutMs,
+              options.signal,
+              (signal) => sel.port!.runAgent(signal ? { ...options, signal } : options),
+            ),
+          (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
+          options.forceProviderAlias,
+          options.budgetScope,
+          "runAgent",
+          options.refs,
+          opCtx,
+          toContractMetrics,
+        );
+        this.emitResultEvents(
+          result,
+          "runAgent",
+          options.taskType,
+          options.budgetScope,
+          options.refs,
+        );
+        return result;
+      },
     );
-    this.emitResultEvents(
-      result,
-      "runAgent",
-      options.taskType,
-      options.budgetScope,
-      options.refs,
-    );
-    return result;
   }
+}
+
+/**
+ * Translate a core `TokenUsage`+`CostUsage`-carrying result into the
+ * observability contract's shape for `attempt.completed`. Field
+ * renames: `cacheReadTokens` → `cachedInputTokens`; `cacheSavingsUSD`
+ * → `savingsUSD`. `cacheWriteTokens` has no direct contract-side
+ * equivalent (cache write telemetry lives in `CacheStats` which
+ * alpha.29 adapters wire — for now dropped from AttemptCompletedData).
+ */
+function toContractMetrics(r: {
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    cacheReadTokens?: number;
+    reasoningTokens?: number;
+  };
+  cost: {
+    inputUSD: number;
+    outputUSD: number;
+    totalUSD: number;
+    cacheSavingsUSD?: number;
+  };
+  modelId: string;
+  providerAlias: string;
+}): AttemptMetrics {
+  const usage: TokenUsage = {
+    inputTokens: r.usage.inputTokens,
+    outputTokens: r.usage.outputTokens,
+    totalTokens: r.usage.totalTokens,
+  };
+  if (r.usage.cacheReadTokens !== undefined) usage.cachedInputTokens = r.usage.cacheReadTokens;
+  if (r.usage.reasoningTokens !== undefined) usage.reasoningTokens = r.usage.reasoningTokens;
+  const cost: CostUsage = {
+    inputUSD: r.cost.inputUSD,
+    outputUSD: r.cost.outputUSD,
+    totalUSD: r.cost.totalUSD,
+  };
+  if (r.cost.cacheSavingsUSD !== undefined) cost.savingsUSD = r.cost.cacheSavingsUSD;
+  return { usage, cost, modelId: r.modelId };
 }
 
 /**
