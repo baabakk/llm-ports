@@ -8,6 +8,30 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-08-11 PST
+
+## llm-ports
+
+### TD-ALPHA29-ADAPTER-EMIT-DEFERRED: adapter-level contract event emission deferred to alpha.30
+
+- **Severity:** Medium
+- **Status:** Open
+- **Files:** `packages/adapter-{openai,anthropic,google,ollama,vercel,codex,aider}/src/adapter.ts`, `packages/core/src/registry/registry.ts` (Registry wraps every attempt itself), `plans/alpha.29-runtime-instrumentation.md` (§7 scope-adjustment entry)
+- **Problem:** The original plan §2.1 model was "Registry wraps operations, adapters wrap attempts, `OperationContext` flows through as a first-class argument." Implementing that cleanly requires a channel to pass the mutable `OperationContext` object from the Registry into the adapter. `withObservabilityContext(port, ctx)` only carries the correlation IDs (from the observability-contract package), not the counter state the shared service tracks. Adding an `_opCtx?` field to every `LLMPort` method's options would be a public API surface change and a leaky abstraction (adapters would have to know about `OperationContext`'s shape). Rather than force one of those, alpha.29 ships Registry-only instrumentation: the Registry's `walkChain` wraps each attempt with `withAttempt` itself, and adapters emit nothing at the operation or attempt level via the shared service.
+- **Impact:** Consumers who bypass the Registry and import a raw in-process adapter (`createOpenAIAdapter().createLLMPort()` and call it directly) see zero contract events for their calls. Consumers using the Registry — the vast majority — get full observability. The gap is real but small; direct-adapter callers today are typically in tests or in edge cases where the Registry is intentionally sidestepped. The codex + aider subprocess adapters shipped inline emission in alpha.28 and continue to emit their own attempt events when called directly, but that emission is duplicated with what the Registry emits if wired through the Registry — a second-order redundancy that also lands here.
+- **Resolution path:** Two candidate designs for alpha.30 to pick between: (a) Extend the observability-contract's `ObservabilityContext` to carry an opaque "operation handle" that adapters treat as pass-through, plus a small helper on the shared service that resurrects an `OperationContext` from a handle. Adapters call `withAttempt(reconstructOpCtx(handle), ...)` when a handle is present, and open their own `withOperation` otherwise. (b) Add an `_opCtx?: OperationContext` field to every `LLMPort` method's options interface, marked internal. Uglier but no shape changes to the contract package. Alpha.30 also lands streaming instrumentation, which needs the same "adapter emits its own events" plumbing; the two are naturally paired.
+
+### TD-ALPHA29-AGENT-STEP-EVENTS-DEFERRED: agent step + tool events deferred to alpha.30
+
+- **Severity:** Low
+- **Status:** Open
+- **Files:** `packages/core/src/registry/registry.ts` (`RegistryPort.runAgent`), `packages/adapter-*/src/adapter.ts` (their internal tool-use loops)
+- **Problem:** Plan §2.5 named `agent.step.*` and `agent.tool.*` events for the runAgent tool-use loop. Those events fire from INSIDE the adapter's tool-use loop, not at the Registry boundary — the Registry sees one `runAgent(options) → AgentResult` call regardless of how many internal steps the adapter took. Under the Option A scope adjustment (see TD-ALPHA29-ADAPTER-EMIT-DEFERRED), adapters don't emit contract events, so agent step/tool events cannot land in alpha.29.
+- **Impact:** Consumers observing a `runAgent` call see `operation.started`, one `attempt.started`, one `attempt.completed`/`failed`, `operation.completed`/`failed` — no per-step or per-tool-call granularity. For long-horizon agent runs (the primary ADW use case), this is a real loss of visibility: a 20-step run looks the same as a 1-step run at the observability layer.
+- **Resolution path:** Lands with adapter-level emission in alpha.30. When adapters gain access to an `OperationContext` (or its handle equivalent), the runAgent tool-use loop can emit `agent.step.started`/`completed` per iteration and `agent.tool.called`/`succeeded`/`failed` per tool invocation using the shared service's helpers.
+
+---
+
 # 2026-05-04T21:30 PST
 
 ## llm-ports
