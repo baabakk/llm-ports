@@ -69,12 +69,13 @@ import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
 import { normalizeTaskType } from "./tasks.js";
 import {
   emitFallbackSelected,
+  maybeComputeFingerprint,
   withAttempt,
   withOperation,
   type Instrumentation,
   type OperationContext,
 } from "../instrumentation.js";
-import type { CostUsage, TokenUsage } from "@llm-ports/observability-contract";
+import type { CostUsage, FingerprintableRequest, TokenUsage } from "@llm-ports/observability-contract";
 
 // ─── Adapter contract used internally by the registry ────────────────
 
@@ -971,6 +972,7 @@ class RegistryPort implements LLMPort {
       this.registry.instrumentation,
       { taskType, method: "generateText", providerChain },
       async (opCtx) => {
+        maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
         const result = await walkChain(
           this.registry,
           normalizedOptions.taskType,
@@ -1015,6 +1017,7 @@ class RegistryPort implements LLMPort {
       this.registry.instrumentation,
       { taskType, method: "generateStructured", providerChain },
       async (opCtx) => {
+        maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
         const result = await walkChain(
           this.registry,
           normalizedOptions.taskType,
@@ -1164,6 +1167,7 @@ class RegistryPort implements LLMPort {
       this.registry.instrumentation,
       { taskType, method: "runAgent", providerChain },
       async (opCtx) => {
+        maybeComputeFingerprint(opCtx, toFingerprintable(options));
         const result = await walkChain(
           this.registry,
           options.taskType,
@@ -1234,6 +1238,45 @@ function toContractMetrics(r: {
   };
   if (r.cost.cacheSavingsUSD !== undefined) cost.savingsUSD = r.cost.cacheSavingsUSD;
   return { usage, cost, modelId: r.modelId };
+}
+
+/**
+ * Extract the fingerprintable subset of an options bag. Copies only
+ * behaviorally-relevant fields per the contract's `FingerprintableRequest`
+ * shape. The compute helper's canonicalization does the rest.
+ *
+ * Options fields NOT in `FingerprintableRequest` (like `priority`,
+ * `taskType`, `signal`, `budgetScope`, `refs`, `forceProviderAlias`,
+ * `onRetry`) are Registry-side orchestration knobs, not part of the
+ * request identity, and are intentionally excluded.
+ */
+function toFingerprintable(options: object): FingerprintableRequest {
+  const opts = options as Record<string, unknown>;
+  const req: FingerprintableRequest = {};
+  const passthrough: (keyof FingerprintableRequest)[] = [
+    "messages",
+    "system",
+    "instructions",
+    "tools",
+    "tool_choice",
+    "response_format",
+    "schema",
+    "temperature",
+    "top_p",
+    "top_k",
+    "max_tokens",
+    "frequency_penalty",
+    "presence_penalty",
+    "stop_sequences",
+    "seed",
+    "reasoning_effort",
+  ];
+  for (const key of passthrough) {
+    if (opts[key] !== undefined) {
+      (req as Record<string, unknown>)[key] = opts[key];
+    }
+  }
+  return req;
 }
 
 /**

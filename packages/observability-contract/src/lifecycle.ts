@@ -20,6 +20,7 @@
 
 import type { CacheStats } from "./cache-stats.js";
 import type { ErrorInfo } from "./error-info.js";
+import type { RequestFingerprint } from "./fingerprint.js";
 import type { CostUsage, LLMPriority, TokenUsage } from "./primitives.js";
 
 // ─── Enum types used across lifecycle payloads ──────────────────────
@@ -198,6 +199,18 @@ export interface AttemptCompletedData {
    * the requested `model_id` when the provider aliases models).
    */
   final_model_id: string;
+
+  /**
+   * Request fingerprint per §4.6. When present, callers can group
+   * attempts by prompt identity (`message_hash`) or full-request
+   * identity (`request_hash`) for A/B analysis, drift detection,
+   * or template-version tracking. Optional: consumers opt into
+   * fingerprinting via `CapturePolicy.fingerprint` (default off in
+   * strict mode; on in permissive). Added in alpha.29 to close the
+   * gap between the alpha.28 `computeRequestFingerprint` helper and
+   * the emission surface it was meant to populate.
+   */
+  request_fingerprint?: RequestFingerprint;
 }
 
 /**

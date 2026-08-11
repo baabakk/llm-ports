@@ -58,18 +58,23 @@
  */
 
 import type {
+  ComputeRequestFingerprintOptions,
   CorrelationContext,
   CostUsage,
   EmitterConfig,
   ErrorInfo,
   FallbackCause,
+  FingerprintableRequest,
+  HashAlgorithm,
   ObservabilityContext,
   ObservabilityEvent,
+  RequestFingerprint,
   RetryReason,
   TokenUsage,
 } from "@llm-ports/observability-contract";
 import {
   buildEvent,
+  computeRequestFingerprint,
   errorTypeToCauseCategory,
   newAttemptId,
   newOperationId,
@@ -97,6 +102,48 @@ export interface Instrumentation {
    * so nested calls inside an outer operation stay correlated.
    */
   context?: ObservabilityContext;
+
+  /**
+   * Opt-in prompt-fingerprint compute per §4.6. When set, callers that
+   * plumb a request through `maybeComputeFingerprint` (typically the
+   * Registry inside each port method) attach a `RequestFingerprint` to
+   * every `llm.attempt.completed` event in the operation.
+   *
+   * Off by default: leaving this undefined means no fingerprint is
+   * computed and no fingerprint field is emitted, per the contract's
+   * `CapturePolicy.fingerprint` default of "off in strict mode."
+   */
+  fingerprint?: FingerprintPolicy;
+}
+
+/**
+ * Configuration for opt-in prompt fingerprinting. All fields optional
+ * except that `algorithm: "hmac-sha256"` requires `hmacKey`.
+ */
+export interface FingerprintPolicy {
+  /** Hash algorithm. Default `"sha256"`. */
+  algorithm?: HashAlgorithm;
+
+  /**
+   * HMAC key. Required when `algorithm` is `"hmac-sha256"`; ignored
+   * otherwise. Must be at least 16 UTF-8 bytes per the contract's hash
+   * primitive.
+   */
+  hmacKey?: string;
+
+  /**
+   * Consumer-supplied prompt template identifier (e.g.
+   * `"triage-classifier"`). Threaded verbatim into the resulting
+   * fingerprint's `prompt_id`.
+   */
+  promptId?: string;
+
+  /**
+   * Consumer-supplied prompt template version qualifier (e.g. a semver,
+   * git sha, or timestamp). Threaded verbatim into the resulting
+   * fingerprint's `prompt_version`.
+   */
+  promptVersion?: string;
 }
 
 /**
@@ -168,6 +215,20 @@ export interface OperationContext {
    * `opCtx.resultSummary` before the outer work returns.
    */
   resultSummary?: Record<string, string | number>;
+
+  /**
+   * Prompt fingerprint per §4.6 of the observability contract. When set
+   * by the outer caller (typically inside a `withOperation` work
+   * callback, before any `withAttempt` call), `withAttempt` includes it
+   * on every `llm.attempt.completed` event it emits. The fingerprint is
+   * computed once per operation because the request is the same across
+   * every retry and fallback within an operation.
+   *
+   * Consumers who do NOT want fingerprinting simply leave this
+   * undefined — the contract's `CapturePolicy.fingerprint` default is
+   * off, and omitting the field is compliant.
+   */
+  requestFingerprint?: RequestFingerprint;
 }
 
 /**
@@ -393,6 +454,7 @@ export async function withAttempt<T>(
         latency_ms: latencyMs,
         final_model_id: finalModelId,
         ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
+        ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
       }),
     );
 
@@ -553,6 +615,7 @@ export function completeAttempt<T>(
       latency_ms: latencyMs,
       final_model_id: result.modelId ?? "(unknown)",
       ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
+      ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
     }),
   );
 }
@@ -575,6 +638,34 @@ export function failAttempt(handle: ManualAttemptHandle, err: unknown): void {
       latency_ms: latencyMs,
     }),
   );
+}
+
+// ─── Public API: fingerprint compute ────────────────────────────────
+
+/**
+ * Compute a `RequestFingerprint` from a request and attach it to the
+ * running operation's context. Called once per operation, before any
+ * `withAttempt` runs — the request is the same across every retry and
+ * fallback, so a single compute suffices.
+ *
+ * No-ops when `opCtx` is undefined (observability not configured for
+ * this call) or when `opCtx.instrumentation.fingerprint` is undefined
+ * (fingerprinting not opted into). Consumers who leave fingerprinting
+ * off pay a single undefined-check per call.
+ */
+export function maybeComputeFingerprint(
+  opCtx: OperationContext | undefined,
+  request: FingerprintableRequest,
+): void {
+  if (!opCtx) return;
+  const policy = opCtx.instrumentation.fingerprint;
+  if (!policy) return;
+  const options: ComputeRequestFingerprintOptions = {};
+  if (policy.algorithm) options.algorithm = policy.algorithm;
+  if (policy.hmacKey) options.hmacKey = policy.hmacKey;
+  if (policy.promptId) options.promptId = policy.promptId;
+  if (policy.promptVersion) options.promptVersion = policy.promptVersion;
+  opCtx.requestFingerprint = computeRequestFingerprint(request, options);
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────

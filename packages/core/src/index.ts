@@ -246,6 +246,7 @@ export {
   emitFallbackSelected,
   emitRetryScheduled,
   failAttempt,
+  maybeComputeFingerprint,
   startAttempt,
   withAttempt,
   withOperation,
@@ -253,6 +254,7 @@ export {
 export type {
   AttemptStartParams,
   AttemptWorkResult,
+  FingerprintPolicy,
   Instrumentation,
   ManualAttemptHandle,
   OperationContext,

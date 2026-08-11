@@ -307,6 +307,7 @@ export const attemptCompletedDataSchema = z.object({
   cache_stats: cacheStatsSchema.optional(),
   provider_response_id: z.string().optional(),
   final_model_id: z.string().min(1),
+  request_fingerprint: requestFingerprintSchema.optional(),
 });
 
 export const operationCompletedDataSchema = z.object({
