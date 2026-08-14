@@ -34,7 +34,14 @@ Thirteen sub-tasks across four tracks. All land in one alpha.30 release. Some ca
 
 **§2.1.3 New `FallbackCause` value.** Add `"provider_authentication_never_established"` to `FallbackCause` in `packages/observability-contract/src/lifecycle.ts` (and its Zod schema in `schemas.ts`). Emitted on `llm.fallback.selected` when the chain walks past a never-authenticated provider whose attempt failed with `AuthenticationError`. The existing `"provider_unavailable"` fires for the ordinary walk-past-a-failed-attempt case; the new value distinguishes dead-credential from transient failure, so sinks can alert specifically on stale credentials.
 
-**§2.1.4 New Registry method: `probeCredentials(chain?)`.** Signature: `async probeCredentials(chain?: string[]): Promise<CredentialProbeReport>`. Cheapest available round-trip per provider — for OpenAI-shaped adapters, `LLMPort.listModels()` when the adapter implements it; otherwise a minimal `generateText` with `maxOutputTokens: 1`. Returns `{ ok: string[], failed: Array<{ alias, error }>, skipped: Array<{ alias, reason }> }`. When `chain` is omitted, probes every configured provider. When passed, probes only those aliases. Caller-invocable — the Registry does NOT auto-probe at construction (opt-in for two reasons: startup cost and side-effects on rate limits). Consumers wire this into their startup / health-check surface. Solves SalesCoach's "no boot-time signal" complaint without imposing a mandatory cost on every consumer.
+**§2.1.4 New Registry method: `probeCredentials(chain?, options?)`.** Signature: `async probeCredentials(chain?: string[], options?: ProbeCredentialsOptions): Promise<CredentialProbeReport>`. Two-tier probe strategy:
+
+- **Tier 1 (default, zero cost).** Adapters that implement `LLMPort.listModels()` — currently the openai, anthropic, google adapters — get probed with a single `listModels()` call. Adapters without `listModels()` are reported as `skipped: [{ alias, reason: "adapter does not implement listModels()" }]`. Zero billable token cost.
+- **Tier 2 (opt-in via `options.probeWithGenerationFallback: true`, small billable cost).** Adapters without `listModels()` fall back to a minimal `generateText` with `maxOutputTokens: 1`. Costs a few cents per provider per probe — meaningful over a busy CI matrix, negligible for a nightly boot-time check on a single deployment. When enabled, every configured provider gets covered.
+
+Returns `{ ok: string[], failed: Array<{ alias, error }>, skipped: Array<{ alias, reason }> }`. When `chain` is omitted, probes every configured provider. When passed, probes only those aliases. Caller-invocable — the Registry does NOT auto-probe at construction (opt-in for two reasons: startup cost and side-effects on rate limits). Consumers wire this into their startup / health-check surface. Solves SalesCoach's "no boot-time signal" complaint without imposing a mandatory cost on every consumer.
+
+**Cost disclosure requirement.** The README + the migration page + the method's JSDoc all state the cost model explicitly: "Tier 1 is free; Tier 2 costs a few cents per adapter probed per boot, which for a single deployment probing once a day is a few dollars a year, but for a fleet or CI matrix can be higher." Users making the tier decision see the trade-off at the call site.
 
 ### §2.2 — Timeout granularity track (SalesCoach `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`)
 
@@ -46,9 +53,26 @@ Thirteen sub-tasks across four tracks. All land in one alpha.30 release. Some ca
 
 ### §2.3 — Diagnostic track (SalesCoach auth TD's "unrelated observation")
 
-**§2.3.1 `AttemptCompletedData.response_char_count`.** New optional numeric field on the contract's `AttemptCompletedData` (plus Zod schema update). Always safe to emit; not gated by `CapturePolicy.content` because it's a count, not content. Adapters populate it from the final response text length (or a sensible equivalent for structured / tool-call responses). Solves "the model returned near-empty output but the call reports success" — the count distinguishes "returned 2 characters" from "returned 800 characters."
+**§2.3.1 `AttemptCompletedData.response_char_count`.** New optional numeric field on the contract's `AttemptCompletedData` (plus Zod schema update). Always safe to emit; not gated by `CapturePolicy.content` because it's a count, not content. Adapters populate it from the total response text length. **What counts as "response text" per method:**
 
-**§2.3.2 `AttemptCompletedData.response_preview`.** New optional string field. Bounded by a `CapturePolicy.responsePreviewMaxChars` new field (default 200 when policy is `PERMISSIVE_CAPTURE_POLICY`, 0 when `DEFAULT_CAPTURE_POLICY` — i.e. off in strict mode). Content, so gated by `CapturePolicy.content === true`. When both `content` is enabled AND `responsePreviewMaxChars > 0`, adapters emit a first-N-chars slice of the response text.
+- `generateText`: `result.text.length`.
+- `generateStructured` / `streamStructured`: the raw pre-parse text length (a hollow-object success shows as e.g. 2 chars for `"{}"`, not the char length of the parsed object).
+- `streamText`: the accumulated stream text at stream close.
+- `runAgent`: the total char count of the final assistant message content.
+- **Tool-call arguments do NOT count** — they're structured metadata surfaced via `agent.tool.called` events (§2.5) and counting them would inflate the number away from its intended "how much natural-language response did the model produce."
+
+Solves "the model returned near-empty output but the call reports success" — the count distinguishes "returned 2 characters" from "returned 800 characters."
+
+**§2.3.2 `AttemptCompletedData.response_preview`.** New optional string field. Bounded by a `CapturePolicy.responsePreviewMaxChars` new field (default 200 when policy is `PERMISSIVE_CAPTURE_POLICY`, 0 when `DEFAULT_CAPTURE_POLICY` — i.e. off in strict mode). Content, so gated by `CapturePolicy.content === true`. When both `content` is enabled AND `responsePreviewMaxChars > 0`, adapters emit a **first-N-chars** slice of the response text.
+
+**"First-N chars" semantics per method** (the distinction matters for streaming and agent loops):
+
+- `generateText` / `generateStructured`: trivially the first N chars of the (single, complete) response — first-N and last-N are equivalent since the response arrives whole.
+- `streamText`: buffer the FIRST N chars from the stream as they arrive (before the consumer's `for-await` has necessarily processed them). Adapter maintains a small first-N buffer independent of consumer consumption. Emitted at stream close on `attempt.completed`. Preserves "what did the model start emitting" visibility even when the consumer aborted the stream partway.
+- `streamStructured`: same as `streamText` — first N chars of the raw stream, pre-parse.
+- `runAgent`: first N chars of the FIRST assistant message content. Shows how the agent started reasoning before any tools were invoked. Per-step and per-tool visibility for later steps lives on `agent.step.completed` and `agent.tool.*` events (§2.5), not on the outer `attempt.completed`.
+
+Rationale: for single-turn methods there's no ambiguity, but for streaming and agent loops "the response" isn't a single moment. First-N is the more diagnostically valuable choice (it answers "did the model start producing sensible text at all") vs. last-N (which for a truncated / aborted stream just shows garbage or is empty). Consumers who want the final content have `result.text` in-process; the preview is an observability artifact for consumers who don't have the in-process result (aggregated dashboards, third-party sinks).
 
 ### §2.4 — Adapter-level emission (resolves `TD-ALPHA29-ADAPTER-EMIT-DEFERRED`)
 
@@ -162,3 +186,4 @@ Copy or reference `plans/alpha.29-runtime-instrumentation.md#7-release-completio
 ## §8 Changelog
 
 - **2026-08-14T14:02:58 -07:00** — Filed as approved plan. Scope frozen: the thirteen §2 sub-tasks across four tracks. Approvals from this session on the auth track (four items), the timeout track (two items), and the diagnostic track (two items) fold into the six §5.3-originally-scoped items already committed.
+- **2026-08-14 — Two implementation clarifications locked in before execution starts.** §2.1.4 `probeCredentials` gets a two-tier strategy: Tier 1 (default) uses `listModels()` for free and reports adapters without it as `skipped`; Tier 2 (opt-in via `options.probeWithGenerationFallback: true`) falls back to a 1-token `generateText` with explicit cost disclosure. §2.3 `response_char_count` and `response_preview` semantics nailed down per method: `char_count` is the total response text length (excluding tool-call arguments); `response_preview` is FIRST-N chars of the earliest output (matters for streams and agent loops — first assistant message for `runAgent`, buffered from stream start for `streamText`/`streamStructured`, trivially first N for the two single-turn methods). Rationale: first-N answers "did the model start producing sensible text" for the truncated-or-aborted case, which is where the field is most useful diagnostically.
