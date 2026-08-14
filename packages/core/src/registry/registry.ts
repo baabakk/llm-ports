@@ -55,11 +55,13 @@ import {
 } from "../validation.js";
 import {
   aggressiveShouldFallback,
+  AuthenticationError,
   ConfigError,
   EmptyMessagesError,
   MessagesRequiredError,
   NoProvidersAvailableError,
   ProviderUnavailableError,
+  type ShouldFallbackContext,
 } from "../errors.js";
 import { createWarningState, warnOnce, type WarningState } from "../utils/deprecation.js";
 import type { LLMMessage } from "../ports/llm-port.js";
@@ -140,7 +142,7 @@ export interface RegistryOptions {
     | "default" // walk on ProviderUnavailableError
     | "aggressive" // walk on any provider-side signal (alpha.25+, LP-REQ-01)
     | "none" // disable; caller handles errors
-    | { shouldFallback: (err: unknown) => boolean };
+    | { shouldFallback: (err: unknown, ctx?: ShouldFallbackContext) => boolean };
   /**
    * OTel-aligned observability hooks. Optional; each hook is independent.
    * Hooks are fire-and-forget — errors thrown by hook callbacks are swallowed
@@ -256,8 +258,16 @@ export class Registry {
   /**
    * Returns true if an error should cause the registry to walk to the next
    * viable provider in the fallback chain. See `RegistryOptions.runtimeFallback`.
+   *
+   * Alpha.30+: accepts an optional `ShouldFallbackContext` second argument
+   * carrying `providerAlias` + `hasEverAuthenticated`. Consumers who wrote
+   * `(err) => boolean` classifiers before alpha.30 still work — TypeScript
+   * function-parameter bivariance lets the narrower signature satisfy the
+   * wider one. New classifiers can opt in to the context to make
+   * ctx-aware decisions (e.g. walk on first-time-failed
+   * `AuthenticationError`; abort on mid-flight auth failure).
    */
-  public readonly shouldFallback: (err: unknown) => boolean;
+  public readonly shouldFallback: (err: unknown, ctx?: ShouldFallbackContext) => boolean;
   /** OTel-aligned observability hooks, set at construction. Read by `walkChain` + `RegistryPort`. */
   public readonly observability: ObservabilityHooks;
   /** Per-attempt timeout in ms, applied by `walkChain` to each provider attempt. (alpha.23+) */
@@ -270,6 +280,15 @@ export class Registry {
    * Read by `RegistryPort` methods and threaded through `walkChain`.
    */
   public readonly instrumentation: Instrumentation | undefined;
+  /**
+   * Alpha.30+: aliases that have completed at least one successful attempt
+   * in the current process. Populated inside `walkChain` on every success;
+   * read via `hasEverAuthenticated(alias)`. Never reset — a provider that
+   * authenticated once in this process is trusted for the rest of the
+   * process. Process restart is what re-verifies. Sourced from SalesCoach's
+   * `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`.
+   */
+  private readonly authenticatedProviders: Set<string> = new Set();
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -320,6 +339,35 @@ export class Registry {
   scopedKey(alias: string, budgetScope?: BudgetScopeRef): string {
     if (!budgetScope) return alias;
     return `${alias}|${budgetScope.scope}:${budgetScope.scopeId}`;
+  }
+
+  /**
+   * Alpha.30+: has this provider alias ever completed a successful attempt
+   * in the current process?
+   *
+   * The bit is set by `walkChain` on every successful attempt and never
+   * reset until process restart. Reads by the fallback policy: a
+   * first-time-failed `AuthenticationError` on a never-authenticated
+   * provider walks the chain (config fault — recover and shout via
+   * `llm.fallback.selected` with `cause: "provider_authentication_never_established"`);
+   * a mid-flight auth failure on a previously-authenticated provider
+   * aborts (something changed at the provider — worth surfacing loudly
+   * as an outage).
+   *
+   * Public so consumers can query the state directly for health checks
+   * or dashboards.
+   */
+  hasEverAuthenticated(providerAlias: string): boolean {
+    return this.authenticatedProviders.has(providerAlias);
+  }
+
+  /**
+   * Internal: called by `walkChain` on every successful attempt to record
+   * that this provider alias has authenticated at least once in the
+   * current process. Never reset.
+   */
+  markProviderAuthenticated(providerAlias: string): void {
+    this.authenticatedProviders.add(providerAlias);
   }
 
   /**
@@ -807,6 +855,9 @@ async function walkChain<R>(
     const key = registry.scopedKey(sel.alias, budgetScope);
     await registry.budget.recordRequest(key);
     await recordCost(sel, result, key);
+    // Alpha.30+: forced-provider success also marks the provider as
+    // authenticated for future ctx-aware fallback decisions.
+    registry.markProviderAuthenticated(sel.alias);
     return result;
   }
   const chain = await registry.selectViableChain(taskType, priority, budgetScope);
@@ -842,10 +893,23 @@ async function walkChain<R>(
       const key = registry.scopedKey(sel.alias, budgetScope);
       await registry.budget.recordRequest(key);
       await recordCost(sel, result, key);
+      // Alpha.30+: mark this provider as having authenticated in the
+      // current process. Read by the ctx-aware fallback policy so a
+      // subsequent auth failure on the same alias is treated as
+      // "mid-flight" (abort) rather than "never established" (walk).
+      registry.markProviderAuthenticated(sel.alias);
       return result;
     } catch (err) {
       lastErr = err;
-      if (!registry.shouldFallback(err)) throw err;
+      // Alpha.30+: pass the ctx-aware second argument so the policy
+      // (default or aggressive or a caller-supplied opt-in classifier)
+      // can distinguish first-time-failed auth (walk) from mid-flight
+      // auth failure (abort). See ShouldFallbackContext JSDoc.
+      const ctx: ShouldFallbackContext = {
+        providerAlias: sel.alias,
+        hasEverAuthenticated: registry.hasEverAuthenticated(sel.alias),
+      };
+      if (!registry.shouldFallback(err, ctx)) throw err;
       const message =
         err instanceof Error ? err.message : typeof err === "string" ? err : "unknown error";
       reasons[sel.alias] = `runtime fallback: ${message}`;
@@ -1366,12 +1430,23 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
  */
 function resolveRuntimeFallback(
   opt: RegistryOptions["runtimeFallback"],
-): (err: unknown) => boolean {
+): (err: unknown, ctx?: ShouldFallbackContext) => boolean {
   if (opt === "none") return () => false;
   if (opt === "aggressive") return aggressiveShouldFallback;
   if (opt && typeof opt === "object" && "shouldFallback" in opt) {
     return opt.shouldFallback;
   }
-  // Default
-  return (err) => err instanceof ProviderUnavailableError;
+  // Default preset: `ProviderUnavailableError` walks unconditionally, plus
+  // alpha.30+ ctx-aware `AuthenticationError` walk on never-authenticated.
+  // Note: this is the "default" preset (unnamed, opt === undefined). The
+  // `defaultShouldFallback` exported function is the alpha.28+ canonical
+  // walk-table, which is a separate opt-in via
+  // `{ shouldFallback: defaultShouldFallback }`.
+  return (err, ctx) => {
+    if (err instanceof ProviderUnavailableError) return true;
+    if (err instanceof AuthenticationError) {
+      return ctx !== undefined && !ctx.hasEverAuthenticated;
+    }
+    return false;
+  };
 }

@@ -607,6 +607,36 @@ export const errorMatchers = {
   all: (e: unknown): boolean => e instanceof LLMPortError,
 };
 
+/**
+ * Optional context the Registry passes to `defaultShouldFallback` and
+ * `aggressiveShouldFallback` (and to caller-supplied classifiers on
+ * `RegistryOptions.runtimeFallback`). Enables policy decisions that
+ * depend on Registry state — most importantly the alpha.30 change
+ * where a first-time-failed `AuthenticationError` walks the chain
+ * while a mid-flight auth failure keeps its abort behavior.
+ *
+ * Backwards compatible: consumers who wrote `(err: unknown) => boolean`
+ * classifiers work unchanged (function-parameter bivariance). New
+ * classifiers can opt in by accepting the second argument.
+ *
+ * Added in `0.1.0-alpha.30`. Sourced from SalesCoach's
+ * `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN` (2026-08-14): the OpenAI
+ * adapter's `isTransientAuthError` already distinguishes "worked
+ * before / now 401" from "never worked" at the retry level via
+ * `ctx.hasSucceeded`; this promotes the same signal to the chain
+ * level.
+ */
+export interface ShouldFallbackContext {
+  /** Alias of the provider whose attempt just failed. */
+  providerAlias: string;
+  /**
+   * True if this provider alias has completed at least one successful
+   * attempt in the current process. Registry-tracked; never reset once
+   * set until process restart.
+   */
+  hasEverAuthenticated: boolean;
+}
+
 // ─── Aggressive fallback classifier (alpha.25+, LP-REQ-01) ────────────
 
 /**
@@ -672,7 +702,20 @@ export const AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS: readonly RegExp[] = [
  * || myExtraCheck(e)`). Consumers who want to disable one of these
  * categories can wrap and short-circuit similarly.
  */
-export function aggressiveShouldFallback(err: unknown): boolean {
+export function aggressiveShouldFallback(err: unknown, ctx?: ShouldFallbackContext): boolean {
+  // 0. AuthenticationError conditional walk (alpha.30+).
+  //    When ctx is provided AND the failing provider has never authenticated
+  //    in this process, a stale credential converts to a chain walk instead
+  //    of a hard abort. The abort behavior for mid-flight auth failures
+  //    (hasEverAuthenticated: true) is unchanged — that shape indicates
+  //    "something changed at the provider," which is worth surfacing loudly.
+  //    Backwards compat: when ctx is undefined (caller-supplied classifier
+  //    didn't opt in, or upstream call site doesn't pass it yet), the
+  //    original abort-on-auth behavior applies.
+  if (err instanceof AuthenticationError) {
+    return ctx !== undefined && !ctx.hasEverAuthenticated;
+  }
+
   // 1. Existing default (ProviderUnavailableError; covers 5xx via SDK wrap
   //    and any other unknown-provider-error surface).
   if (err instanceof ProviderUnavailableError) return true;
@@ -793,7 +836,7 @@ export function aggressiveShouldFallback(err: unknown): boolean {
  * `defaultShouldFallback` when your adapter stack emits the typed classes
  * consistently.
  */
-export function defaultShouldFallback(err: unknown): boolean {
+export function defaultShouldFallback(err: unknown, ctx?: ShouldFallbackContext): boolean {
   // Fast pass-through for non-LLMPortError inputs: only walk on 5xx-shaped
   // raw errors (defensive; adapters SHOULD have wrapped these already).
   if (!(err instanceof LLMPortError)) {
@@ -809,6 +852,13 @@ export function defaultShouldFallback(err: unknown): boolean {
     return false;
   }
 
+  // AuthenticationError conditional walk (alpha.30+). Same semantics as
+  // aggressiveShouldFallback: walk on first-time-failed credential, abort
+  // on mid-flight auth failure. See ShouldFallbackContext JSDoc.
+  if (err instanceof AuthenticationError) {
+    return ctx !== undefined && !ctx.hasEverAuthenticated;
+  }
+
   // Walk-worthy classes.
   if (err instanceof RateLimitError) return true;
   if (err instanceof ServiceUnavailableError) return true;
@@ -821,7 +871,6 @@ export function defaultShouldFallback(err: unknown): boolean {
 
   // Abort-worthy classes: explicit for readability + safety against
   // future subclasses inheriting the wrong parent.
-  if (err instanceof AuthenticationError) return false;
   if (err instanceof AdapterInternalError) return false;
   if (err instanceof InvalidImageUrlError) return false;
 

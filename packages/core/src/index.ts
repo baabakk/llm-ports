@@ -150,6 +150,7 @@ export {
   SessionBudgetExceededError,
   ValidationError,
 } from "./errors.js";
+export type { ShouldFallbackContext } from "./errors.js";
 
 // ─── Retry observability ─────────────────────────────────────────────
 export type {
