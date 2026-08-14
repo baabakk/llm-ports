@@ -45,17 +45,23 @@ export type RetryReason =
  * `llm.fallback.selected` events.
  */
 export type FallbackCause =
-  | "rate_limit"                // 429 on the current provider; walk to next
-  | "service_unavailable"       // 5xx on the current provider
-  | "provider_unavailable"      // SDK-level unreachable
-  | "context_window_exceeded"   // prompt too long for current provider's window
-  | "content_policy"            // current provider rejected content
-  | "credit_exhausted"          // current provider's account exhausted
-  | "provider_malformed_400"    // current provider returned unparseable 400
-  | "image_too_large"           // current provider's image limit exceeded
-  | "content_block_unsupported" // current provider does not support a block kind
-  | "budget_exceeded"           // per-provider request/cost gate tripped
-  | "consumer_forced";          // consumer explicitly requested next provider
+  | "rate_limit"                                   // 429 on the current provider; walk to next
+  | "service_unavailable"                          // 5xx on the current provider
+  | "provider_unavailable"                         // SDK-level unreachable
+  | "context_window_exceeded"                      // prompt too long for current provider's window
+  | "content_policy"                               // current provider rejected content
+  | "credit_exhausted"                             // current provider's account exhausted
+  | "provider_malformed_400"                       // current provider returned unparseable 400
+  | "image_too_large"                              // current provider's image limit exceeded
+  | "content_block_unsupported"                    // current provider does not support a block kind
+  | "budget_exceeded"                              // per-provider request/cost gate tripped
+  | "consumer_forced"                              // consumer explicitly requested next provider
+  | "provider_authentication_never_established";   // alpha.30+: never-authenticated credential
+                                                   // (first-time-failed AuthenticationError). Distinct
+                                                   // from provider_unavailable so sinks can alert
+                                                   // specifically on stale credentials. Added in
+                                                   // alpha.30 for SalesCoach's
+                                                   // TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN.
 
 /**
  * How an operation terminated. Set on the operation-level terminator

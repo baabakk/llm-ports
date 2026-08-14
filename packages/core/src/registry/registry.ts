@@ -77,7 +77,12 @@ import {
   type Instrumentation,
   type OperationContext,
 } from "../instrumentation.js";
-import type { CostUsage, FingerprintableRequest, TokenUsage } from "@llm-ports/observability-contract";
+import type {
+  CostUsage,
+  FallbackCause,
+  FingerprintableRequest,
+  TokenUsage,
+} from "@llm-ports/observability-contract";
 
 // ─── Adapter contract used internally by the registry ────────────────
 
@@ -237,6 +242,55 @@ export interface RegistryOptions {
   deprecationWarningHandler?: (message: string) => void;
 }
 
+// ─── Credential-probe result (alpha.30+) ─────────────────────────────
+
+/**
+ * Options for `Registry.probeCredentials`. See method JSDoc for the
+ * cost model and tier semantics.
+ */
+export interface ProbeCredentialsOptions {
+  /**
+   * When `true`, adapters without `LLMPort.listModels()` fall back to
+   * a minimal `generateText` call with `maxOutputTokens: 1`. Real
+   * billable-token cost (typically a few cents per adapter probed per
+   * probe). Off by default: adapters without `listModels()` are
+   * reported as `skipped`.
+   *
+   * Cost trade-off: for a single deployment probing once per boot per
+   * adapter, the yearly cost is negligible (a few dollars per adapter
+   * per year). For a busy CI matrix probing many times per hour it can
+   * add up. The default is off so no consumer incurs cost by accident;
+   * opt in when full coverage matters more than the marginal spend.
+   */
+  probeWithGenerationFallback?: boolean;
+}
+
+/**
+ * One row of a `ProbeCredentialsReport`. Populated for every alias the
+ * probe attempted, whether it succeeded, failed, or was skipped.
+ */
+export interface ProbeReportEntry {
+  /** The provider alias as configured. */
+  alias: string;
+  /** The adapter name backing this alias (e.g. "openai", "anthropic"). */
+  provider: string;
+  /** The model ID as configured for this alias. */
+  modelId: string;
+}
+
+/**
+ * Result of `Registry.probeCredentials`. Every configured alias in
+ * scope lands in exactly one of `ok` / `failed` / `skipped`.
+ */
+export interface ProbeCredentialsReport {
+  /** Aliases whose probe succeeded. `markProviderAuthenticated` was called for each. */
+  ok: ProbeReportEntry[];
+  /** Aliases whose probe threw. `error` is the message; `errorType` is `err.name`. */
+  failed: Array<ProbeReportEntry & { error: string; errorType: string }>;
+  /** Aliases the probe couldn't attempt. See `reason` for each. */
+  skipped: Array<ProbeReportEntry & { reason: string }>;
+}
+
 // ─── Selection result ────────────────────────────────────────────────
 
 export interface ModelSelection {
@@ -368,6 +422,138 @@ export class Registry {
    */
   markProviderAuthenticated(providerAlias: string): void {
     this.authenticatedProviders.add(providerAlias);
+  }
+
+  /**
+   * Alpha.30+: probe every configured provider (or a specified subset)
+   * to verify credentials are working. Returns a `ProbeCredentialsReport`
+   * split into `ok` / `failed` / `skipped`. Solves the "no boot-time
+   * signal" problem SalesCoach's `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`
+   * called out: a dead credential sat in staging for days because the
+   * only surface that would have revealed it was a failed user-facing
+   * request.
+   *
+   * Two-tier strategy:
+   *
+   * **Tier 1 (default, zero billable cost).** Adapters that implement
+   * `LLMPort.listModels()` — currently the openai, anthropic, google
+   * adapters — get probed with a single `listModels()` call. Adapters
+   * without `listModels()` are reported as `skipped`.
+   *
+   * **Tier 2 (opt-in via `options.probeWithGenerationFallback: true`,
+   * small billable cost).** Adapters without `listModels()` fall back to
+   * a minimal `generateText` with `maxOutputTokens: 1`. Costs a few
+   * cents per adapter per probe — meaningful over a busy CI matrix,
+   * negligible for a nightly boot-time check on a single deployment.
+   * When enabled, every configured provider gets covered.
+   *
+   * Side effect: on `ok`, calls `markProviderAuthenticated(alias)` so
+   * subsequent auth failures on the same alias in the same process are
+   * classified as mid-flight (abort) rather than never-established
+   * (walk). This is the intended semantic — the probe IS what
+   * establishes the authenticated status.
+   *
+   * Caller-invocable — the Registry does NOT auto-probe at construction
+   * (opt-in for two reasons: startup cost and side-effects on rate
+   * limits). Consumers wire this into their startup / health-check
+   * surface.
+   *
+   * @param chain — optional subset of aliases to probe. Omitted means
+   *   probe every configured provider.
+   * @param options — probe configuration; see `ProbeCredentialsOptions`.
+   */
+  async probeCredentials(
+    chain?: string[],
+    options: ProbeCredentialsOptions = {},
+  ): Promise<ProbeCredentialsReport> {
+    const aliases = chain ?? Object.keys(this.config.providers);
+    const ok: ProbeReportEntry[] = [];
+    const failed: ProbeCredentialsReport["failed"] = [];
+    const skipped: ProbeCredentialsReport["skipped"] = [];
+
+    for (const alias of aliases) {
+      const entry = this.config.providers[alias];
+      if (!entry) {
+        skipped.push({
+          alias,
+          provider: "(none)",
+          modelId: "(none)",
+          reason: "provider not configured",
+        });
+        continue;
+      }
+      const adapter = this.adapters[entry.adapter];
+      if (!adapter) {
+        skipped.push({
+          alias,
+          provider: entry.adapter,
+          modelId: entry.modelId,
+          reason: `adapter "${entry.adapter}" not registered`,
+        });
+        continue;
+      }
+      const port = adapter.createLLMPort?.(entry.modelId, alias);
+      if (!port) {
+        skipped.push({
+          alias,
+          provider: entry.adapter,
+          modelId: entry.modelId,
+          reason: `adapter "${entry.adapter}" does not implement createLLMPort`,
+        });
+        continue;
+      }
+
+      const meta: ProbeReportEntry = {
+        alias,
+        provider: entry.adapter,
+        modelId: entry.modelId,
+      };
+
+      // Tier 1: listModels() — free.
+      if (port.listModels) {
+        try {
+          await port.listModels();
+          ok.push(meta);
+          this.markProviderAuthenticated(alias);
+        } catch (err) {
+          failed.push({
+            ...meta,
+            error: err instanceof Error ? err.message : String(err),
+            errorType: err instanceof Error ? err.name : "UnknownError",
+          });
+        }
+        continue;
+      }
+
+      // Tier 2: generateText fallback — opt-in.
+      if (options.probeWithGenerationFallback) {
+        try {
+          await port.generateText({
+            taskType: "credential-probe",
+            messages: [{ role: "user", content: "ok" }],
+            maxOutputTokens: 1,
+          });
+          ok.push(meta);
+          this.markProviderAuthenticated(alias);
+        } catch (err) {
+          failed.push({
+            ...meta,
+            error: err instanceof Error ? err.message : String(err),
+            errorType: err instanceof Error ? err.name : "UnknownError",
+          });
+        }
+        continue;
+      }
+
+      // Neither path applies. Skip explicitly so the caller sees the gap.
+      skipped.push({
+        ...meta,
+        reason:
+          "adapter does not implement listModels() and probeWithGenerationFallback is off",
+      });
+    }
+
+    return { ok, failed, skipped };
   }
 
   /**
@@ -881,11 +1067,18 @@ async function walkChain<R>(
         reason: lastErr,
         ...(refs ? { refs } : {}),
       });
-      // Alpha.29 contract event.
+      // Alpha.29 contract event; alpha.30 adds a distinct cause when
+      // the fallback was triggered by a never-established credential so
+      // sinks can alert specifically on stale keys instead of lumping
+      // them in with ordinary transient failures.
+      const fbCause: FallbackCause =
+        lastErr instanceof AuthenticationError
+          ? "provider_authentication_never_established"
+          : "provider_unavailable";
       emitFallbackSelected(opCtx, {
         fromProviderAlias: prevSelForFallback.alias,
         toProviderAlias: sel.alias,
-        cause: "provider_unavailable",
+        cause: fbCause,
       });
     }
     try {

@@ -73,6 +73,9 @@ export {
   type ModelSelection,
   type PricingFreshnessAdapterReport,
   type PricingFreshnessReport,
+  type ProbeCredentialsOptions,
+  type ProbeCredentialsReport,
+  type ProbeReportEntry,
   type RegistryOptions,
 } from "./registry/registry.js";
 

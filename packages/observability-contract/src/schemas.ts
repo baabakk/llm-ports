@@ -258,6 +258,7 @@ const fallbackCauseSchema = z.enum([
   "content_block_unsupported",
   "budget_exceeded",
   "consumer_forced",
+  "provider_authentication_never_established", // alpha.30+
 ]);
 
 const methodSchema = z.enum([
