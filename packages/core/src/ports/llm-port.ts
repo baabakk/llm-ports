@@ -308,6 +308,18 @@ export interface GenerateTextOptions {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /**
+   * Alpha.30+: per-call override for the per-attempt timeout, in
+   * milliseconds. Highest-precedence in the timeout chain: call →
+   * `TaskConfig.defaultPerAttemptTimeoutMs` (via
+   * `RegistryOptions.taskDefaults`) → `RegistryOptions.perAttemptTimeoutMs`
+   * → undefined (no timeout).
+   *
+   * Set when one specific call needs different headroom from what the
+   * Registry-level or task-level default provides. Sourced from
+   * SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`.
+   */
+  perAttemptTimeoutMs?: number;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
@@ -359,6 +371,18 @@ export interface GenerateStructuredOptions<T> {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /**
+   * Alpha.30+: per-call override for the per-attempt timeout, in
+   * milliseconds. Highest-precedence in the timeout chain: call →
+   * `TaskConfig.defaultPerAttemptTimeoutMs` (via
+   * `RegistryOptions.taskDefaults`) → `RegistryOptions.perAttemptTimeoutMs`
+   * → undefined (no timeout).
+   *
+   * Set when one specific call needs different headroom from what the
+   * Registry-level or task-level default provides. Sourced from
+   * SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`.
+   */
+  perAttemptTimeoutMs?: number;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
@@ -406,6 +430,18 @@ export interface StreamTextOptions {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /**
+   * Alpha.30+: per-call override for the per-attempt timeout, in
+   * milliseconds. Highest-precedence in the timeout chain: call →
+   * `TaskConfig.defaultPerAttemptTimeoutMs` (via
+   * `RegistryOptions.taskDefaults`) → `RegistryOptions.perAttemptTimeoutMs`
+   * → undefined (no timeout).
+   *
+   * Set when one specific call needs different headroom from what the
+   * Registry-level or task-level default provides. Sourced from
+   * SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`.
+   */
+  perAttemptTimeoutMs?: number;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
@@ -436,6 +472,18 @@ export interface StreamStructuredOptions<T> {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /**
+   * Alpha.30+: per-call override for the per-attempt timeout, in
+   * milliseconds. Highest-precedence in the timeout chain: call →
+   * `TaskConfig.defaultPerAttemptTimeoutMs` (via
+   * `RegistryOptions.taskDefaults`) → `RegistryOptions.perAttemptTimeoutMs`
+   * → undefined (no timeout).
+   *
+   * Set when one specific call needs different headroom from what the
+   * Registry-level or task-level default provides. Sourced from
+   * SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`.
+   */
+  perAttemptTimeoutMs?: number;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */
@@ -471,6 +519,18 @@ export interface RunAgentOptions {
   temperature?: number;
   /** Cancellation signal threaded through to the provider's HTTP fetch. */
   signal?: AbortSignal;
+  /**
+   * Alpha.30+: per-call override for the per-attempt timeout, in
+   * milliseconds. Highest-precedence in the timeout chain: call →
+   * `TaskConfig.defaultPerAttemptTimeoutMs` (via
+   * `RegistryOptions.taskDefaults`) → `RegistryOptions.perAttemptTimeoutMs`
+   * → undefined (no timeout).
+   *
+   * Set when one specific call needs different headroom from what the
+   * Registry-level or task-level default provides. Sourced from
+   * SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`.
+   */
+  perAttemptTimeoutMs?: number;
   /** Override task routing for this call only; route directly to the named provider alias. Per-provider budget gates still apply. (alpha.7+) */
   forceProviderAlias?: string;
   /** Reasoning effort hint for o-series / gpt-5-nano / Groq gpt-oss-120b. Silently ignored by adapters whose providers don't honor it. (alpha.12+) */

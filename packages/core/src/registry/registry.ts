@@ -68,7 +68,7 @@ import type { LLMMessage } from "../ports/llm-port.js";
 import type { ProviderEntry, RegistryConfig } from "./config.js";
 import { parseRegistryConfig } from "./config.js";
 import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
-import { normalizeTaskType } from "./tasks.js";
+import { normalizeTaskType, type TaskConfig } from "./tasks.js";
 import {
   emitFallbackSelected,
   maybeComputeFingerprint,
@@ -215,9 +215,40 @@ export interface RegistryOptions {
    * stream opens, mid-stream timeout is a per-chunk policy that lives in
    * the consumer's `for await`).
    *
+   * Alpha.30+: this is now the lowest-precedence step in a four-step
+   * chain. Precedence, first non-undefined wins:
+   *   1. Per-call `perAttemptTimeoutMs` on the generation-method options.
+   *   2. Per-task `TaskConfig.defaultPerAttemptTimeoutMs` when the call's
+   *      `taskType` matches a declared task in `taskDefaults` below.
+   *   3. This Registry-level `perAttemptTimeoutMs`.
+   *   4. Undefined (no timeout).
+   *
    * Added in 0.1.0-alpha.23.
    */
   perAttemptTimeoutMs?: number;
+  /**
+   * Alpha.30+: per-task defaults keyed by `taskType`. When a call's
+   * `taskType` matches a key here, the `TaskConfig` fields are consulted
+   * for timeout resolution (`defaultPerAttemptTimeoutMs`) and future
+   * per-task defaults. Typically populated from a `declareTasks({...})`
+   * result via `.__meta`:
+   *
+   * ```ts
+   * const tasks = declareTasks({
+   *   "call-plan": { defaultPerAttemptTimeoutMs: 60000 },
+   *   "classify":  { defaultPerAttemptTimeoutMs: 5000 },
+   * });
+   * createRegistryFromEnv({ ..., taskDefaults: tasks.__meta });
+   * ```
+   *
+   * Match uses the caller's raw `taskType` (case-insensitive with the
+   * same `normalizeTaskType` transform the env parser uses for route
+   * lookup). Unmatched task types fall through to the Registry-level
+   * `perAttemptTimeoutMs` per the four-step precedence chain above.
+   *
+   * Sourced from SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`.
+   */
+  taskDefaults?: Record<string, TaskConfig>;
   /**
    * When true, suppress the alpha.26+ deprecation warnings that fire when a
    * call uses the legacy `{instructions, prompt}` shape instead of the
@@ -343,6 +374,14 @@ export class Registry {
    * `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`.
    */
   private readonly authenticatedProviders: Set<string> = new Set();
+  /**
+   * Alpha.30+: per-task configuration overrides keyed by normalized
+   * task type. Populated from `RegistryOptions.taskDefaults` at construction.
+   * Read by `resolvePerAttemptTimeoutMs` and future per-task-aware code
+   * paths. Keys are `normalizeTaskType(rawTaskType)` so `"STRUCTURED_OUTPUT"`
+   * and `"structured-output"` share one entry.
+   */
+  private readonly taskDefaults: Record<string, TaskConfig>;
   private readonly adapters: Record<string, AdapterRegistration>;
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
@@ -361,6 +400,15 @@ export class Registry {
       ...(opts.deprecationWarningHandler ? { handler: opts.deprecationWarningHandler } : {}),
     });
     this.instrumentation = opts.instrumentation;
+    // Alpha.30+: normalize task-default keys the same way env-var parse
+    // + registry lookup normalize task types. So `"STRUCTURED_OUTPUT"`
+    // and `"structured-output"` share one entry.
+    this.taskDefaults = {};
+    if (opts.taskDefaults) {
+      for (const [key, config] of Object.entries(opts.taskDefaults)) {
+        this.taskDefaults[normalizeTaskType(key)] = config;
+      }
+    }
     this.validateConfig();
   }
 
@@ -422,6 +470,29 @@ export class Registry {
    */
   markProviderAuthenticated(providerAlias: string): void {
     this.authenticatedProviders.add(providerAlias);
+  }
+
+  /**
+   * Alpha.30+: resolve the effective per-attempt timeout for a call using
+   * the four-step precedence chain: call → task → Registry → undefined.
+   *
+   * @param taskType — the caller's `taskType` string. Matched
+   *   case-insensitively against declared `taskDefaults` via the same
+   *   normalization the env-var parser uses. Optional (some code paths
+   *   don't have one; falls through to Registry / undefined).
+   * @param callOverride — the per-call `perAttemptTimeoutMs` from the
+   *   generation-method options. Highest precedence when set.
+   * @returns effective timeout in ms, or undefined for "no timeout."
+   */
+  resolvePerAttemptTimeoutMs(taskType?: string, callOverride?: number): number | undefined {
+    if (callOverride !== undefined) return callOverride;
+    if (taskType !== undefined) {
+      const cfg = this.taskDefaults[normalizeTaskType(taskType)];
+      if (cfg?.defaultPerAttemptTimeoutMs !== undefined) {
+        return cfg.defaultPerAttemptTimeoutMs;
+      }
+    }
+    return this.perAttemptTimeoutMs;
   }
 
   /**
@@ -1236,7 +1307,10 @@ class RegistryPort implements LLMPort {
           normalizedOptions.priority,
           (sel) =>
             withPerAttemptTimeout(
-              this.registry.perAttemptTimeoutMs,
+              this.registry.resolvePerAttemptTimeoutMs(
+                normalizedOptions.taskType,
+                normalizedOptions.perAttemptTimeoutMs,
+              ),
               normalizedOptions.signal,
               (signal) => sel.port!.generateText(signal ? { ...normalizedOptions, signal } : normalizedOptions),
             ),
@@ -1281,7 +1355,10 @@ class RegistryPort implements LLMPort {
           normalizedOptions.priority,
           (sel) =>
             withPerAttemptTimeout(
-              this.registry.perAttemptTimeoutMs,
+              this.registry.resolvePerAttemptTimeoutMs(
+                normalizedOptions.taskType,
+                normalizedOptions.perAttemptTimeoutMs,
+              ),
               normalizedOptions.signal,
               (signal) => sel.port!.generateStructured(signal ? { ...normalizedOptions, signal } : normalizedOptions),
             ),
@@ -1431,7 +1508,10 @@ class RegistryPort implements LLMPort {
           options.priority,
           (sel) =>
             withPerAttemptTimeout(
-              this.registry.perAttemptTimeoutMs,
+              this.registry.resolvePerAttemptTimeoutMs(
+                options.taskType,
+                options.perAttemptTimeoutMs,
+              ),
               options.signal,
               (signal) => sel.port!.runAgent(signal ? { ...options, signal } : options),
             ),

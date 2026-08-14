@@ -18,6 +18,24 @@ export interface TaskConfig {
   defaultTemperature?: number;
   defaultMaxOutputTokens?: number;
   description?: string;
+  /**
+   * Alpha.30+: per-task default per-attempt timeout, milliseconds. When
+   * set, overrides the Registry-level `RegistryOptions.perAttemptTimeoutMs`
+   * for calls whose `taskType` matches this declared task. Overridden
+   * in turn by the per-call `perAttemptTimeoutMs` on generation-method
+   * options.
+   *
+   * Precedence (first non-undefined wins): call → task → Registry →
+   * undefined (no timeout).
+   *
+   * Addresses SalesCoach's `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`
+   * (2026-08-14): a single Registry-level timeout starves any provider
+   * whose legitimate latency exceeds the global cap. Per-task defaults
+   * let a slow-but-necessary task (structured-output on a reasoning
+   * model) declare more headroom without loosening the cap that
+   * protects the fast tasks.
+   */
+  defaultPerAttemptTimeoutMs?: number;
 }
 
 /**
