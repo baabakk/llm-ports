@@ -77,6 +77,7 @@ import {
   type Instrumentation,
   type OperationContext,
 } from "../instrumentation.js";
+import { withObservabilityContext } from "../observability-context.js";
 import type {
   CostUsage,
   FallbackCause,
@@ -1329,7 +1330,10 @@ class RegistryPort implements LLMPort {
                 normalizedOptions.perAttemptTimeoutMs,
               ),
               normalizedOptions.signal,
-              (signal) => sel.port!.generateText(signal ? { ...normalizedOptions, signal } : normalizedOptions),
+              (signal) =>
+                scopedPortForAdapter(sel.port!, opCtx).generateText(
+                  signal ? { ...normalizedOptions, signal } : normalizedOptions,
+                ),
             ),
           (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
           normalizedOptions.forceProviderAlias,
@@ -1377,7 +1381,10 @@ class RegistryPort implements LLMPort {
                 normalizedOptions.perAttemptTimeoutMs,
               ),
               normalizedOptions.signal,
-              (signal) => sel.port!.generateStructured(signal ? { ...normalizedOptions, signal } : normalizedOptions),
+              (signal) =>
+                scopedPortForAdapter(sel.port!, opCtx).generateStructured(
+                  signal ? { ...normalizedOptions, signal } : normalizedOptions,
+                ),
             ),
           (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
           normalizedOptions.forceProviderAlias,
@@ -1530,7 +1537,10 @@ class RegistryPort implements LLMPort {
                 options.perAttemptTimeoutMs,
               ),
               options.signal,
-              (signal) => sel.port!.runAgent(signal ? { ...options, signal } : options),
+              (signal) =>
+                scopedPortForAdapter(sel.port!, opCtx).runAgent(
+                  signal ? { ...options, signal } : options,
+                ),
             ),
           (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
           options.forceProviderAlias,
@@ -1667,6 +1677,36 @@ function messageContentToText(content: unknown): string {
     }
   }
   return parts.join("");
+}
+
+/**
+ * Alpha.30+: wrap a provider port with the outer operation's
+ * observability context so the adapter can resurrect the running
+ * `OperationContext` via `resurrectOperationContext(port)`. Passes the
+ * opaque `operation_handle` down; adapters that don't participate in
+ * the new scheme ignore the extra field.
+ *
+ * When `opCtx` is undefined (instrumentation not configured on the
+ * Registry), returns the port unchanged — no wrapping cost. When set,
+ * `withObservabilityContext` returns a Proxy that carries the merged
+ * context; the adapter's method receives the wrapped port and any
+ * `getObservabilityContext(port)` call there returns the operation
+ * fields.
+ *
+ * Kept intentionally minimal — the only fields the Registry stamps
+ * down are `operation_id` (correlation) and `operation_handle`
+ * (resurrection key). Caller-supplied fields on
+ * `instrumentation.context` (traceparent, baggage, attributes) are
+ * merged in via `withObservabilityContext`'s composition rules; the
+ * caller-side ObservabilityContext lives at Registry construction and
+ * is applied at Instrumentation build time, not per-call.
+ */
+function scopedPortForAdapter(port: LLMPort, opCtx: OperationContext | undefined): LLMPort {
+  if (!opCtx) return port;
+  return withObservabilityContext(port, {
+    operation_id: opCtx.operationId,
+    operation_handle: opCtx.handle,
+  });
 }
 
 /**

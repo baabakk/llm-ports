@@ -109,4 +109,28 @@ export interface ObservabilityContext {
    * the resulting `CorrelationContext.conversation_id`.
    */
   conversation_id?: string;
+
+  /**
+   * Alpha.30+: opaque handle the Registry mints when it opens an
+   * operation and passes down to adapters via
+   * `withObservabilityContext(port, { operation_id, operation_handle })`.
+   *
+   * Adapters treat this string as OPAQUE: they never construct or parse
+   * one. The core's `resurrectOperationContext(port)` helper reads it
+   * and returns the running `OperationContext`, so an adapter can
+   * emit correlated sub-events (agent step events, stream chunk
+   * events, richer attempt.completed data) without re-implementing
+   * the operation-level bookkeeping.
+   *
+   * Absent when the caller invokes an adapter directly (no Registry
+   * in the loop). Adapters that support their own operation lifecycle
+   * open one via `withOperation` in that case.
+   *
+   * Sourced from `TD-ALPHA29-ADAPTER-EMIT-DEFERRED` in the llm-ports
+   * repo's TECH-DEBT.md — the plumbing that unlocks adapter-level
+   * emission (agent step events, streaming, provider cache
+   * normalization) without a breaking change to LLMPort's method
+   * signatures.
+   */
+  operation_handle?: string;
 }

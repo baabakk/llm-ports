@@ -251,6 +251,7 @@ export {
   emitRetryScheduled,
   failAttempt,
   maybeComputeFingerprint,
+  resurrectOperationContext,
   startAttempt,
   withAttempt,
   withOperation,

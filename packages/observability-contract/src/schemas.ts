@@ -67,6 +67,7 @@ export const observabilityContextSchema = z.object({
     .optional(),
   fingerprint_key: z.string().optional(),
   conversation_id: z.string().optional(),
+  operation_handle: z.string().optional(),
 });
 
 // ─── Primitive schemas ──────────────────────────────────────────────

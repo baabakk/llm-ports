@@ -73,6 +73,8 @@ import type {
   RetryReason,
   TokenUsage,
 } from "@llm-ports/observability-contract";
+import { getObservabilityContext } from "./observability-context.js";
+import type { LLMPort } from "./ports/llm-port.js";
 import {
   buildEvent,
   computeRequestFingerprint,
@@ -200,6 +202,16 @@ export interface OperationContext {
   /** The `operation_id` in flight for this operation. */
   readonly operationId: string;
 
+  /**
+   * Alpha.30+: opaque handle the Registry stamps onto downstream
+   * `ObservabilityContext.operation_handle` so adapters can retrieve
+   * this OperationContext via `resurrectOperationContext(port)`.
+   * Distinct from `operationId` — the handle is a registration key for
+   * the in-process handle-registry Map; `operationId` is the event
+   * envelope's correlation ID that lands on every emitted event.
+   */
+  readonly handle: string;
+
   /** Wall-clock start of the operation (Date.now()). */
   readonly startedAtMs: number;
 
@@ -326,6 +338,33 @@ export interface AttemptWorkResult<T> {
 
 // ─── Constants ──────────────────────────────────────────────────────
 
+/**
+ * Alpha.30+: module-level registry of in-flight OperationContexts
+ * keyed by their opaque handle. Populated by `withOperation` at the
+ * start of an operation; deleted in the finally block when the
+ * operation completes / fails / cancels.
+ *
+ * Adapters read from this registry via `resurrectOperationContext(port)`
+ * which retrieves the handle from the port's ObservabilityContext.
+ *
+ * This is a `Map<string, OperationContext>` rather than a `WeakMap`
+ * because handles are strings (not object references). The finally-
+ * block cleanup keeps the map bounded to concurrently-live operations.
+ * A pathological consumer that never `await`s a `withOperation` could
+ * in principle leak entries, but that would also leak the caller's
+ * own promise state, so it's the caller's bug, not ours.
+ */
+const handleRegistry = new Map<string, OperationContext>();
+
+/**
+ * Mint a new opaque operation handle. Uses the same nanoid generator
+ * the contract package uses for other IDs — 16 chars, URL-safe. The
+ * probability of collision within one process is negligible.
+ */
+function newOperationHandle(): string {
+  return newOperationId();
+}
+
 const ZERO_USAGE: TokenUsage = Object.freeze({
   inputTokens: 0,
   outputTokens: 0,
@@ -364,15 +403,22 @@ export async function withOperation<T>(
   }
 
   const operationId = instrumentation.context?.operation_id ?? newOperationId();
+  const handle = newOperationHandle();
   const opCtx: OperationContext = {
     instrumentation,
     operationId,
+    handle,
     startedAtMs: Date.now(),
     attemptsMade: 0,
     providersTried: [],
     aggregateUsage: { ...ZERO_USAGE },
     aggregateCost: { ...ZERO_COST },
   };
+  // Register the handle so adapters called during `work` can retrieve
+  // this OperationContext via `resurrectOperationContext(port)`. Cleaned
+  // up in the finally block below so a long-running consumer doesn't
+  // leak entries into the module-level Map.
+  handleRegistry.set(handle, opCtx);
 
   const opCorrelation: CorrelationContext = { operation_id: operationId };
 
@@ -386,47 +432,96 @@ export async function withOperation<T>(
   );
 
   try {
-    const result = await work(opCtx);
-    const totalDurationMs = Date.now() - opCtx.startedAtMs;
+    try {
+      const result = await work(opCtx);
+      const totalDurationMs = Date.now() - opCtx.startedAtMs;
 
-    safeEmit(
-      instrumentation.config,
-      buildEvent(instrumentation.config, "llm.operation.completed", opCorrelation, {
-        aggregate_usage: opCtx.aggregateUsage,
-        aggregate_cost: opCtx.aggregateCost,
-        attempts_made: opCtx.attemptsMade,
-        final_provider_alias: opCtx.finalProviderAlias ?? "(unknown)",
-        total_duration_ms: totalDurationMs,
-        ...(opCtx.resultSummary ? { result_summary: opCtx.resultSummary } : {}),
-      }),
-    );
-
-    return result;
-  } catch (err) {
-    const totalDurationMs = Date.now() - opCtx.startedAtMs;
-
-    if (isAbortError(err)) {
       safeEmit(
         instrumentation.config,
-        buildEvent(instrumentation.config, "llm.operation.cancelled", opCorrelation, {
-          cancelled_at_attempt: opCtx.attemptsMade,
-          providers_tried_before_cancel: [...opCtx.providersTried],
-          total_duration_ms: totalDurationMs,
-        }),
-      );
-    } else {
-      safeEmit(
-        instrumentation.config,
-        buildEvent(instrumentation.config, "llm.operation.failed", opCorrelation, {
-          error: toErrorInfo(err),
+        buildEvent(instrumentation.config, "llm.operation.completed", opCorrelation, {
+          aggregate_usage: opCtx.aggregateUsage,
+          aggregate_cost: opCtx.aggregateCost,
           attempts_made: opCtx.attemptsMade,
-          providers_tried: [...opCtx.providersTried],
+          final_provider_alias: opCtx.finalProviderAlias ?? "(unknown)",
           total_duration_ms: totalDurationMs,
+          ...(opCtx.resultSummary ? { result_summary: opCtx.resultSummary } : {}),
         }),
       );
+
+      return result;
+    } catch (err) {
+      const totalDurationMs = Date.now() - opCtx.startedAtMs;
+
+      if (isAbortError(err)) {
+        safeEmit(
+          instrumentation.config,
+          buildEvent(instrumentation.config, "llm.operation.cancelled", opCorrelation, {
+            cancelled_at_attempt: opCtx.attemptsMade,
+            providers_tried_before_cancel: [...opCtx.providersTried],
+            total_duration_ms: totalDurationMs,
+          }),
+        );
+      } else {
+        safeEmit(
+          instrumentation.config,
+          buildEvent(instrumentation.config, "llm.operation.failed", opCorrelation, {
+            error: toErrorInfo(err),
+            attempts_made: opCtx.attemptsMade,
+            providers_tried: [...opCtx.providersTried],
+            total_duration_ms: totalDurationMs,
+          }),
+        );
+      }
+      throw err;
     }
-    throw err;
+  } finally {
+    // Alpha.30+: unregister the handle so the handle-registry Map
+    // doesn't accumulate entries for completed operations. The
+    // OperationContext itself can then be garbage-collected once the
+    // work callback's closures release it.
+    handleRegistry.delete(handle);
   }
+}
+
+// ─── Public API: adapter-side operation resurrection (alpha.30+) ────
+
+/**
+ * Retrieve the running `OperationContext` from a wrapped port when the
+ * Registry (or another outer scope) plumbed one down via
+ * `withObservabilityContext(port, { operation_handle })`. Returns
+ * undefined when the port has no handle attached — the common case
+ * when a consumer imports an adapter directly, bypassing the Registry.
+ *
+ * Adapters use this to emit correlated sub-events (agent step events,
+ * stream chunk events, richer diagnostic data) that thread into the
+ * outer operation without having to open a new one:
+ *
+ * ```typescript
+ * // Inside an adapter's runAgent implementation:
+ * const opCtx = resurrectOperationContext(this);
+ * if (opCtx) {
+ *   // Emit agent.step.* events correlated with the outer operation.
+ *   // The Registry's withOperation + withAttempt already handle the
+ *   // outer lifecycle; this adds richer step-level detail.
+ * } else {
+ *   // Called directly — the adapter opens its own withOperation to
+ *   // emit the full lifecycle.
+ * }
+ * ```
+ *
+ * Read semantics only: this does NOT create an OperationContext when
+ * none exists. Adapters that want to instrument in the direct-call
+ * case wrap their own `withOperation`. This helper's contract is
+ * "resurrect what an outer scope already opened."
+ *
+ * Sourced from `TD-ALPHA29-ADAPTER-EMIT-DEFERRED` — the plumbing that
+ * unlocks §2.4/§2.5/§2.7 without a breaking change to `LLMPort`
+ * method signatures.
+ */
+export function resurrectOperationContext(port: LLMPort): OperationContext | undefined {
+  const ctx = getObservabilityContext(port);
+  if (!ctx?.operation_handle) return undefined;
+  return handleRegistry.get(ctx.operation_handle);
 }
 
 // ─── Public API: withAttempt ────────────────────────────────────────

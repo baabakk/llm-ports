@@ -122,6 +122,7 @@ function mergeContext(
   if (right.tracestate !== undefined) merged.tracestate = right.tracestate;
   if (right.fingerprint_key !== undefined) merged.fingerprint_key = right.fingerprint_key;
   if (right.conversation_id !== undefined) merged.conversation_id = right.conversation_id;
+  if (right.operation_handle !== undefined) merged.operation_handle = right.operation_handle;
 
   if (right.baggage !== undefined) {
     if (left.baggage === undefined) {
