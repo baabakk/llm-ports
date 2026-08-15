@@ -303,6 +303,26 @@ export const attemptFailedDataSchema = z.object({
   latency_ms: z.number().nonnegative(),
 });
 
+// Alpha.30+: streaming stats + per-chunk event. Declared before
+// attemptCompletedDataSchema so the schema can reference streamStatsSchema
+// on its `stream_stats` optional field.
+
+export const streamStatsSchema = z.object({
+  ttft_ms: z.number().nonnegative(),
+  total_stream_duration_ms: z.number().nonnegative(),
+  chunk_count: z.number().int().nonnegative(),
+  inter_chunk_latency_p50_ms: z.number().nonnegative().optional(),
+  inter_chunk_latency_p99_ms: z.number().nonnegative().optional(),
+  termination: z.enum(["complete", "aborted", "error"]),
+});
+
+export const streamChunkDataSchema = z.object({
+  chunk_index: z.number().int().nonnegative(),
+  chars_in_chunk: z.number().int().nonnegative(),
+  time_since_start_ms: z.number().nonnegative(),
+  chunk_content: z.string().optional(),
+});
+
 export const attemptCompletedDataSchema = z.object({
   usage: tokenUsageSchema,
   cost: costUsageSchema,
@@ -313,6 +333,7 @@ export const attemptCompletedDataSchema = z.object({
   request_fingerprint: requestFingerprintSchema.optional(),
   response_char_count: z.number().int().nonnegative().optional(),
   response_preview: z.string().optional(),
+  stream_stats: streamStatsSchema.optional(),
 });
 
 export const operationCompletedDataSchema = z.object({
@@ -439,6 +460,7 @@ export const lifecycleEventSchemas = {
   "agent.step.completed": eventSchemaFor("agent.step.completed", agentStepCompletedDataSchema),
   "agent.tool.called": eventSchemaFor("agent.tool.called", agentToolCalledDataSchema),
   "agent.tool.returned": eventSchemaFor("agent.tool.returned", agentToolReturnedDataSchema),
+  "llm.stream.chunk": eventSchemaFor("llm.stream.chunk", streamChunkDataSchema),
 };
 
 // Sanity: every LIFECYCLE_EVENT_TYPES entry has a corresponding schema.

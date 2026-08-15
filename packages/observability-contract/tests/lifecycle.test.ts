@@ -57,8 +57,8 @@ function makeEvent<T extends LifecycleEventType>(
 
 describe("Lifecycle event types (§4.3 + §4.7)", () => {
   describe("LIFECYCLE_EVENT_TYPES enumeration", () => {
-    it("contains all 13 event types (9 lifecycle + 4 agent-step)", () => {
-      expect(LIFECYCLE_EVENT_TYPES).toHaveLength(13);
+    it("contains all 14 event types (9 lifecycle + 4 agent-step + 1 stream-chunk added alpha.30)", () => {
+      expect(LIFECYCLE_EVENT_TYPES).toHaveLength(14);
     });
 
     it("contains the 9 core lifecycle types", () => {

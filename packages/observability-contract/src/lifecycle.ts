@@ -265,6 +265,15 @@ export interface AttemptCompletedData {
    * result.
    */
   response_preview?: string;
+
+  /**
+   * Alpha.30+: aggregate streaming statistics. Set only for
+   * `streamText` / `streamStructured` attempts; omitted on the
+   * three non-streaming methods. Always safe to emit — this is a
+   * rollup summary, not content. See `StreamStats` for the field
+   * meanings and the TTFT / p50 / p99 semantics.
+   */
+  stream_stats?: StreamStats;
 }
 
 /**
@@ -332,6 +341,80 @@ export interface OperationCancelledData {
 
   /** Total wall-clock duration from operation start to cancel. */
   total_duration_ms: number;
+}
+
+// ─── Streaming statistics + per-chunk event (alpha.30+, §2.7) ───────
+
+/**
+ * Aggregate telemetry for a completed streaming attempt. Attached to
+ * `AttemptCompletedData.stream_stats` on `llm.attempt.completed` for
+ * `streamText` / `streamStructured` calls. Always emitted regardless
+ * of `CapturePolicy.stream_chunk_capture` — this is a rollup, not
+ * content.
+ *
+ * TTFT (time-to-first-token) is the load-bearing new metric:
+ * consumers can chart provider tail latency, which is invisible in
+ * the non-streaming lifecycle. p50 / p99 give the shape of
+ * inter-chunk latency distribution beyond just the average.
+ */
+export interface StreamStats {
+  /** Milliseconds from stream open to receipt of the first chunk. */
+  ttft_ms: number;
+
+  /** Total wall-clock duration from stream open to stream close. */
+  total_stream_duration_ms: number;
+
+  /** Number of chunks received during the stream's lifetime. */
+  chunk_count: number;
+
+  /**
+   * 50th-percentile inter-chunk latency, milliseconds. Absent when
+   * fewer than two chunks arrived (no gap to measure).
+   */
+  inter_chunk_latency_p50_ms?: number;
+
+  /** 99th-percentile inter-chunk latency, milliseconds. Absent as above. */
+  inter_chunk_latency_p99_ms?: number;
+
+  /**
+   * How the stream ended. "complete" = natural EOS; "aborted" =
+   * caller-signal or AbortController fired; "error" = provider or
+   * transport threw mid-stream.
+   */
+  termination: "complete" | "aborted" | "error";
+}
+
+/**
+ * `llm.stream.chunk` — one chunk of a streaming attempt. Emitted per-chunk
+ * only when `CapturePolicy.stream_chunk_capture === "full"`. Aggregate
+ * mode (the default) computes `StreamStats` from these events without
+ * emitting them.
+ *
+ * The event is expensive at high chunk rates (a 5000-chunk stream fires
+ * 5000 emissions); use `"full"` mode only for low-volume diagnostic
+ * runs. Consumers running steady-state production traffic keep
+ * `stream_chunk_capture: "off"` and rely on the aggregate
+ * `AttemptCompletedData.stream_stats` field.
+ */
+export interface StreamChunkData {
+  /** 0-indexed chunk sequence number within the attempt. */
+  chunk_index: number;
+
+  /**
+   * Character count of this chunk. Always safe to emit — not content;
+   * gives a coarse per-chunk size signal without leaking content bytes.
+   */
+  chars_in_chunk: number;
+
+  /** Milliseconds from stream open to this chunk's receipt. */
+  time_since_start_ms: number;
+
+  /**
+   * The chunk's raw text content. Content, so gated by
+   * `CapturePolicy.content ∈ {"full", "redacted"}`. Adapters populate
+   * this only when content emission is allowed; otherwise omitted.
+   */
+  chunk_content?: string;
 }
 
 // ─── Agent step events (Plan 58 v0.4 §4.7) ──────────────────────────
@@ -423,6 +506,7 @@ export interface LifecycleEventDataByType {
   "agent.step.completed": AgentStepCompletedData;
   "agent.tool.called": AgentToolCalledData;
   "agent.tool.returned": AgentToolReturnedData;
+  "llm.stream.chunk": StreamChunkData;
 }
 
 /** Every lifecycle event type name as a string literal union. */
@@ -446,6 +530,7 @@ export const LIFECYCLE_EVENT_TYPES: readonly LifecycleEventType[] = [
   "agent.step.completed",
   "agent.tool.called",
   "agent.tool.returned",
+  "llm.stream.chunk",
 ] as const;
 
 /**

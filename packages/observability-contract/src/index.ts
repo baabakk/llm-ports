@@ -199,5 +199,7 @@ export type {
   OperationFailedData,
   OperationStartedData,
   RetryReason,
+  StreamChunkData,
+  StreamStats,
   TerminationStatus,
 } from "./lifecycle.js";
