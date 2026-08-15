@@ -58,6 +58,7 @@
  */
 
 import type {
+  CacheStats,
   CapturePolicy,
   ComputeRequestFingerprintOptions,
   CorrelationContext,
@@ -345,6 +346,16 @@ export interface AttemptWorkResult<T> {
    * undefined and the field is omitted from the emitted event.
    */
   streamStats?: StreamStats;
+
+  /**
+   * Alpha.30+: provider prompt-cache accounting derived from the
+   * adapter's `TokenUsage.cacheReadTokens` / `.cacheWriteTokens`. When
+   * omitted, the `cache_stats` field is not emitted on
+   * `llm.attempt.completed`; when present it is passed through
+   * verbatim so consumers see the canonical `CacheStats.provider_cache`
+   * / `.semantic_cache` shape rather than the adapter's native fields.
+   */
+  cacheStats?: CacheStats;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -673,6 +684,7 @@ export async function withAttempt<T>(
         ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
         ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
         ...(result.streamStats ? { stream_stats: result.streamStats } : {}),
+        ...(result.cacheStats ? { cache_stats: result.cacheStats } : {}),
         ...diagnosticFields,
       }),
     );
@@ -980,6 +992,7 @@ export function completeAttempt<T>(
       ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
       ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
       ...(result.streamStats ? { stream_stats: result.streamStats } : {}),
+      ...(result.cacheStats ? { cache_stats: result.cacheStats } : {}),
       ...diagnosticFields,
     }),
   );

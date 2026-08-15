@@ -91,6 +91,7 @@ import {
 } from "../instrumentation.js";
 import { withObservabilityContext } from "../observability-context.js";
 import type {
+  CacheStats,
   CapturePolicy,
   CostUsage,
   FallbackCause,
@@ -1080,6 +1081,16 @@ interface AttemptMetrics {
    * regardless of policy.
    */
   responsePreviewSource?: string;
+  /**
+   * Alpha.30+ §2.6: normalized cache accounting derived from the
+   * adapter's `TokenUsage.cacheReadTokens` / `.cacheWriteTokens`.
+   * `toContractMetricsBase` computes it via
+   * `provider_cache_stats_from_usage` so all in-process adapters land
+   * on the same `CacheStats.provider_cache` shape at the boundary.
+   * Undefined = adapter reported no cache activity → emit no
+   * `cache_stats` field on `llm.attempt.completed`.
+   */
+  cacheStats?: CacheStats;
 }
 
 async function walkChain<R>(
@@ -1125,6 +1136,7 @@ async function walkChain<R>(
           ...(m.responsePreviewSource !== undefined
             ? { responsePreviewSource: m.responsePreviewSource }
             : {}),
+          ...(m.cacheStats ? { cacheStats: m.cacheStats } : {}),
         };
       },
     );
@@ -1811,6 +1823,7 @@ function toContractMetricsBase(r: {
     outputTokens: number;
     totalTokens: number;
     cacheReadTokens?: number;
+    cacheWriteTokens?: number;
     reasoningTokens?: number;
   };
   cost: {
@@ -1835,7 +1848,66 @@ function toContractMetricsBase(r: {
     totalUSD: r.cost.totalUSD,
   };
   if (r.cost.cacheSavingsUSD !== undefined) cost.savingsUSD = r.cost.cacheSavingsUSD;
-  return { usage, cost, modelId: r.modelId };
+  const cacheStats = providerCacheStatsFromUsage(
+    r.usage.cacheReadTokens,
+    r.usage.cacheWriteTokens,
+    r.usage.inputTokens,
+  );
+  const metrics: AttemptMetrics = { usage, cost, modelId: r.modelId };
+  if (cacheStats) metrics.cacheStats = cacheStats;
+  return metrics;
+}
+
+/**
+ * Alpha.30+ §2.6: derive the contract's `CacheStats.provider_cache`
+ * shape from the adapter-normalized usage counts.
+ *
+ * The five in-process adapters (openai, anthropic, google, ollama,
+ * vercel) all surface prompt-cache activity on `TokenUsage.cacheReadTokens`
+ * / `.cacheWriteTokens` in their native handling. Anthropic reports
+ * both explicit read and write; OpenAI + Google report read only; Ollama
+ * + Vercel report nothing. This helper folds those three shapes into
+ * the one contract shape without needing per-adapter branching:
+ *
+ *   - `read > 0`  + `read >= input`  → status "hit"     (fully served from cache)
+ *   - `read > 0`  + `read <  input`  → status "partial" (some prefix cached, tail fresh)
+ *   - `read == 0` + something reported  → status "miss" (cache consulted, no hit)
+ *   - both undefined                     → return undefined (adapter is silent about cache)
+ *
+ * The `provider_reported` flag is always true here because we only
+ * construct the shape when the adapter actually surfaced a field —
+ * strict-mode consumers who want a "no cache activity" signal simply
+ * observe the field's absence.
+ */
+function providerCacheStatsFromUsage(
+  cacheReadTokens: number | undefined,
+  cacheWriteTokens: number | undefined,
+  inputTokens: number,
+): CacheStats | undefined {
+  const readReported = cacheReadTokens !== undefined;
+  const writeReported = cacheWriteTokens !== undefined;
+  if (!readReported && !writeReported) return undefined;
+
+  const readCount = cacheReadTokens ?? 0;
+  const writeCount = cacheWriteTokens ?? 0;
+
+  let status: "hit" | "miss" | "partial";
+  if (readCount === 0) {
+    status = "miss";
+  } else if (readCount >= inputTokens && inputTokens > 0) {
+    status = "hit";
+  } else {
+    status = "partial";
+  }
+
+  const provider_cache: CacheStats["provider_cache"] = {
+    status,
+    provider_reported: true,
+  };
+  if (readReported) provider_cache!.read_input_tokens = readCount;
+  if (writeReported) provider_cache!.write_input_tokens = writeCount;
+
+  return { provider_cache };
 }
 
 /**
@@ -2320,6 +2392,14 @@ async function closeStreamedAttempt(args: {
     termination: "complete",
   };
 
+  const cacheStats = meta?.usage
+    ? providerCacheStatsFromUsage(
+        meta.usage.cacheReadTokens,
+        meta.usage.cacheWriteTokens,
+        meta.usage.inputTokens,
+      )
+    : undefined;
+
   completeAttempt(handle, {
     value: undefined,
     ...(meta?.usage ? { usage: meta.usage } : {}),
@@ -2328,6 +2408,7 @@ async function closeStreamedAttempt(args: {
     responseCharCount: args.totalChars,
     responsePreviewSource: args.previewBuffer,
     streamStats: stats,
+    ...(cacheStats ? { cacheStats } : {}),
   });
 }
 
