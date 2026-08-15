@@ -15,8 +15,42 @@
 | `@llm-ports/adapter-vercel` | [`packages/adapter-vercel/CHANGELOG.md`](packages/adapter-vercel/CHANGELOG.md) |
 | `@llm-ports/adapter-codex` | [`packages/adapter-codex/CHANGELOG.md`](packages/adapter-codex/CHANGELOG.md) |
 | `@llm-ports/adapter-aider` | [`packages/adapter-aider/CHANGELOG.md`](packages/adapter-aider/CHANGELOG.md) |
+| `@llm-ports/telemetry-otel` | [`packages/telemetry-otel/CHANGELOG.md`](packages/telemetry-otel/CHANGELOG.md) |
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
+
+## v0.1.0-alpha.30 — 2026-08-14
+
+### What changed
+
+Streaming instrumentation, adapter-side emission, provider-cache normalization, and an OpenTelemetry companion package. Closes both alpha.29 carve-outs (`TD-ALPHA29-ADAPTER-EMIT-DEFERRED`, `TD-ALPHA29-AGENT-STEP-EVENTS-DEFERRED`) and both SalesCoach TDs (`TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`, `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`). Fully additive; existing consumers see identical behavior when they don't opt into the new fields.
+
+### New
+
+- **`@llm-ports/core` — streaming instrumentation.** `streamText` / `streamStructured` now emit the same operation + attempt lifecycle as non-streaming methods, plus `AttemptCompletedData.stream_stats`: `ttft_ms`, `total_stream_duration_ms`, `chunk_count`, `inter_chunk_latency_p50_ms` / `_p99_ms` (from real per-chunk timings), `termination: "complete" | "aborted" | "error"`. New `llm.stream.chunk` event fires per chunk when `CapturePolicy.stream_chunk_capture === "full"`; content on the chunk event is gated by the content policy. Four new manual operation hatches (`startOperation`, `completeOperation`, `failOperation`, `cancelOperation`) compose with the existing attempt hatches — streaming completion is spread across consumer iteration, so wrap-around doesn't fit.
+- **`@llm-ports/core` — provider-cache normalization.** Native `TokenUsage.cacheReadTokens` / `.cacheWriteTokens` fold into `CacheStats.provider_cache` on `llm.attempt.completed` at the Registry boundary. Same shape for OpenAI, Anthropic, Google, and the streaming path.
+- **`@llm-ports/core` — adapter-emission scaffold.** `resurrectOperationContext(port)` retrieves the running `OperationContext` when the Registry (or a direct-caller `withObservabilityContext`) plumbed one down via an opaque `operation_handle` on `ObservabilityContext`. Four new agent-event emit helpers (`emitAgentStepStarted`, `emitAgentStepCompleted`, `emitAgentToolCalled`, `emitAgentToolReturned`). `sha256Hex` + `hmacSha256Hex` re-exported from `@llm-ports/observability-contract` so adapters compute digests without needing to add the contract package as a direct dep.
+- **`@llm-ports/observability-contract` — streaming contract.** New `StreamStats` + `StreamChunkData` types, `llm.stream.chunk` lifecycle event, `AttemptCompletedData.stream_stats` optional field, and new `FallbackCause.provider_authentication_never_established`.
+- **`@llm-ports/adapter-openai` / `-anthropic` / `-google` — agent-loop events.** All three now call `resurrectOperationContext(this)` at the top of `runAgent` and emit `agent.step.started` + `.completed` per LLM turn, `agent.tool.called` + `.returned` per tool call (with sha256 digests of arguments + results).
+- **`@llm-ports/adapter-codex` / `-aider` — shared-service refactor.** Both subprocess adapters now compose `withOperation` + `withAttempt` instead of duplicating `sink.emit(buildEvent(...))` blocks. Spawn errors wrap as `AdapterInternalError` inside the withAttempt work so emitted events keep `cause_category: "port_internal"`.
+- **`@llm-ports/telemetry-otel@0.1.0`** — new publishable package. `createOtelSink({ tracer, meter? })` bridges every contract event to OTel gen_ai spans + metrics per the [gen_ai semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). Zero runtime dependencies; the package declares a minimal `Tracer` / `Meter` subset of `@opentelemetry/api` v1 and consumers pass their real OTel instances (structural match). Metrics optional — pass `meter` for histograms, omit for tracing-only mode. Toggles: `emitStreamChunkEvents` / `emitAgentEvents` (default true).
+
+### Fixed
+
+- **`@llm-ports/core` — auth-error walk-vs-abort (SalesCoach `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`).** `defaultShouldFallback` now takes an optional `ShouldFallbackContext` (`providerAlias`, `hasEverAuthenticated`) and walks on `AuthenticationError` only when the provider has never authenticated in the current process. A dead position-4 key at chain-open falls forward; a mid-flight auth failure on a previously-authenticated provider aborts. `probeCredentials(chain?, options?)` gains an opt-in two-tier `probeWithGenerationFallback` mode for adapters where `listModels` is authoritative but not exhaustive.
+- **`@llm-ports/core` — per-attempt timeout precedence (SalesCoach `TD-CALLPLAN-CHAIN-TIMEOUT-STARVATION`).** `resolvePerAttemptTimeoutMs(taskType, callOverride)` implements a 4-step precedence chain: call override → task-declared default → Registry default → undefined. Single global 15s cap no longer starves later chain positions on long-tail tasks.
+- **`@llm-ports/core` — diagnostic fields on every completed attempt.** `AttemptCompletedData.response_char_count` always emits verbatim; `.response_preview` emits only when `CapturePolicy.content` is `"full"` or `"redacted"` AND `.responsePreviewMaxChars > 0` (default 0 in strict, 200 in permissive).
+- **`@llm-ports/core` — observability-context proxy bind.** `withObservabilityContext` now binds methods to the wrapped proxy (receiver) instead of the underlying target. That's what makes `resurrectOperationContext(this)` inside `runAgent` walk back to the outer op — the proxy is the instance the context is registered against. Destructured calls still work (receiver at bind time is the proxy).
+
+### Changed
+
+- Nothing breaking at the public API surface. Every new field is additive; existing callers see identical behavior when they don't opt in.
+
+### Migration notes
+
+Bump every `@llm-ports/*` peer dep in your `package.json` from `alpha.29` to `alpha.30`. No code changes required. Wiring the new streaming, cache, and OTel surfaces is opt-in. Add `@llm-ports/telemetry-otel` as a new dependency if you want OTel semconv bridging.
+
+Consumers currently on the `default` shouldFallback preset who want the alpha.30 walk-vs-abort auth policy should switch to `{ shouldFallback: defaultShouldFallback }` from `@llm-ports/core` explicitly — the unnamed default preset (`undefined`) keeps the alpha.28+ compat behavior with the ctx-aware `AuthenticationError` walk added on top.
 
 ## v0.1.0-alpha.29 — 2026-08-11
 
