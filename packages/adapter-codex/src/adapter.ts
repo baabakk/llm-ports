@@ -27,6 +27,7 @@ import type { Readable } from "node:stream";
 import type {
   AgentResult,
   CostUsage,
+  Instrumentation,
   LLMPort,
   RunAgentOptions,
   TokenUsage,
@@ -34,16 +35,13 @@ import type {
 import {
   AdapterInternalError,
   ProviderUnavailableError,
+  withAttempt,
+  withOperation,
 } from "@llm-ports/core";
-import {
-  buildEvent,
-  correlationFromContext,
-  newAttemptId,
-  newOperationId,
-  type CorrelationContext,
-  type EmitterConfig,
-  type ObservabilityContext,
-  type ObservabilitySink,
+import type {
+  EmitterConfig,
+  ObservabilityContext,
+  ObservabilitySink,
 } from "@llm-ports/observability-contract";
 
 // ─── Public types ──────────────────────────────────────────────────
@@ -206,133 +204,122 @@ async function runCodexAgent(
     imageFiles: codexOpts.imageFiles,
   });
 
-  const operationId = config.observability?.context?.operation_id ?? newOperationId();
-  const attemptId = newAttemptId();
-  const correlation: CorrelationContext = config.observability?.context
-    ? correlationFromContext(config.observability.context, {
-        operation_id: operationId,
-        attempt_id: attemptId,
-      })
-    : { operation_id: operationId, attempt_id: attemptId };
-
-  const emitterConfig: EmitterConfig | null = config.observability
-    ? {
-        source: config.observability.source ?? {
-          library: "@llm-ports/adapter-codex",
-          library_version: "0.1.0-alpha.28",
-        },
-        sink: config.observability.sink,
-      }
-    : null;
-
-  if (emitterConfig) {
-    const opCorr: CorrelationContext = { operation_id: correlation.operation_id };
-    emitterConfig.sink.emit(
-      buildEvent(emitterConfig, "llm.operation.started", opCorr, {
-        task_type: options.taskType,
-        provider_chain: [alias],
-        method: "runAgent",
-      }),
-    );
-    emitterConfig.sink.emit(
-      buildEvent(emitterConfig, "llm.attempt.started", correlation, {
-        provider_alias: alias,
-        model_id: model ?? "(codex-default)",
-        attempt_number: 1,
-        is_retry: false,
-        is_fallback: false,
-      }),
-    );
-  }
-
-  const start = Date.now();
+  const instrumentation = buildAdapterInstrumentation(config.observability, {
+    library: "@llm-ports/adapter-codex",
+    library_version: "0.1.0-alpha.30",
+  });
 
   try {
-    const outcome = await spawnCodex({
-      cliPath: config.cliPath,
-      args,
-      env: { ...process.env, ...config.envOverrides } as NodeJS.ProcessEnv,
-      timeoutMs: config.timeoutMs,
-      signal: options.signal,
-    });
+    return await withOperation(
+      instrumentation,
+      {
+        taskType: options.taskType ?? "general",
+        method: "runAgent",
+        providerChain: [alias],
+      },
+      async (opCtx) => {
+        return withAttempt(
+          opCtx,
+          { providerAlias: alias, modelId: model ?? "(codex-default)" },
+          async () => {
+            const start = Date.now();
+            let outcome: SpawnOutcome;
+            try {
+              outcome = await spawnCodex({
+                cliPath: config.cliPath,
+                args,
+                env: { ...process.env, ...config.envOverrides } as NodeJS.ProcessEnv,
+                timeoutMs: config.timeoutMs,
+                signal: options.signal,
+              });
+            } catch (spawnErr) {
+              // Preserve pre-refactor `cause_category: "port_internal"`
+              // classification on the emitted `llm.attempt.failed` /
+              // `.operation.failed` events. Bare `Error` from spawn maps
+              // to `"unknown"` in `errorTypeToCauseCategory`, so wrap it
+              // as `AdapterInternalError` first (which maps to
+              // `"port_internal"`). The outer catch still re-throws as
+              // `ProviderUnavailableError` for the caller so external
+              // behavior is unchanged.
+              if (spawnErr instanceof Error) {
+                throw new AdapterInternalError(alias, spawnErr.message, spawnErr);
+              }
+              throw new AdapterInternalError(alias, String(spawnErr));
+            }
+            const latencyMs = Date.now() - start;
 
-    const latencyMs = Date.now() - start;
+            // Codex --json emits one JSON object per line. Parse each; on
+            // parse failure fall through to treating the line as opaque text.
+            const parsedEvents = parseCodexJsonLines(outcome.stdout);
+            const usage = deriveUsage(parsedEvents);
+            const cost: CostUsage = { inputUSD: 0, outputUSD: 0, totalUSD: 0 };
+            const finalText = deriveFinalText(parsedEvents) ?? outcome.stdout.trim();
+            const modelId = deriveModelId(parsedEvents) ?? model ?? "(codex-default)";
 
-    // Codex --json emits one JSON object per line. Parse each; on
-    // parse failure fall through to treating the line as opaque text.
-    const parsedEvents = parseCodexJsonLines(outcome.stdout);
-    const usage = deriveUsage(parsedEvents);
-    const cost: CostUsage = { inputUSD: 0, outputUSD: 0, totalUSD: 0 };
-    const finalText = deriveFinalText(parsedEvents) ?? outcome.stdout.trim();
-    const modelId = deriveModelId(parsedEvents) ?? model ?? "(codex-default)";
+            // Carry codex's exit code through to `operation.completed`'s
+            // result_summary so consumers preserve the pre-shared-service
+            // signal.
+            if (opCtx) {
+              opCtx.resultSummary = { exit_code: outcome.exitCode };
+            }
 
-    if (emitterConfig) {
-      emitterConfig.sink.emit(
-        buildEvent(emitterConfig, "llm.attempt.completed", correlation, {
-          usage,
-          cost,
-          latency_ms: latencyMs,
-          final_model_id: modelId,
-        }),
-      );
-      const opCorr: CorrelationContext = { operation_id: correlation.operation_id };
-      emitterConfig.sink.emit(
-        buildEvent(emitterConfig, "llm.operation.completed", opCorr, {
-          aggregate_usage: usage,
-          aggregate_cost: cost,
-          attempts_made: 1,
-          final_provider_alias: alias,
-          total_duration_ms: latencyMs,
-          result_summary: { exit_code: outcome.exitCode },
-        }),
-      );
-    }
+            const result: AgentResult = {
+              text: finalText,
+              messages: [
+                { role: "user", content: prompt },
+                { role: "assistant", content: finalText },
+              ],
+              toolCalls: [],
+              usage,
+              cost,
+              modelId,
+              providerAlias: alias,
+              latencyMs,
+              stepsTaken: parsedEvents.length,
+              terminationReason: "completed",
+            };
 
-    return {
-      text: finalText,
-      messages: [{ role: "user", content: prompt }, { role: "assistant", content: finalText }],
-      toolCalls: [],
-      usage,
-      cost,
-      modelId,
-      providerAlias: alias,
-      latencyMs,
-      stepsTaken: parsedEvents.length,
-      terminationReason: "completed",
-    };
+            return {
+              value: result,
+              usage,
+              cost,
+              modelId,
+              responseCharCount: finalText.length,
+              responsePreviewSource: finalText,
+            };
+          },
+        );
+      },
+    );
   } catch (err) {
-    // Local failure or subprocess error. Emit failure lifecycle events
-    // before propagating.
-    const latencyMs = Date.now() - start;
-    const errorInfo = {
-      error_type: err instanceof Error ? err.name : "UnknownError",
-      message: err instanceof Error ? err.message : String(err),
-      retryable: false,
-      fallback_worthy: false,
-      cause_category: "port_internal" as const,
-    };
-    if (emitterConfig) {
-      emitterConfig.sink.emit(
-        buildEvent(emitterConfig, "llm.attempt.failed", correlation, {
-          error: errorInfo,
-          latency_ms: latencyMs,
-        }),
-      );
-      const opCorr: CorrelationContext = { operation_id: correlation.operation_id };
-      emitterConfig.sink.emit(
-        buildEvent(emitterConfig, "llm.operation.failed", opCorr, {
-          error: errorInfo,
-          attempts_made: 1,
-          providers_tried: [alias],
-          total_duration_ms: latencyMs,
-        }),
-      );
-    }
+    if (err instanceof ProviderUnavailableError) throw err;
     if (err instanceof Error) {
       throw new ProviderUnavailableError(alias, err);
     }
     throw new ProviderUnavailableError(alias, new Error(String(err)));
   }
+}
+
+/**
+ * Alpha.30+ §2.5: build an `Instrumentation` handle for the shared
+ * service from the adapter's config.observability shape (which predates
+ * the shared service and mirrors `EmitterConfig` inline). Returns
+ * undefined when observability is not configured so the wrap-around
+ * helpers no-op cheaply.
+ */
+function buildAdapterInstrumentation(
+  observability: AdapterConfig["observability"] | undefined,
+  defaultSource: EmitterConfig["source"],
+): Instrumentation | undefined {
+  if (!observability) return undefined;
+  const instrumentation: Instrumentation = {
+    config: {
+      source: observability.source ?? defaultSource,
+      sink: observability.sink,
+    },
+  };
+  if (observability.context) instrumentation.context = observability.context;
+  return instrumentation;
 }
 
 // ─── Subprocess helpers ─────────────────────────────────────────────
