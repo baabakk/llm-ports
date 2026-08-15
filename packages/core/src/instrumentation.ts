@@ -71,6 +71,8 @@ import type {
   ObservabilityEvent,
   RequestFingerprint,
   RetryReason,
+  StreamChunkData,
+  StreamStats,
   TokenUsage,
 } from "@llm-ports/observability-contract";
 import { getObservabilityContext } from "./observability-context.js";
@@ -334,6 +336,15 @@ export interface AttemptWorkResult<T> {
    * capture policy.
    */
   responsePreviewSource?: string;
+
+  /**
+   * Alpha.30+: per-stream aggregate telemetry produced by the streaming
+   * wrapper (see registry.ts `instrumentTextStream` /
+   * `instrumentStructuredStream`). Attached on the natural-completion
+   * path of a streamed attempt; non-streaming attempts leave this
+   * undefined and the field is omitted from the emitted event.
+   */
+  streamStats?: StreamStats;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -377,6 +388,130 @@ const ZERO_COST: CostUsage = Object.freeze({
   totalUSD: 0,
 }) as CostUsage;
 
+// ─── Public API: manual operation escape hatch (streaming) ──────────
+
+/**
+ * Handle returned by `startOperation` for callers who cannot use the
+ * wrap-around `withOperation` form. The streaming methods on the
+ * Registry (`streamText` / `streamStructured`) use this because
+ * completion happens after the async generator has already returned
+ * its iterable to the consumer; the wrap-around form's promise chain
+ * cannot span the consumer's iteration.
+ *
+ * Non-streaming callers should stick to `withOperation` (it composes
+ * these hatches internally and owns the try/finally lifecycle).
+ */
+export interface ManualOperationHandle {
+  readonly instrumentation: Instrumentation;
+  readonly opCtx: OperationContext;
+  readonly correlation: CorrelationContext;
+}
+
+/**
+ * Manually start an operation without the wrap-around form. Emits
+ * `llm.operation.started` and returns a handle the caller finishes
+ * later with `completeOperation` / `failOperation` / `cancelOperation`.
+ *
+ * When `instrumentation` is undefined, returns undefined so callers
+ * pay zero cost (matches `withOperation`'s no-op semantics).
+ */
+export function startOperation(
+  instrumentation: Instrumentation | undefined,
+  params: OperationStartParams,
+): ManualOperationHandle | undefined {
+  if (!instrumentation) return undefined;
+
+  const operationId = instrumentation.context?.operation_id ?? newOperationId();
+  const handle = newOperationHandle();
+  const opCtx: OperationContext = {
+    instrumentation,
+    operationId,
+    handle,
+    startedAtMs: Date.now(),
+    attemptsMade: 0,
+    providersTried: [],
+    aggregateUsage: { ...ZERO_USAGE },
+    aggregateCost: { ...ZERO_COST },
+  };
+  handleRegistry.set(handle, opCtx);
+
+  const correlation: CorrelationContext = { operation_id: operationId };
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "llm.operation.started", correlation, {
+      task_type: params.taskType,
+      method: params.method,
+      provider_chain: [...params.providerChain],
+    }),
+  );
+
+  return { instrumentation, opCtx, correlation };
+}
+
+/**
+ * Manually complete an operation started via `startOperation`. Emits
+ * `llm.operation.completed` and cleans up the handle registry entry.
+ * Safe to call with undefined (no-op).
+ */
+export function completeOperation(handle: ManualOperationHandle | undefined): void {
+  if (!handle) return;
+  const { instrumentation, opCtx, correlation } = handle;
+  const totalDurationMs = Date.now() - opCtx.startedAtMs;
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "llm.operation.completed", correlation, {
+      aggregate_usage: opCtx.aggregateUsage,
+      aggregate_cost: opCtx.aggregateCost,
+      attempts_made: opCtx.attemptsMade,
+      final_provider_alias: opCtx.finalProviderAlias ?? "(unknown)",
+      total_duration_ms: totalDurationMs,
+      ...(opCtx.resultSummary ? { result_summary: opCtx.resultSummary } : {}),
+    }),
+  );
+  handleRegistry.delete(opCtx.handle);
+}
+
+/**
+ * Manually fail an operation started via `startOperation`. Emits
+ * `llm.operation.failed` and cleans up the handle registry entry.
+ * Safe to call with undefined.
+ */
+export function failOperation(handle: ManualOperationHandle | undefined, err: unknown): void {
+  if (!handle) return;
+  const { instrumentation, opCtx, correlation } = handle;
+  const totalDurationMs = Date.now() - opCtx.startedAtMs;
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "llm.operation.failed", correlation, {
+      error: toErrorInfo(err),
+      attempts_made: opCtx.attemptsMade,
+      providers_tried: [...opCtx.providersTried],
+      total_duration_ms: totalDurationMs,
+    }),
+  );
+  handleRegistry.delete(opCtx.handle);
+}
+
+/**
+ * Manually cancel an operation started via `startOperation`. Emits
+ * `llm.operation.cancelled` and cleans up the handle registry entry.
+ * Safe to call with undefined.
+ */
+export function cancelOperation(handle: ManualOperationHandle | undefined): void {
+  if (!handle) return;
+  const { instrumentation, opCtx, correlation } = handle;
+  const totalDurationMs = Date.now() - opCtx.startedAtMs;
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "llm.operation.cancelled", correlation, {
+      cancelled_at_attempt: opCtx.attemptsMade,
+      providers_tried_before_cancel: [...opCtx.providersTried],
+      total_duration_ms: totalDurationMs,
+    }),
+  );
+  handleRegistry.delete(opCtx.handle);
+}
+
 // ─── Public API: withOperation ──────────────────────────────────────
 
 /**
@@ -392,94 +527,32 @@ const ZERO_COST: CostUsage = Object.freeze({
  * When `instrumentation` is undefined, this is a no-op wrapper that
  * just returns `work(undefined)`. Callers pay zero cost when
  * observability is not configured.
+ *
+ * Implementation composes the manual hatches (`startOperation` +
+ * `completeOperation` / `failOperation` / `cancelOperation`) so both
+ * wrap-around callers and streaming callers share one emission path.
  */
 export async function withOperation<T>(
   instrumentation: Instrumentation | undefined,
   params: OperationStartParams,
   work: (opCtx: OperationContext | undefined) => Promise<T>,
 ): Promise<T> {
-  if (!instrumentation) {
+  const handle = startOperation(instrumentation, params);
+  if (!handle) {
     return work(undefined);
   }
 
-  const operationId = instrumentation.context?.operation_id ?? newOperationId();
-  const handle = newOperationHandle();
-  const opCtx: OperationContext = {
-    instrumentation,
-    operationId,
-    handle,
-    startedAtMs: Date.now(),
-    attemptsMade: 0,
-    providersTried: [],
-    aggregateUsage: { ...ZERO_USAGE },
-    aggregateCost: { ...ZERO_COST },
-  };
-  // Register the handle so adapters called during `work` can retrieve
-  // this OperationContext via `resurrectOperationContext(port)`. Cleaned
-  // up in the finally block below so a long-running consumer doesn't
-  // leak entries into the module-level Map.
-  handleRegistry.set(handle, opCtx);
-
-  const opCorrelation: CorrelationContext = { operation_id: operationId };
-
-  safeEmit(
-    instrumentation.config,
-    buildEvent(instrumentation.config, "llm.operation.started", opCorrelation, {
-      task_type: params.taskType,
-      method: params.method,
-      provider_chain: [...params.providerChain],
-    }),
-  );
-
   try {
-    try {
-      const result = await work(opCtx);
-      const totalDurationMs = Date.now() - opCtx.startedAtMs;
-
-      safeEmit(
-        instrumentation.config,
-        buildEvent(instrumentation.config, "llm.operation.completed", opCorrelation, {
-          aggregate_usage: opCtx.aggregateUsage,
-          aggregate_cost: opCtx.aggregateCost,
-          attempts_made: opCtx.attemptsMade,
-          final_provider_alias: opCtx.finalProviderAlias ?? "(unknown)",
-          total_duration_ms: totalDurationMs,
-          ...(opCtx.resultSummary ? { result_summary: opCtx.resultSummary } : {}),
-        }),
-      );
-
-      return result;
-    } catch (err) {
-      const totalDurationMs = Date.now() - opCtx.startedAtMs;
-
-      if (isAbortError(err)) {
-        safeEmit(
-          instrumentation.config,
-          buildEvent(instrumentation.config, "llm.operation.cancelled", opCorrelation, {
-            cancelled_at_attempt: opCtx.attemptsMade,
-            providers_tried_before_cancel: [...opCtx.providersTried],
-            total_duration_ms: totalDurationMs,
-          }),
-        );
-      } else {
-        safeEmit(
-          instrumentation.config,
-          buildEvent(instrumentation.config, "llm.operation.failed", opCorrelation, {
-            error: toErrorInfo(err),
-            attempts_made: opCtx.attemptsMade,
-            providers_tried: [...opCtx.providersTried],
-            total_duration_ms: totalDurationMs,
-          }),
-        );
-      }
-      throw err;
+    const result = await work(handle.opCtx);
+    completeOperation(handle);
+    return result;
+  } catch (err) {
+    if (isAbortError(err)) {
+      cancelOperation(handle);
+    } else {
+      failOperation(handle, err);
     }
-  } finally {
-    // Alpha.30+: unregister the handle so the handle-registry Map
-    // doesn't accumulate entries for completed operations. The
-    // OperationContext itself can then be garbage-collected once the
-    // work callback's closures release it.
-    handleRegistry.delete(handle);
+    throw err;
   }
 }
 
@@ -599,6 +672,7 @@ export async function withAttempt<T>(
         final_model_id: finalModelId,
         ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
         ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
+        ...(result.streamStats ? { stream_stats: result.streamStats } : {}),
         ...diagnosticFields,
       }),
     );
@@ -905,8 +979,31 @@ export function completeAttempt<T>(
       final_model_id: result.modelId ?? "(unknown)",
       ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
       ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
+      ...(result.streamStats ? { stream_stats: result.streamStats } : {}),
       ...diagnosticFields,
     }),
+  );
+}
+
+/**
+ * Alpha.30+: emit `llm.stream.chunk` correlated to a running attempt.
+ * Called per chunk by the streaming instrumentation wrapper when the
+ * effective `CapturePolicy.stream_chunk_capture` is `"full"`; the
+ * wrapper is also responsible for gating `chunk_content` behind the
+ * content policy (this helper emits whatever the caller supplies).
+ *
+ * Safe to call with undefined handle (no-op) so instrumented and
+ * un-instrumented streams share the same call site.
+ */
+export function emitStreamChunk(
+  handle: ManualAttemptHandle | undefined,
+  data: StreamChunkData,
+): void {
+  if (!handle) return;
+  const { opCtx, correlation } = handle;
+  safeEmit(
+    opCtx.instrumentation.config,
+    buildEvent(opCtx.instrumentation.config, "llm.stream.chunk", correlation, data),
   );
 }
 
@@ -966,8 +1063,13 @@ export function maybeComputeFingerprint(
  * `instrumentation.capturePolicy` is undefined, so callers who
  * never opted into a policy get the strict-by-default posture
  * automatically.
+ *
+ * Exported so the streaming instrumentation in registry.ts can gate
+ * per-chunk emission (`stream_chunk_capture`) and content inclusion
+ * (`content`) against the same policy that governs `response_preview`.
  */
-function effectiveCapturePolicy(instrumentation: Instrumentation): CapturePolicy {
+export function effectiveCapturePolicy(instrumentation: Instrumentation | undefined): CapturePolicy {
+  if (!instrumentation) return DEFAULT_CAPTURE_POLICY;
   return instrumentation.capturePolicy ?? DEFAULT_CAPTURE_POLICY;
 }
 
@@ -1049,8 +1151,12 @@ function toErrorInfo(err: unknown): ErrorInfo {
  * `AbortSignal` cancellation. Node's fetch and the AI SDKs use
  * `DOMException` with name `"AbortError"`, but user-thrown Error
  * subclasses named "AbortError" should also be honored.
+ *
+ * Exported so the streaming instrumentation in registry.ts can classify
+ * an in-stream abort as `termination: "aborted"` (vs `"error"`) without
+ * duplicating the check.
  */
-function isAbortError(err: unknown): boolean {
+export function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 

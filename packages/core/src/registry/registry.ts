@@ -34,6 +34,7 @@ import {
   emitTokenUsage,
   type ObservabilityHooks,
   type StreamCompleteCallback,
+  type StreamCompleteMetadata,
 } from "../observability.js";
 import type {
   BatchEmbeddingOptions,
@@ -70,18 +71,31 @@ import { parseRegistryConfig } from "./config.js";
 import { CostSession, type OpenCostSessionOptions } from "./cost-session.js";
 import { normalizeTaskType, type TaskConfig } from "./tasks.js";
 import {
+  cancelOperation,
+  completeAttempt,
+  completeOperation,
+  effectiveCapturePolicy,
   emitFallbackSelected,
+  emitStreamChunk,
+  failAttempt,
+  failOperation,
+  isAbortError,
   maybeComputeFingerprint,
+  startAttempt,
+  startOperation,
   withAttempt,
   withOperation,
   type Instrumentation,
+  type ManualAttemptHandle,
   type OperationContext,
 } from "../instrumentation.js";
 import { withObservabilityContext } from "../observability-context.js";
 import type {
+  CapturePolicy,
   CostUsage,
   FallbackCause,
   FingerprintableRequest,
+  StreamStats,
   TokenUsage,
 } from "@llm-ports/observability-contract";
 
@@ -1446,73 +1460,288 @@ class RegistryPort implements LLMPort {
     };
   }
 
+  /**
+   * Alpha.30+: chain walker for streams.
+   *
+   * Streams cannot use the shared `walkChain` because `walkChain` closes
+   * each attempt's lifecycle synchronously when the attempt returns
+   * (via `withAttempt`), but a stream's true completion is spread across
+   * consumer iteration. Instead this helper walks the provider chain
+   * emitting the same per-attempt + fallback events as the non-streaming
+   * path, opens the winning stream, and returns an open
+   * `ManualAttemptHandle` for the caller (`instrumentTextStream` /
+   * `instrumentStructuredStream`) to finish with `completeAttempt` on
+   * natural close or `failAttempt` on abort / mid-stream error.
+   *
+   * On chain-walk failure (all providers rejected at stream-creation
+   * time) the last `failAttempt` has already been emitted and this
+   * helper rethrows without opening an attempt for the caller.
+   */
+  private async walkStreamChain<S>(
+    method: "streamText" | "streamStructured",
+    normalizedOptions: {
+      taskType?: string;
+      priority?: 0 | 1 | 2 | 3;
+      forceProviderAlias?: string;
+      budgetScope?: BudgetScopeRef;
+      refs?: Record<string, ArtifactRef>;
+    },
+    opCtx: OperationContext | undefined,
+    openStream: (sel: ModelSelection) => S,
+  ): Promise<{
+    stream: S;
+    sel: ModelSelection;
+    attemptHandle: ManualAttemptHandle | undefined;
+  }> {
+    const { forceProviderAlias, priority, budgetScope, refs, taskType } = normalizedOptions;
+
+    const openAttempt = (
+      sel: ModelSelection,
+      isFallback: boolean,
+    ): ManualAttemptHandle | undefined => {
+      if (!opCtx) return undefined;
+      return startAttempt(opCtx, {
+        providerAlias: sel.alias,
+        modelId: sel.modelId,
+        ...(isFallback ? { isFallback: true } : {}),
+      });
+    };
+
+    // forceProviderAlias short-circuit: no fallback engaged (matches
+    // walkChain's behavior for non-stream methods).
+    if (forceProviderAlias !== undefined) {
+      const sel = await this.registry.selectByAlias(forceProviderAlias, priority, budgetScope);
+      if (!sel.port) {
+        throw new NoProvidersAvailableError(`forced:${forceProviderAlias}`, [sel.alias], {
+          [sel.alias]: `adapter "${sel.adapter.name}" does not implement LLMPort`,
+        });
+      }
+      const handle = openAttempt(sel, false);
+      try {
+        const stream = openStream(sel);
+        const key = this.registry.scopedKey(sel.alias, budgetScope);
+        await this.registry.budget.recordRequest(key);
+        this.registry.markProviderAuthenticated(sel.alias);
+        return { stream, sel, attemptHandle: handle };
+      } catch (err) {
+        if (handle) failAttempt(handle, err);
+        throw err;
+      }
+    }
+
+    const chain = await this.registry.selectViableChain(
+      taskType ?? "general",
+      priority,
+      budgetScope,
+    );
+    const reasons: Record<string, string> = {};
+    let lastErr: unknown;
+    let prevSel: ModelSelection | undefined;
+    for (const sel of chain) {
+      if (!sel.port) {
+        reasons[sel.alias] = `adapter "${sel.adapter.name}" does not implement LLMPort`;
+        continue;
+      }
+      if (prevSel) {
+        emitFallback(this.registry.observability.onFallback, {
+          fromAlias: prevSel.alias,
+          toAlias: sel.alias,
+          cause: "provider-error",
+          operation: method,
+          ...(taskType ? { taskType } : {}),
+          reason: lastErr,
+          ...(refs ? { refs } : {}),
+        });
+        const fbCause: FallbackCause =
+          lastErr instanceof AuthenticationError
+            ? "provider_authentication_never_established"
+            : "provider_unavailable";
+        emitFallbackSelected(opCtx, {
+          fromProviderAlias: prevSel.alias,
+          toProviderAlias: sel.alias,
+          cause: fbCause,
+        });
+      }
+      const isFallback = prevSel !== undefined;
+      const handle = openAttempt(sel, isFallback);
+      try {
+        const stream = openStream(sel);
+        const key = this.registry.scopedKey(sel.alias, budgetScope);
+        await this.registry.budget.recordRequest(key);
+        this.registry.markProviderAuthenticated(sel.alias);
+        return { stream, sel, attemptHandle: handle };
+      } catch (err) {
+        lastErr = err;
+        if (handle) failAttempt(handle, err);
+        const ctx: ShouldFallbackContext = {
+          providerAlias: sel.alias,
+          hasEverAuthenticated: this.registry.hasEverAuthenticated(sel.alias),
+        };
+        if (!this.registry.shouldFallback(err, ctx)) throw err;
+        const message =
+          err instanceof Error ? err.message : typeof err === "string" ? err : "unknown error";
+        reasons[sel.alias] = `runtime fallback: ${message}`;
+        prevSel = sel;
+        continue;
+      }
+    }
+    const attempted = chain.map((s) => s.alias);
+    throw new NoProvidersAvailableError(taskType ?? "general", attempted, reasons);
+  }
+
   async *streamText(options: StreamTextOptions): AsyncIterable<string> {
     const messages = normalizeMessagesOnOptions("streamText", options);
     const normalizedOptions = { ...options, messages };
-    // Streaming runtime fallback is more nuanced — once we start yielding
-    // chunks, switching providers mid-stream would emit a confusing mix.
-    // For alpha.7 we walk the chain on the INITIAL `streamText()` call
-    // (most failures happen at stream-creation time anyway), then yield
-    // through whatever stream opened successfully. Mid-stream errors
-    // propagate as-is to the consumer; users handle them with a try/catch
-    // inside the for-await. Document this limit in the cancellation guide.
-    const completeCallback = this.buildStreamCompleteCallback(
+    const taskType = normalizedOptions.taskType ?? "general";
+    const providerChain = normalizedOptions.forceProviderAlias
+      ? [normalizedOptions.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+
+    // Manual operation hatch: streaming completion is spread across
+    // consumer iteration, so the wrap-around `withOperation` form (which
+    // resolves the moment the wrapped async function returns) cannot
+    // span the true operation lifetime. `startOperation` +
+    // `completeOperation` / `failOperation` / `cancelOperation` share
+    // one emission path with `withOperation`.
+    const opHandle = startOperation(this.registry.instrumentation, {
+      taskType,
+      method: "streamText",
+      providerChain,
+    });
+    const opCtx = opHandle?.opCtx;
+    maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
+
+    // Compose the stream-complete callback: fire the alpha.21 hooks +
+    // budget recording as before AND capture the meta so
+    // `instrumentTextStream` can attach usage / cost / final_model_id
+    // to `llm.attempt.completed` for the streamed attempt.
+    const inner = this.buildStreamCompleteCallback(
       "streamText",
       normalizedOptions.taskType,
       normalizedOptions.budgetScope,
       normalizedOptions.refs,
     );
-    const optionsWithCallback = attachStreamCompleteCallback({ ...normalizedOptions }, completeCallback);
-    const startStream = async (sel: ModelSelection): Promise<AsyncIterable<string>> => {
-      return sel.port!.streamText(optionsWithCallback);
+    let streamMeta: StreamCompleteMetadata | undefined;
+    const wrappedCallback: StreamCompleteCallback = (meta) => {
+      streamMeta = meta;
+      inner(meta);
     };
-    const stream = await walkChain(
-      this.registry,
-      normalizedOptions.taskType,
-      normalizedOptions.priority,
-      startStream,
-      // No cost recording here — the stream-complete callback records cost
-      // when the stream naturally finishes. This preserves the alpha.7
-      // "no cost at stream-creation" behavior while adding the alpha.25
-      // "cost at stream-completion" surface.
-      async () => {
-        /* noop */
-      },
-      normalizedOptions.forceProviderAlias,
-      normalizedOptions.budgetScope,
-      "streamText",
-      normalizedOptions.refs,
+    const optionsWithCallback = attachStreamCompleteCallback(
+      { ...normalizedOptions },
+      wrappedCallback,
     );
-    yield* stream;
+
+    let raw: AsyncIterable<string>;
+    let winningSel: ModelSelection;
+    let attemptHandle: ManualAttemptHandle | undefined;
+    try {
+      const walked = await this.walkStreamChain(
+        "streamText",
+        normalizedOptions,
+        opCtx,
+        (sel) => scopedPortForAdapter(sel.port!, opCtx).streamText(optionsWithCallback),
+      );
+      raw = walked.stream;
+      winningSel = walked.sel;
+      attemptHandle = walked.attemptHandle;
+    } catch (err) {
+      if (opHandle) {
+        if (isAbortError(err)) cancelOperation(opHandle);
+        else failOperation(opHandle, err);
+      }
+      throw err;
+    }
+
+    const policy = effectiveCapturePolicy(this.registry.instrumentation);
+    try {
+      yield* instrumentTextStream(raw, {
+        attemptHandle,
+        winningModelId: winningSel.modelId,
+        policy,
+        getMeta: () => streamMeta,
+      });
+    } catch (err) {
+      if (opHandle) {
+        if (isAbortError(err)) cancelOperation(opHandle);
+        else failOperation(opHandle, err);
+      }
+      throw err;
+    }
+    if (opHandle) completeOperation(opHandle);
   }
 
-  async *streamStructured<T>(options: StreamStructuredOptions<T>): AsyncIterable<Partial<T>> {
+  async *streamStructured<T>(
+    options: StreamStructuredOptions<T>,
+  ): AsyncIterable<Partial<T>> {
     const messages = normalizeMessagesOnOptions("streamStructured", options);
     const normalizedOptions = { ...options, messages };
-    const completeCallback = this.buildStreamCompleteCallback(
+    const taskType = normalizedOptions.taskType ?? "general";
+    const providerChain = normalizedOptions.forceProviderAlias
+      ? [normalizedOptions.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+
+    const opHandle = startOperation(this.registry.instrumentation, {
+      taskType,
+      method: "streamStructured",
+      providerChain,
+    });
+    const opCtx = opHandle?.opCtx;
+    maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
+
+    const inner = this.buildStreamCompleteCallback(
       "streamStructured",
       normalizedOptions.taskType,
       normalizedOptions.budgetScope,
       normalizedOptions.refs,
     );
-    const optionsWithCallback = attachStreamCompleteCallback({ ...normalizedOptions }, completeCallback);
-    const startStream = async (sel: ModelSelection): Promise<AsyncIterable<Partial<T>>> => {
-      return sel.port!.streamStructured(optionsWithCallback);
+    let streamMeta: StreamCompleteMetadata | undefined;
+    const wrappedCallback: StreamCompleteCallback = (meta) => {
+      streamMeta = meta;
+      inner(meta);
     };
-    const stream = await walkChain(
-      this.registry,
-      normalizedOptions.taskType,
-      normalizedOptions.priority,
-      startStream,
-      async () => {
-        /* noop */
-      },
-      normalizedOptions.forceProviderAlias,
-      normalizedOptions.budgetScope,
-      "streamStructured",
-      normalizedOptions.refs,
+    const optionsWithCallback = attachStreamCompleteCallback(
+      { ...normalizedOptions },
+      wrappedCallback,
     );
-    yield* stream;
+
+    let raw: AsyncIterable<Partial<T>>;
+    let winningSel: ModelSelection;
+    let attemptHandle: ManualAttemptHandle | undefined;
+    try {
+      const walked = await this.walkStreamChain<AsyncIterable<Partial<T>>>(
+        "streamStructured",
+        normalizedOptions,
+        opCtx,
+        (sel) =>
+          scopedPortForAdapter(sel.port!, opCtx).streamStructured<T>(optionsWithCallback),
+      );
+      raw = walked.stream;
+      winningSel = walked.sel;
+      attemptHandle = walked.attemptHandle;
+    } catch (err) {
+      if (opHandle) {
+        if (isAbortError(err)) cancelOperation(opHandle);
+        else failOperation(opHandle, err);
+      }
+      throw err;
+    }
+
+    const policy = effectiveCapturePolicy(this.registry.instrumentation);
+    try {
+      yield* instrumentStructuredStream<T>(raw, {
+        attemptHandle,
+        winningModelId: winningSel.modelId,
+        policy,
+        getMeta: () => streamMeta,
+      });
+    } catch (err) {
+      if (opHandle) {
+        if (isAbortError(err)) cancelOperation(opHandle);
+        else failOperation(opHandle, err);
+      }
+      throw err;
+    }
+    if (opHandle) completeOperation(opHandle);
   }
 
   async runAgent(options: RunAgentOptions): Promise<AgentResult> {
@@ -1854,4 +2083,266 @@ function resolveRuntimeFallback(
     }
     return false;
   };
+}
+
+// ─── Alpha.30+: streaming instrumentation ───────────────────────────
+
+/**
+ * Context passed from the Registry stream methods into the per-chunk
+ * instrumenting generators. Deliberately minimal — the shared state
+ * (winning provider, effective capture policy, adapter callback meta,
+ * open attempt handle) is threaded in one object so the helpers only
+ * take one parameter besides the raw stream.
+ */
+interface StreamInstrumentationContext {
+  /** Manual attempt handle opened by `walkStreamChain`; may be undefined when observability is off. */
+  attemptHandle: ManualAttemptHandle | undefined;
+  /** Model ID of the winning provider (`sel.modelId`) — used as fallback when the adapter's meta doesn't fire. */
+  winningModelId: string;
+  /** Effective CapturePolicy read once at stream open (`effectiveCapturePolicy(instrumentation)`). */
+  policy: CapturePolicy;
+  /** Late-binding accessor for the adapter's `StreamCompleteMetadata`, populated when the adapter fires the complete callback. */
+  getMeta: () => StreamCompleteMetadata | undefined;
+}
+
+/**
+ * Wrap a raw text stream with per-chunk instrumentation.
+ *
+ * Owns the tail of the attempt lifecycle: `walkStreamChain` already
+ * emitted `llm.attempt.started`; this generator emits
+ * `llm.attempt.completed` (with stream_stats) on natural close, or
+ * `llm.attempt.failed` on abort / mid-stream error. Per-chunk events
+ * (`llm.stream.chunk`) fire when `CapturePolicy.stream_chunk_capture`
+ * is `"full"`; chunk content is additionally gated by the content
+ * policy (matches the response_preview gate).
+ *
+ * TTFT + inter-chunk latency + total_stream_duration are wall-clock
+ * measurements relative to the first `next()` pull (which happens
+ * inside this generator's `for-await` — before that pull the raw
+ * iterable has not been asked for anything).
+ */
+async function* instrumentTextStream(
+  raw: AsyncIterable<string>,
+  ctx: StreamInstrumentationContext,
+): AsyncIterable<string> {
+  const startedAt = Date.now();
+  let firstChunkAt: number | undefined;
+  let lastChunkAt = startedAt;
+  const gaps: number[] = [];
+  let chunkCount = 0;
+  let totalChars = 0;
+  let previewBuffer = "";
+  const previewMax = ctx.policy.responsePreviewMaxChars ?? 0;
+  const previewAllowed = ctx.policy.content === "full" || ctx.policy.content === "redacted";
+  const chunkFullEmit = ctx.policy.stream_chunk_capture === "full";
+  const chunkContentAllowed = chunkFullEmit && previewAllowed;
+  let terminated: "complete" | "aborted" | "error" = "complete";
+  let terminationErr: unknown;
+
+  try {
+    for await (const chunk of raw) {
+      const now = Date.now();
+      const chunkText = typeof chunk === "string" ? chunk : "";
+      if (firstChunkAt === undefined) {
+        firstChunkAt = now;
+      } else {
+        gaps.push(now - lastChunkAt);
+      }
+      lastChunkAt = now;
+      const idx = chunkCount;
+      chunkCount++;
+      totalChars += chunkText.length;
+      if (previewMax > 0 && previewBuffer.length < previewMax) {
+        const need = previewMax - previewBuffer.length;
+        previewBuffer += chunkText.slice(0, need);
+      }
+      if (chunkFullEmit && ctx.attemptHandle) {
+        emitStreamChunk(ctx.attemptHandle, {
+          chunk_index: idx,
+          chars_in_chunk: chunkText.length,
+          time_since_start_ms: now - startedAt,
+          ...(chunkContentAllowed ? { chunk_content: chunkText } : {}),
+        });
+      }
+      yield chunk;
+    }
+  } catch (err) {
+    terminationErr = err;
+    terminated = isAbortError(err) ? "aborted" : "error";
+    throw err;
+  } finally {
+    await closeStreamedAttempt({
+      handle: ctx.attemptHandle,
+      terminated,
+      terminationErr,
+      startedAt,
+      firstChunkAt,
+      chunkCount,
+      totalChars,
+      previewBuffer,
+      gaps,
+      winningModelId: ctx.winningModelId,
+      getMeta: ctx.getMeta,
+    });
+  }
+}
+
+/**
+ * Structured-stream variant. Same lifecycle discipline as
+ * `instrumentTextStream`, but per-chunk "text" is derived by
+ * `JSON.stringify` (partial JSON objects have no natural character
+ * count otherwise). Per-chunk content emission serialises the partial
+ * for `chunk_content` when policy allows.
+ */
+async function* instrumentStructuredStream<T>(
+  raw: AsyncIterable<Partial<T>>,
+  ctx: StreamInstrumentationContext,
+): AsyncIterable<Partial<T>> {
+  const startedAt = Date.now();
+  let firstChunkAt: number | undefined;
+  let lastChunkAt = startedAt;
+  const gaps: number[] = [];
+  let chunkCount = 0;
+  let totalChars = 0;
+  let previewBuffer = "";
+  const previewMax = ctx.policy.responsePreviewMaxChars ?? 0;
+  const previewAllowed = ctx.policy.content === "full" || ctx.policy.content === "redacted";
+  const chunkFullEmit = ctx.policy.stream_chunk_capture === "full";
+  const chunkContentAllowed = chunkFullEmit && previewAllowed;
+  let terminated: "complete" | "aborted" | "error" = "complete";
+  let terminationErr: unknown;
+
+  try {
+    for await (const chunk of raw) {
+      const now = Date.now();
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(chunk ?? {});
+      } catch {
+        // Circular / un-serializable partials fall back to a length-only
+        // count of the JSON.stringify failure so char accounting stays
+        // sane. Content preview + per-chunk content omit for this chunk.
+        serialized = "";
+      }
+      if (firstChunkAt === undefined) {
+        firstChunkAt = now;
+      } else {
+        gaps.push(now - lastChunkAt);
+      }
+      lastChunkAt = now;
+      const idx = chunkCount;
+      chunkCount++;
+      totalChars += serialized.length;
+      if (previewMax > 0 && previewBuffer.length < previewMax) {
+        const need = previewMax - previewBuffer.length;
+        previewBuffer += serialized.slice(0, need);
+      }
+      if (chunkFullEmit && ctx.attemptHandle) {
+        emitStreamChunk(ctx.attemptHandle, {
+          chunk_index: idx,
+          chars_in_chunk: serialized.length,
+          time_since_start_ms: now - startedAt,
+          ...(chunkContentAllowed ? { chunk_content: serialized } : {}),
+        });
+      }
+      yield chunk;
+    }
+  } catch (err) {
+    terminationErr = err;
+    terminated = isAbortError(err) ? "aborted" : "error";
+    throw err;
+  } finally {
+    await closeStreamedAttempt({
+      handle: ctx.attemptHandle,
+      terminated,
+      terminationErr,
+      startedAt,
+      firstChunkAt,
+      chunkCount,
+      totalChars,
+      previewBuffer,
+      gaps,
+      winningModelId: ctx.winningModelId,
+      getMeta: ctx.getMeta,
+    });
+  }
+}
+
+/**
+ * Shared attempt closer used by both stream instrumentation
+ * generators. On the natural-completion path, awaits one microtask so
+ * an adapter that fires the stream-complete callback synchronously
+ * from its own iterator's finally has landed before we read
+ * `getMeta()`, then emits `llm.attempt.completed` with `stream_stats`.
+ * On the error / abort path, emits `llm.attempt.failed` — the alpha.30
+ * contract does not add `stream_stats` to the failure event, so partial
+ * telemetry is dropped rather than emitted in the wrong envelope shape.
+ */
+async function closeStreamedAttempt(args: {
+  handle: ManualAttemptHandle | undefined;
+  terminated: "complete" | "aborted" | "error";
+  terminationErr: unknown;
+  startedAt: number;
+  firstChunkAt: number | undefined;
+  chunkCount: number;
+  totalChars: number;
+  previewBuffer: string;
+  gaps: number[];
+  winningModelId: string;
+  getMeta: () => StreamCompleteMetadata | undefined;
+}): Promise<void> {
+  const { handle, terminated } = args;
+  if (!handle) return;
+
+  if (terminated !== "complete") {
+    failAttempt(handle, args.terminationErr);
+    return;
+  }
+
+  // Yield one microtask so an adapter that fires the stream-complete
+  // callback from its own iterator's finally block has run before we
+  // read `getMeta()`. Vercel-AI-shaped adapters follow this pattern.
+  await Promise.resolve();
+
+  const endedAt = Date.now();
+  const meta = args.getMeta();
+  const ttft = (args.firstChunkAt ?? endedAt) - args.startedAt;
+  const stats: StreamStats = {
+    ttft_ms: ttft,
+    total_stream_duration_ms: endedAt - args.startedAt,
+    chunk_count: args.chunkCount,
+    ...(args.gaps.length >= 1
+      ? {
+          inter_chunk_latency_p50_ms: percentile(args.gaps, 50),
+          inter_chunk_latency_p99_ms: percentile(args.gaps, 99),
+        }
+      : {}),
+    termination: "complete",
+  };
+
+  completeAttempt(handle, {
+    value: undefined,
+    ...(meta?.usage ? { usage: meta.usage } : {}),
+    ...(meta?.cost ? { cost: meta.cost } : {}),
+    modelId: meta?.modelId ?? args.winningModelId,
+    responseCharCount: args.totalChars,
+    responsePreviewSource: args.previewBuffer,
+    streamStats: stats,
+  });
+}
+
+/**
+ * Nearest-rank percentile over a sample of positive integers.
+ * Zero-copy: sorts a shallow clone so the input array is not mutated.
+ * Callers guard against empty input (returns 0 defensively so a
+ * mis-guarded call still produces a valid non-negative integer instead
+ * of NaN).
+ */
+function percentile(samples: number[], p: number): number {
+  if (samples.length === 0) return 0;
+  const sorted = samples.slice().sort((a, b) => a - b);
+  const rank = Math.max(1, Math.ceil((p / 100) * sorted.length));
+  const idx = Math.min(rank - 1, sorted.length - 1);
+  const value = sorted[idx];
+  return value ?? 0;
 }

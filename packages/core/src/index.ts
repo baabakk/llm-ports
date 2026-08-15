@@ -246,17 +246,24 @@ export {
 
 // ─── Observability instrumentation service (alpha.29+, plans/alpha.29 §2.1) ─
 export {
+  cancelOperation,
   completeAttempt,
+  completeOperation,
+  effectiveCapturePolicy,
   emitAgentStepCompleted,
   emitAgentStepStarted,
   emitAgentToolCalled,
   emitAgentToolReturned,
   emitFallbackSelected,
   emitRetryScheduled,
+  emitStreamChunk,
   failAttempt,
+  failOperation,
+  isAbortError,
   maybeComputeFingerprint,
   resurrectOperationContext,
   startAttempt,
+  startOperation,
   withAttempt,
   withOperation,
 } from "./instrumentation.js";
@@ -266,6 +273,7 @@ export type {
   FingerprintPolicy,
   Instrumentation,
   ManualAttemptHandle,
+  ManualOperationHandle,
   OperationContext,
   OperationStartParams,
 } from "./instrumentation.js";
