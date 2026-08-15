@@ -1,0 +1,56 @@
+{
+  "name": "@llm-ports/telemetry-otel",
+  "version": "0.1.0-alpha.30",
+  "description": "OpenTelemetry semantic-conventions bridge for @llm-ports/observability-contract. `createOtelSink({ tracer, meter? })` maps every lifecycle event into gen_ai.* spans + metrics per the OTel gen_ai semconv. Zero runtime dependencies; consumers pass their own OTel tracer/meter (or any object that satisfies the minimal Tracer/Meter interfaces the sink type-checks against).",
+  "license": "MIT",
+  "author": "Babak Abbaschian",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@llm-ports/observability-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@llm-ports/observability-contract": "workspace:*",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baabakk/llm-ports.git",
+    "directory": "packages/telemetry-otel"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "semconv",
+    "gen_ai",
+    "llm",
+    "observability",
+    "tracing",
+    "metrics"
+  ]
+}
