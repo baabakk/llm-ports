@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/adapter-aider",
-  "version": "0.1.0-alpha.29",
+  "version": "0.1.0-alpha.30",
   "description": "Subprocess-driven Aider CLI adapter for @llm-ports (Shape A passthrough governance).",
   "type": "module",
   "main": "./dist/index.cjs",

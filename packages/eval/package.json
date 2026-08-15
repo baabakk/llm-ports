@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/eval",
-  "version": "0.1.0-alpha.29",
+  "version": "0.1.0-alpha.30",
   "description": "Durable storage for post-hoc evaluations (LLM-judge scores, human annotations, rule-based verdicts) keyed on the @llm-ports/observability-contract EvaluationRef shape. Ships an in-memory store (default) and an opt-in SQLite writer (peer-dep on better-sqlite3).",
   "type": "module",
   "main": "./dist/index.cjs",

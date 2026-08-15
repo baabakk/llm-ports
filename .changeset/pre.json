@@ -26,7 +26,8 @@
     "@llm-ports/adapter-aider": "0.1.0-alpha.27",
     "@llm-ports/adapter-codex": "0.1.0-alpha.27",
     "@llm-ports/observability-contract": "0.1.0-alpha.27",
-    "@llm-ports/eval": "0.1.0-alpha.28"
+    "@llm-ports/eval": "0.1.0-alpha.28",
+    "@llm-ports/telemetry-otel": "0.1.0-alpha.29"
   },
   "changesets": [
     "abort-signal-options",
@@ -61,6 +62,7 @@
     "alpha-27-legacy-removal",
     "alpha-28-observability-contract-foundation",
     "alpha-29-runtime-instrumentation",
+    "alpha-30-adapter-emission-streaming-cache-otel",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",
