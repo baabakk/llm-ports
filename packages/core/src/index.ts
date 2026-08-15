@@ -247,6 +247,10 @@ export {
 // ─── Observability instrumentation service (alpha.29+, plans/alpha.29 §2.1) ─
 export {
   completeAttempt,
+  emitAgentStepCompleted,
+  emitAgentStepStarted,
+  emitAgentToolCalled,
+  emitAgentToolReturned,
   emitFallbackSelected,
   emitRetryScheduled,
   failAttempt,

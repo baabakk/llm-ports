@@ -677,6 +677,144 @@ export function emitFallbackSelected(
   );
 }
 
+// ─── Public API: agent-loop sub-events (alpha.30+) ──────────────────
+//
+// Adapters call these from inside their runAgent tool-use loop after
+// resurrecting the outer operation context via
+// `resurrectOperationContext(port)`. The events emit correlated with
+// the outer operation_id — sinks aggregating by operation see the
+// full step + tool-call tree stitched under the same operation.
+//
+// All four helpers no-op when `opCtx` is undefined, so an adapter
+// that unconditionally calls them stays safe in the direct-call
+// case where no outer operation exists. When the adapter opens its
+// own withOperation for the direct-call case, the returned opCtx
+// works with these helpers identically.
+
+/**
+ * Emit `agent.step.started`. Adapters fire this at the top of each
+ * loop iteration — one per LLM turn, one per tool invocation, one
+ * per validation retry.
+ *
+ * @param opCtx — the resurrected OperationContext (from
+ *   `resurrectOperationContext(port)`) or the adapter's own
+ *   OperationContext (from a direct-call `withOperation`).
+ * @param params — `stepIndex` (1-indexed), `stepType`, optional
+ *   `toolName` for tool-kind steps.
+ */
+export function emitAgentStepStarted(
+  opCtx: OperationContext | undefined,
+  params: {
+    stepIndex: number;
+    stepType: "llm" | "tool" | "validation";
+    toolName?: string;
+  },
+): void {
+  if (!opCtx) return;
+  const { instrumentation } = opCtx;
+  const correlation: CorrelationContext = { operation_id: opCtx.operationId };
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "agent.step.started", correlation, {
+      step_index: params.stepIndex,
+      step_type: params.stepType,
+      ...(params.toolName !== undefined ? { tool_name: params.toolName } : {}),
+    }),
+  );
+}
+
+/**
+ * Emit `agent.step.completed`. Fired when the step ends (successfully
+ * or with an error already captured on `llm.attempt.failed`).
+ * Optional `usage` + `cost` when the step consumed provider tokens
+ * (LLM-kind steps typically; tool + validation steps typically don't).
+ */
+export function emitAgentStepCompleted(
+  opCtx: OperationContext | undefined,
+  params: {
+    stepIndex: number;
+    durationMs: number;
+    usage?: TokenUsage;
+    cost?: CostUsage;
+  },
+): void {
+  if (!opCtx) return;
+  const { instrumentation } = opCtx;
+  const correlation: CorrelationContext = { operation_id: opCtx.operationId };
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "agent.step.completed", correlation, {
+      step_index: params.stepIndex,
+      duration_ms: params.durationMs,
+      ...(params.usage ? { usage: params.usage } : {}),
+      ...(params.cost ? { cost: params.cost } : {}),
+    }),
+  );
+}
+
+/**
+ * Emit `agent.tool.called`. Adapters fire this once per tool call the
+ * model produces on an LLM step, BEFORE the tool actually runs.
+ *
+ * `argumentsDigest` is a SHA-256 hex digest of the arguments (typically
+ * `sha256Hex(JSON.stringify(args))` from `@llm-ports/observability-contract`).
+ * The digest is content-free: emit it always regardless of
+ * `CapturePolicy.content`; the raw arguments themselves are the
+ * content that a permissive policy would additionally allow, but this
+ * helper does not surface them.
+ */
+export function emitAgentToolCalled(
+  opCtx: OperationContext | undefined,
+  params: {
+    toolName: string;
+    toolCallId: string;
+    argumentsDigest: string;
+  },
+): void {
+  if (!opCtx) return;
+  const { instrumentation } = opCtx;
+  const correlation: CorrelationContext = { operation_id: opCtx.operationId };
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "agent.tool.called", correlation, {
+      tool_name: params.toolName,
+      tool_call_id: params.toolCallId,
+      arguments_digest: params.argumentsDigest,
+    }),
+  );
+}
+
+/**
+ * Emit `agent.tool.returned`. Fired once per matching
+ * `agent.tool.called`. `resultDigest` is a SHA-256 hex digest of the
+ * result payload; emit `error: ErrorInfo` when the tool threw or
+ * returned a structured error.
+ */
+export function emitAgentToolReturned(
+  opCtx: OperationContext | undefined,
+  params: {
+    toolName: string;
+    toolCallId: string;
+    resultDigest: string;
+    durationMs: number;
+    error?: ErrorInfo;
+  },
+): void {
+  if (!opCtx) return;
+  const { instrumentation } = opCtx;
+  const correlation: CorrelationContext = { operation_id: opCtx.operationId };
+  safeEmit(
+    instrumentation.config,
+    buildEvent(instrumentation.config, "agent.tool.returned", correlation, {
+      tool_name: params.toolName,
+      tool_call_id: params.toolCallId,
+      result_digest: params.resultDigest,
+      duration_ms: params.durationMs,
+      ...(params.error ? { error: params.error } : {}),
+    }),
+  );
+}
+
 // ─── Public API: manual escape hatch (streaming) ────────────────────
 
 /**
