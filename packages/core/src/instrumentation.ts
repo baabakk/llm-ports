@@ -58,6 +58,7 @@
  */
 
 import type {
+  CapturePolicy,
   ComputeRequestFingerprintOptions,
   CorrelationContext,
   CostUsage,
@@ -75,6 +76,7 @@ import type {
 import {
   buildEvent,
   computeRequestFingerprint,
+  DEFAULT_CAPTURE_POLICY,
   errorTypeToCauseCategory,
   newAttemptId,
   newOperationId,
@@ -114,6 +116,21 @@ export interface Instrumentation {
    * `CapturePolicy.fingerprint` default of "off in strict mode."
    */
   fingerprint?: FingerprintPolicy;
+
+  /**
+   * Alpha.30+: capture policy governing per-attempt diagnostic fields
+   * (`response_char_count`, `response_preview`) and future
+   * content-bearing emission. When omitted, `DEFAULT_CAPTURE_POLICY`
+   * applies (`content: "none"`, `responsePreviewMaxChars: 0` — count
+   * emits, preview does not).
+   *
+   * Consumers who want previews in dev set
+   * `{ ...DEFAULT_CAPTURE_POLICY, content: "full", responsePreviewMaxChars: 200 }`
+   * (or use `PERMISSIVE_CAPTURE_POLICY`). The response_char_count
+   * field always emits regardless of policy — it's a count, not
+   * content, and gating it would defeat the point.
+   */
+  capturePolicy?: CapturePolicy;
 }
 
 /**
@@ -279,6 +296,32 @@ export interface AttemptWorkResult<T> {
 
   /** Provider-issued response identifier (e.g. OpenAI `chatcmpl-...`). */
   providerResponseId?: string;
+
+  /**
+   * Alpha.30+: total character count of the natural-language response
+   * for this attempt. Always emitted verbatim (never gated by
+   * CapturePolicy — it's a count, not content). Set to the appropriate
+   * per-method count (see the alpha.30 plan doc §2.3.1).
+   *
+   * When omitted, `response_char_count` is not emitted on
+   * `llm.attempt.completed`.
+   */
+  responseCharCount?: number;
+
+  /**
+   * Alpha.30+: raw text to slice for the `response_preview` field on
+   * `llm.attempt.completed`. Gated by `CapturePolicy.content` +
+   * `CapturePolicy.responsePreviewMaxChars > 0` at emit time.
+   *
+   * Per-method source text (see plan doc §2.3.2):
+   *   - generateText / generateStructured: the response text itself
+   *   - runAgent: the FIRST assistant message's content (not the final)
+   *   - streamText / streamStructured: buffered from stream start (§2.7)
+   *
+   * When omitted, `response_preview` is not emitted regardless of
+   * capture policy.
+   */
+  responsePreviewSource?: string;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -446,6 +489,12 @@ export async function withAttempt<T>(
     opCtx.aggregateUsage = mergeUsage(opCtx.aggregateUsage, usage);
     opCtx.aggregateCost = mergeCost(opCtx.aggregateCost, cost);
 
+    const diagnosticFields = computeDiagnosticFields(
+      result.responseCharCount,
+      result.responsePreviewSource,
+      effectiveCapturePolicy(instrumentation),
+    );
+
     safeEmit(
       instrumentation.config,
       buildEvent(instrumentation.config, "llm.attempt.completed", correlation, {
@@ -455,6 +504,7 @@ export async function withAttempt<T>(
         final_model_id: finalModelId,
         ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
         ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
+        ...diagnosticFields,
       }),
     );
 
@@ -607,6 +657,12 @@ export function completeAttempt<T>(
   opCtx.aggregateUsage = mergeUsage(opCtx.aggregateUsage, usage);
   opCtx.aggregateCost = mergeCost(opCtx.aggregateCost, cost);
 
+  const diagnosticFields = computeDiagnosticFields(
+    result.responseCharCount,
+    result.responsePreviewSource,
+    effectiveCapturePolicy(opCtx.instrumentation),
+  );
+
   safeEmit(
     opCtx.instrumentation.config,
     buildEvent(opCtx.instrumentation.config, "llm.attempt.completed", correlation, {
@@ -616,6 +672,7 @@ export function completeAttempt<T>(
       final_model_id: result.modelId ?? "(unknown)",
       ...(result.providerResponseId ? { provider_response_id: result.providerResponseId } : {}),
       ...(opCtx.requestFingerprint ? { request_fingerprint: opCtx.requestFingerprint } : {}),
+      ...diagnosticFields,
     }),
   );
 }
@@ -669,6 +726,48 @@ export function maybeComputeFingerprint(
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────
+
+/**
+ * Alpha.30+: resolve the effective CapturePolicy for an
+ * Instrumentation. Falls back to `DEFAULT_CAPTURE_POLICY` when
+ * `instrumentation.capturePolicy` is undefined, so callers who
+ * never opted into a policy get the strict-by-default posture
+ * automatically.
+ */
+function effectiveCapturePolicy(instrumentation: Instrumentation): CapturePolicy {
+  return instrumentation.capturePolicy ?? DEFAULT_CAPTURE_POLICY;
+}
+
+/**
+ * Alpha.30+: compute the diagnostic fields for
+ * `llm.attempt.completed` given the raw source values and the
+ * effective capture policy. Two rules:
+ *
+ *   - `response_char_count` always emits when provided (never gated —
+ *     it's a count, not content).
+ *   - `response_preview` emits only when the policy's `content` is
+ *     "full" or "redacted" (matches the `contentEverExposed` check)
+ *     AND `responsePreviewMaxChars > 0`.
+ *
+ * Returns an object suitable for spread into the event data. When
+ * neither field applies, returns `{}`.
+ */
+function computeDiagnosticFields(
+  responseCharCount: number | undefined,
+  responsePreviewSource: string | undefined,
+  policy: CapturePolicy,
+): { response_char_count?: number; response_preview?: string } {
+  const out: { response_char_count?: number; response_preview?: string } = {};
+  if (typeof responseCharCount === "number") {
+    out.response_char_count = responseCharCount;
+  }
+  const contentAllowed = policy.content === "full" || policy.content === "redacted";
+  const maxChars = policy.responsePreviewMaxChars ?? 0;
+  if (contentAllowed && maxChars > 0 && typeof responsePreviewSource === "string") {
+    out.response_preview = responsePreviewSource.slice(0, maxChars);
+  }
+  return out;
+}
 
 /**
  * Emit an event to a sink without letting the sink's failure break

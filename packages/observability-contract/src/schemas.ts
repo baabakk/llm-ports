@@ -231,6 +231,7 @@ export const capturePolicySerializableSchema = z.object({
   metadata_allowlist: z.array(z.string()).optional(),
   error_body_capture: errorBodyCaptureSchema,
   stream_chunk_capture: streamChunkCaptureSchema,
+  responsePreviewMaxChars: z.number().int().nonnegative().optional(),
 });
 
 // ─── Lifecycle event data schemas ───────────────────────────────────
@@ -309,6 +310,8 @@ export const attemptCompletedDataSchema = z.object({
   provider_response_id: z.string().optional(),
   final_model_id: z.string().min(1),
   request_fingerprint: requestFingerprintSchema.optional(),
+  response_char_count: z.number().int().nonnegative().optional(),
+  response_preview: z.string().optional(),
 });
 
 export const operationCompletedDataSchema = z.object({

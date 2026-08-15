@@ -217,6 +217,54 @@ export interface AttemptCompletedData {
    * the emission surface it was meant to populate.
    */
   request_fingerprint?: RequestFingerprint;
+
+  /**
+   * Alpha.30+: total character count of the model's natural-language
+   * response for this attempt. Always safe to emit — it's a count,
+   * not content — so `CapturePolicy.content` does NOT gate it.
+   *
+   * Solves "the model returned near-empty output but the call reports
+   * success" — the count distinguishes "returned 2 chars" from
+   * "returned 800 chars," which is enough to diagnose most
+   * permissive-schema-plus-hollow-response cases without any content
+   * exposure.
+   *
+   * What counts per method (see the alpha.30 plan doc §2.3.1):
+   *   - `generateText`: `result.text.length`
+   *   - `generateStructured` / `streamStructured`: raw pre-parse
+   *     text length (a hollow-object success shows as e.g. 2 for `{}`)
+   *   - `streamText`: accumulated stream text at stream close
+   *   - `runAgent`: total char count of the FINAL assistant message
+   *   - Tool-call arguments do NOT count — surfaced via
+   *     `agent.tool.called` events instead
+   *
+   * Sourced from SalesCoach's `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`
+   * "unrelated observation" side note (2026-08-14).
+   */
+  response_char_count?: number;
+
+  /**
+   * Alpha.30+: FIRST-N chars of the model's natural-language response
+   * for this attempt. Content — gated by
+   * `CapturePolicy.content === true` AND
+   * `CapturePolicy.responsePreviewMaxChars > 0`. Off by default in
+   * strict mode; 200 chars in permissive.
+   *
+   * "First N" rather than "last N" so the field answers "did the
+   * model start producing sensible text" even when the stream was
+   * aborted partway or the response was truncated. For streams and
+   * agent loops, the adapter buffers the first N chars from the
+   * earliest output (see the alpha.30 plan doc §2.3.2 for per-method
+   * semantics — first assistant message for `runAgent`, buffered
+   * from stream start for `streamText`/`streamStructured`, trivially
+   * first N for the two single-turn methods).
+   *
+   * Consumers who want the full final content already have it in
+   * `result.text` in-process. This field is an observability
+   * artifact for third-party sinks that don't have the in-process
+   * result.
+   */
+  response_preview?: string;
 }
 
 /**

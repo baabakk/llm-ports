@@ -138,6 +138,26 @@ export interface CapturePolicy {
    * absent, the capture-level filter is the final say.
    */
   redactor?: Redactor;
+
+  /**
+   * Alpha.30+: maximum length (in characters) of the
+   * `AttemptCompletedData.response_preview` field the emitter includes
+   * on `llm.attempt.completed`. Zero disables the preview even when
+   * `content` is otherwise "full" — the count field
+   * (`response_char_count`) still emits either way.
+   *
+   * Two gates apply, both must be true for the preview to land:
+   *   1. `content === "full"` (or `"redacted"` when a redactor is set).
+   *   2. `responsePreviewMaxChars > 0`.
+   *
+   * Default: 0 in `DEFAULT_CAPTURE_POLICY` (off, matches the strict
+   * default posture); 200 in `PERMISSIVE_CAPTURE_POLICY` (on for dev).
+   *
+   * Sourced from SalesCoach's `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`
+   * "unrelated observation" (2026-08-14) about undebuggable
+   * empty-response successes under permissive schemas.
+   */
+  responsePreviewMaxChars?: number;
 }
 
 /**
@@ -151,6 +171,7 @@ export const DEFAULT_CAPTURE_POLICY: CapturePolicy = {
   baggage_allowlist: [],
   error_body_capture: "redacted",
   stream_chunk_capture: "off",
+  responsePreviewMaxChars: 0, // alpha.30+: preview off in strict mode
 };
 
 /**
@@ -165,6 +186,7 @@ export const PERMISSIVE_CAPTURE_POLICY: CapturePolicy = {
   baggage_allowlist: [], // still empty; deliberate: baggage travels cross-service
   error_body_capture: "full",
   stream_chunk_capture: "off", // still off; chunk-level is a volume concern, not a privacy one
+  responsePreviewMaxChars: 200, // alpha.30+: 200-char preview reasonable for dev
 };
 
 /**

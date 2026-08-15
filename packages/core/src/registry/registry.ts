@@ -1052,6 +1052,19 @@ interface AttemptMetrics {
   cost: CostUsage;
   modelId: string;
   providerResponseId?: string;
+  /**
+   * Alpha.30+: char count for `AttemptCompletedData.response_char_count`.
+   * Per-method extractors set the appropriate value (see plan §2.3.1).
+   * Undefined = don't emit response_char_count.
+   */
+  responseCharCount?: number;
+  /**
+   * Alpha.30+: text to slice for `AttemptCompletedData.response_preview`.
+   * Per-method extractors set the appropriate source (see plan §2.3.2 —
+   * FIRST-N chars of earliest output). Undefined = don't emit preview
+   * regardless of policy.
+   */
+  responsePreviewSource?: string;
 }
 
 async function walkChain<R>(
@@ -1093,6 +1106,10 @@ async function walkChain<R>(
           cost: m.cost,
           modelId: m.modelId,
           ...(m.providerResponseId ? { providerResponseId: m.providerResponseId } : {}),
+          ...(m.responseCharCount !== undefined ? { responseCharCount: m.responseCharCount } : {}),
+          ...(m.responsePreviewSource !== undefined
+            ? { responsePreviewSource: m.responsePreviewSource }
+            : {}),
         };
       },
     );
@@ -1320,7 +1337,7 @@ class RegistryPort implements LLMPort {
           "generateText",
           normalizedOptions.refs,
           opCtx,
-          toContractMetrics,
+          toContractMetricsForText,
         );
         this.emitResultEvents(
           result,
@@ -1368,7 +1385,7 @@ class RegistryPort implements LLMPort {
           "generateStructured",
           normalizedOptions.refs,
           opCtx,
-          toContractMetrics,
+          toContractMetricsForStructured,
         );
         this.emitResultEvents(
           result,
@@ -1521,7 +1538,7 @@ class RegistryPort implements LLMPort {
           "runAgent",
           options.refs,
           opCtx,
-          toContractMetrics,
+          toContractMetricsForAgent,
         );
         this.emitResultEvents(
           result,
@@ -1543,8 +1560,13 @@ class RegistryPort implements LLMPort {
  * → `savingsUSD`. `cacheWriteTokens` has no direct contract-side
  * equivalent (cache write telemetry lives in `CacheStats` which
  * alpha.29 adapters wire — for now dropped from AttemptCompletedData).
+ *
+ * The base extractor produces usage + cost + modelId; per-method
+ * extractors below layer on the alpha.30 diagnostic fields
+ * (`responseCharCount`, `responsePreviewSource`) with the semantics
+ * appropriate for that method.
  */
-function toContractMetrics(r: {
+function toContractMetricsBase(r: {
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -1575,6 +1597,76 @@ function toContractMetrics(r: {
   };
   if (r.cost.cacheSavingsUSD !== undefined) cost.savingsUSD = r.cost.cacheSavingsUSD;
   return { usage, cost, modelId: r.modelId };
+}
+
+/**
+ * Alpha.30+: extractor for generateText. `response_char_count` and
+ * `response_preview` source both use `result.text` — a single-turn
+ * method with no distinction between "first" and "final" output.
+ */
+function toContractMetricsForText(r: GenerateTextResult): AttemptMetrics {
+  const base = toContractMetricsBase(r);
+  base.responseCharCount = r.text.length;
+  base.responsePreviewSource = r.text;
+  return base;
+}
+
+/**
+ * Alpha.30+: extractor for generateStructured. `response_char_count`
+ * and `response_preview` source both derive from a text representation
+ * of the parsed value. `GenerateStructuredResult` doesn't expose a
+ * raw pre-parse text field, so we approximate via `JSON.stringify` —
+ * a hollow-object success shows as e.g. 2 chars for `"{}"`, matching
+ * the plan's spec. When adapters gain their own attempt.completed
+ * emission (post §2.4), they can produce the true raw text; the
+ * Registry-side extractor is the best it can do without breaking the
+ * `GenerateStructuredResult` shape.
+ */
+function toContractMetricsForStructured<T>(r: GenerateStructuredResult<T>): AttemptMetrics {
+  const base = toContractMetricsBase(r);
+  const rawText =
+    typeof r.data === "string" ? (r.data as string) : JSON.stringify(r.data ?? {});
+  base.responseCharCount = rawText.length;
+  base.responsePreviewSource = rawText;
+  return base;
+}
+
+/**
+ * Alpha.30+: extractor for runAgent. Two different pieces of text per
+ * plan §2.3:
+ *   - char_count = length of the FINAL assistant message content
+ *     (`result.text` for AgentResult).
+ *   - preview source = FIRST assistant message's content. Shows how
+ *     the agent started reasoning before any tools were invoked.
+ *
+ * When the messages array is empty (unusual — the agent produced no
+ * assistant turn at all), both fields fall back to the final text.
+ */
+function toContractMetricsForAgent(r: AgentResult): AttemptMetrics {
+  const base = toContractMetricsBase(r);
+  base.responseCharCount = r.text.length;
+  const firstAssistant = r.messages?.find((m) => m.role === "assistant");
+  const firstText = firstAssistant ? messageContentToText(firstAssistant.content) : r.text;
+  base.responsePreviewSource = firstText;
+  return base;
+}
+
+/**
+ * Alpha.30+: flatten an LLMMessage's `content` (string or
+ * ContentBlock[]) to a plain string. Tool-call blocks are excluded
+ * per the plan's "tool-call arguments do NOT count toward the
+ * char_count" rule; only text blocks contribute.
+ */
+function messageContentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content as Array<{ type?: string; text?: string }>) {
+    if (block?.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    }
+  }
+  return parts.join("");
 }
 
 /**
