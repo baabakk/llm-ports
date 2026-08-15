@@ -76,10 +76,18 @@ export function withObservabilityContext<T extends LLMPort>(
   const wrapped = new Proxy(port, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
-      // Bind methods to the underlying port so `this` remains correct
-      // when the caller destructures methods off the wrapped port.
+      // Bind methods to the RECEIVER (the wrapped proxy) so `this`
+      // inside the adapter method resolves to the proxy — that's the
+      // instance the ObservabilityContext is registered against, so
+      // `resurrectOperationContext(this)` inside the adapter's
+      // runAgent tool-use loop can walk back to the outer operation
+      // and emit correlated `agent.step.*` / `agent.tool.*` events
+      // (§2.4/§2.5, alpha.30). Destructured calls still work because
+      // the receiver at bind time is the proxy; underlying port
+      // access still works because the proxy forwards every property
+      // read via Reflect.get(target, ...).
       if (typeof value === "function") {
-        return value.bind(target);
+        return value.bind(receiver);
       }
       return value;
     },

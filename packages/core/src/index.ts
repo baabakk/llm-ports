@@ -277,3 +277,9 @@ export type {
   OperationContext,
   OperationStartParams,
 } from "./instrumentation.js";
+
+// Alpha.30+ §2.5: re-export the contract's hash helpers so adapters can
+// compute `agent.tool.called` / `agent.tool.returned` digests without
+// needing to add `@llm-ports/observability-contract` as a direct dep.
+// Contract's hash implementation is authoritative; this just relays.
+export { hmacSha256Hex, sha256Hex } from "@llm-ports/observability-contract";

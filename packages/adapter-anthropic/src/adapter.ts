@@ -14,11 +14,17 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   attemptValidationRepair,
   computeChatCost,
+  emitAgentStepCompleted,
+  emitAgentStepStarted,
+  emitAgentToolCalled,
+  emitAgentToolReturned,
   emitRetryEvent,
   extractJSON,
   failValidation,
   mergeTokenUsage,
   NonContiguousSystemError,
+  resurrectOperationContext,
+  sha256Hex,
   throwIfAborted,
   tryParsePartialJSON,
   validateImageBlocks,
@@ -608,7 +614,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       }
     },
 
-    async runAgent(options: RunAgentOptions): Promise<AgentResult> {
+    async runAgent(this: LLMPort, options: RunAgentOptions): Promise<AgentResult> {
       throwIfAborted(options.signal);
       validateMessages(options.messages);
       const start = Date.now();
@@ -621,6 +627,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let lastModelId = modelId;
       let terminationReason: AgentResult["terminationReason"] = "max_steps";
 
+      // Alpha.30+ §2.5: resurrect the outer OperationContext.
+      const outerOpCtx = resurrectOperationContext(this);
+
       try {
         for (let step = 0; step < maxSteps; step++) {
           // Re-check between agent steps so cancellation propagates even if
@@ -629,6 +638,8 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           throwIfAborted(options.signal);
           stepsTaken = step + 1;
           const { system, messages } = toAnthropicMessages(conversation);
+          const llmStepStart = Date.now();
+          emitAgentStepStarted(outerOpCtx, { stepIndex: stepsTaken, stepType: "llm" });
           const response = await executeMessageCreate<Anthropic.Messages.Message>(
             (caps) =>
               applyAnthropicCacheControl(
@@ -647,8 +658,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               ),
             options.signal,
           );
-          totalUsage = mergeTokenUsage(totalUsage, parseUsage(response));
+          const stepUsage = parseUsage(response);
+          totalUsage = mergeTokenUsage(totalUsage, stepUsage);
           lastModelId = response.model ?? modelId;
+          emitAgentStepCompleted(outerOpCtx, {
+            stepIndex: stepsTaken,
+            durationMs: Date.now() - llmStepStart,
+            usage: stepUsage,
+            cost: computeChatCost(stepUsage, pricing),
+          });
           const blocks = response.content as never as Array<
             | { type: "text"; text: string }
             | { type: "tool_use"; id: string; name: string; input: unknown }
@@ -685,6 +703,12 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
               });
               continue;
             }
+            const toolStart = Date.now();
+            emitAgentToolCalled(outerOpCtx, {
+              toolName: tu.name,
+              toolCallId: tu.id,
+              argumentsDigest: sha256Hex(JSON.stringify(tu.input ?? {})),
+            });
             try {
               const output = await def.execute(tu.input as never);
               toolCalls.push({
@@ -697,16 +721,36 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
                 def.maxOutputBytes !== undefined && text.length > def.maxOutputBytes
                   ? `${text.slice(0, def.maxOutputBytes)}\n[truncated]`
                   : text;
+              emitAgentToolReturned(outerOpCtx, {
+                toolName: tu.name,
+                toolCallId: tu.id,
+                resultDigest: sha256Hex(truncated),
+                durationMs: Date.now() - toolStart,
+              });
               toolResults.push({
                 type: "tool_result",
                 toolUseId: tu.id,
                 content: truncated,
               });
             } catch (toolErr) {
+              const errText = toolErr instanceof Error ? toolErr.message : String(toolErr);
+              emitAgentToolReturned(outerOpCtx, {
+                toolName: tu.name,
+                toolCallId: tu.id,
+                resultDigest: sha256Hex(errText),
+                durationMs: Date.now() - toolStart,
+                error: {
+                  error_type: toolErr instanceof Error ? toolErr.name : "UnknownError",
+                  message: errText,
+                  cause_category: "port_internal",
+                  retryable: false,
+                  fallback_worthy: false,
+                },
+              });
               toolResults.push({
                 type: "tool_result",
                 toolUseId: tu.id,
-                content: toolErr instanceof Error ? toolErr.message : String(toolErr),
+                content: errText,
                 isError: true,
               });
             }
