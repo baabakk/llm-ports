@@ -21,6 +21,10 @@ This root file aggregates the **release-level** notes — the user-facing summar
 
 ## v0.1.0-alpha.31 — 2026-08-19
 
+### Scope note
+
+This release is a single-issue hotfix, not a feature release. The scope previously announced for alpha.31 (`@llm-ports/eval` persistence backends beyond SQLite, plus evaluation-workflow tooling) was displaced by the unblocker below. That work is queued in [docs/v0-1-status.md](docs/v0-1-status.md#near-term-alpha-queue) rather than silently reassigned to a later version number.
+
 ### What changed
 
 Per-call `operation_id` precedence via `withObservabilityContext(port, ctx)`. Alpha.29 shipped `Instrumentation.context.operation_id` as a Registry-level (config-time) pinning slot, but the Registry still minted a fresh id per port method call regardless of what the caller wrapped the port with. Alpha.31 closes that gap: the Registry's five port methods (`generateText`, `generateStructured`, `runAgent`, `streamText`, `streamStructured`) now pass `getObservabilityContext(this)` into `withOperation` / `startOperation`, honoring a caller-supplied per-call context first. Fully additive; existing callers see identical behavior.

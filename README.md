@@ -17,7 +17,7 @@ Multi-provider routing • fallback chains • USD cost gating • capability fa
 >
 > **Previous release: `0.1.0-alpha.30`** — streaming instrumentation, adapter-side emission, provider-cache normalization, and the OpenTelemetry bridge. Registry `streamText` / `streamStructured` emit the full contract lifecycle plus `stream_stats`. Openai / anthropic / google `runAgent` loops emit `agent.step.*` + `agent.tool.*` correlated via `resurrectOperationContext(this)`. New companion [`@llm-ports/telemetry-otel`](./packages/telemetry-otel).
 >
-> **Coming next: `alpha.32`** — evaluation-workflow tooling and persistence backends beyond SQLite (Postgres, ClickHouse) for `@llm-ports/eval`.
+> **Coming next** — shared authentication state across Registry instances (`authBackend`), then the `@llm-ports/eval` persistence backends (Postgres, ClickHouse) and evaluation-workflow tooling that were queued for alpha.31 and displaced by the hotfix above. The durable queue lives in [docs/v0-1-status.md](./docs/v0-1-status.md#near-term-alpha-queue); this line only points at the top of it.
 
 ---
 

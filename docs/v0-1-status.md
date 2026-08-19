@@ -125,6 +125,23 @@ These are observations, not regressions. The plumbing handles both cases predict
 
 ---
 
+## Near-term alpha queue
+
+The work queue inside the current `0.1.0-alpha.*` series. This section, not the README badge, is the durable record of alpha-series intent. The README's "coming next" line is a pointer to the top of this list and gets rewritten every release; this list does not.
+
+When a release ships contents other than what was queued here, the displacement is recorded in that release's changelog entry rather than by silently editing this list.
+
+| Item | State | Notes |
+|---|---|---|
+| Shared authentication state across Registry instances (`authBackend`) | Queued, correctness | Alpha.30 made per-instance authentication tracking decide walk-versus-abort on auth failures. It is the only cross-cutting Registry state without an injectable backend, so two Registry instances classify the same credential differently. Follows the existing `budgetBackend` / `costBackend` shape, defaulting to today's behavior. Carries a docs correction: alpha.30's "fully additive, identical behavior" claim is false for multi-registry consumers. |
+| `@llm-ports/eval` persistence backends beyond SQLite (Postgres, ClickHouse) | Queued, displaced from alpha.31 | Stated as alpha.31 scope, displaced by the per-call `operation_id` hotfix that shipped under that number. Recorded here so the deferral is visible rather than implied. |
+| Evaluation-workflow tooling | Queued, displaced from alpha.31 | Same displacement as above. |
+| Registry-instance sharing semantics, documented | Queued, docs | One explicit statement of what is and is not shared across Registry instances. Currently answerable only by reading `registry.ts`. |
+
+Items graduate from this list into a release's changelog when they ship. Items that slip record the slip.
+
+---
+
 ## What v0.2 adds
 
 Roadmap target — not promises, but the work queue. Order is approximate; what ships first is whatever has clearest user need.
