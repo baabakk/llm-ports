@@ -8,6 +8,56 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-08-19T03:41 PDT
+
+## llm-ports
+
+> The four entries in this section were originally filed in a downstream consumer's tech-debt log while that consumer was adopting alpha.30 and alpha.31. They are upstream-owned, so they belong here. Identifiers are preserved verbatim so existing downstream cross-references keep resolving. Downstream now carries pointers rather than copies.
+
+### TD-LLMPORTS-AUTH-STATE-NOT-PLUGGABLE: authentication state is the only cross-cutting Registry state without an injectable backend, so two Registry instances classify the same credential differently
+
+- **Severity:** High
+- **Status:** Open
+- **Files:** `packages/core/src/registry/registry.ts` (line 395 the field, 481 the reader, 491 the writer), `packages/core/src/errors.ts` (lines 716 and 859, the walk-versus-abort branch), `CHANGELOG.md` (the alpha.30 additive-compatibility claim), `docs/`
+- **Problem:** Alpha.30 began tracking, per Registry instance, which provider aliases have ever authenticated successfully. That set decides whether an authentication failure means "this credential never worked, so walk to the next provider" or "this credential worked moments ago, so configuration changed underneath us, abort." The set is a private instance field at `registry.ts:395`, never reset per the comment at line 390, read via `hasEverAuthenticated(alias)` at line 481. The branch consuming it appears twice in `errors.ts`, at 716 and 859. An application holding two Registry instances therefore holds two independent copies, and the same credential failing on the same alias can be classified differently by each depending on which authenticated first.
+
+  The precise defect is not that alpha.30 added state. It is that alpha.30 added a fourth kind of cross-cutting Registry state without the injectable-backend treatment the other three already have. `budgetBackend` and `costBackend` both exist so that state can live outside the instance and be shared. Authentication state got no equivalent, and it is the only private per-instance collection in the entire registry file.
+
+  There is no single-registry contract to fall back on. The only relevant guidance anywhere is one line in the getting-started tutorial ("Once at app startup. Hold the returned port as a singleton"), which concerns not rebuilding per call. No reference page, type, or runtime warning states that multiple instances are unsupported.
+- **Impact:** Silent, data-dependent divergence in error handling. Nothing logs it, nothing fails loudly, and the verdict depends on instance ordering. The first known consumer held two registries only to express a per-route timeout, which `taskDefaults` now makes unnecessary, so that instance is being deleted. The defect survives it. Per-tenant API key isolation is an ordinary reason to hold one Registry per tenant with shared aliases and distinct keys, and under the current design a successful authentication in tenant A changes how tenant B's dead key is classified. A credential fault in one tenant alters failure semantics in another, which nothing in the public API would lead a reader to predict.
+
+  Compounding this: the alpha.30 release notes state "fully additive; existing consumers see identical behavior when they don't opt into the new fields." That is false for any consumer holding more than one Registry, and it is the sentence a reader would rely on when deciding whether the upgrade warranted review.
+- **Resolution path:** (1) Add an `authBackend` option to `RegistryOptions` following the established shape of `budgetBackend` and `costBackend`, defaulting to the current in-memory per-instance behavior so no existing consumer changes. This additionally gives multi-process deployments a shared authentication view, which the present design cannot express at all. (2) Correct the alpha.30 release notes to name the multi-registry exception to the additive claim. (3) Add one explicit statement to the reference documentation covering what is and is not shared across Registry instances, which a reader currently cannot answer short of reading `registry.ts`.
+
+### TD-LLMPORTS-ALPHA31-EVAL-BACKENDS-DEFERRED: the announced alpha.31 scope was displaced by an unrelated hotfix and moved a version without being recorded
+
+- **Severity:** Medium
+- **Status:** Open
+- **Files:** `README.md`, `docs/v0-1-status.md`, `CHANGELOG.md`, `packages/eval/`
+- **Problem:** Before alpha.31 shipped, the README stated: "Coming next: `alpha.31` — persistence backends beyond SQLite (Postgres, ClickHouse), and evaluation-workflow tooling." What shipped under that number was per-call `operation_id` precedence, a single unrelated change cut to unblock a downstream consumer. The forward-looking README line was then rewritten to point at alpha.32, moving a stated deliverable a version with no record of the deferral anywhere.
+- **Impact:** No runtime effect. The cost is that `@llm-ports/eval` shipped at alpha.28 with in-memory and SQLite stores only, and the Postgres and ClickHouse backends have now carried a "coming next" label across two version boundaries. Anyone tracking the project sees a stated deliverable move with no explanation, and nothing in the log would cause the work to be picked back up. Secondary observation: alpha.31 was a hotfix carrying a README badge and a full aggregate changelog entry proportionate to a much larger release. Its notes were accurate about what it contained; the mismatch was between its framing and its size.
+- **Resolution path:** Partially addressed in commit 34e332a, which added a "Near-term alpha queue" to `docs/v0-1-status.md` as the durable record, added a scope note to the alpha.31 changelog entry naming what it displaced, and repointed the README's forward-looking line at the queue instead of a version number. Remaining: actually ship the displaced work. Convention now recorded: when a release ships contents other than what was queued, the displacement is recorded in that release's changelog entry rather than by editing the forward-looking line.
+
+### TD-LLMPORTS-TELEMETRY-OTEL-TRACER-VARIANCE: the `telemetry-otel` `Tracer` interface is not TypeScript-compatible with the real `@opentelemetry/api` `Tracer`
+
+- **Severity:** Low
+- **Status:** Open
+- **Files:** `packages/telemetry-otel/src/` (the `Tracer` / `SpanOptions` / `Attributes` interface declarations)
+- **Problem:** The package declares its own minimal `Tracer`, `SpanOptions`, and `Attributes` interfaces, intended as a dependency-free structural subset of `@opentelemetry/api`. The subset picked two variances that do not unify with the real type. First, `Tracer.startSpan(name, options?)` is arity-2 while the real `Tracer.startSpan(name, options?, context?)` is arity-3, and TypeScript refuses to widen a two-parameter function type to accept a three-parameter one. Second, the `AttributeValue` array variants are declared `readonly Array<...>` while the real ones are mutable `Array<...>`, and TypeScript refuses to assign a readonly array to a mutable index signature.
+- **Impact:** Both variances are safe at runtime. A real Tracer's optional third argument satisfies a two-argument call site via arity contravariance, and readonly arrays are assignable at emit time. The cost is compile-time only: every consumer passing a real `@opentelemetry/api` tracer to `createOtelSink({ tracer })` must add an `unknown` cast at the call site, costing one line of code plus a tech-debt entry per adopter. At least one downstream consumer already carries that cast.
+- **Resolution path:** Widen `Tracer.startSpan` to `(name: string, options?: SpanOptions, context?: unknown) => Span`, since the context parameter is opaque to the sink and declaring it `unknown` matches the real arity without taking `@opentelemetry/api` as a peer dependency. Change the `AttributeValue` array variants from `readonly Array<...>` to `Array<...>` so the real type unifies structurally. Zero runtime change, type-only. Consumers can then drop the cast.
+
+### TD-LLMPORTS-REGISTRY-PER-CALL-CONTEXT: the Registry minted its own `operation_id` at every port method call, ignoring a caller-supplied `withObservabilityContext(port, ctx)`
+
+- **Severity:** Medium
+- **Status:** Resolved 2026-08-19 in `0.1.0-alpha.31`, commit 93e6cb6
+- **Files:** `packages/core/src/instrumentation.ts`, `packages/core/src/registry/registry.ts`, `packages/core/tests/per-call-operation-id.test.ts`
+- **Problem:** Alpha.29 shipped `Instrumentation.context.operation_id` as a Registry-level, configuration-time pinning slot. There was no per-call mechanism. `withObservabilityContext(port, { operation_id })` stored context on the wrapped port instance via a WeakMap, and adapters could retrieve it through `resurrectOperationContext(port)`, but the Registry's own `withOperation` read only `instrumentation.context?.operation_id` and otherwise minted fresh. A caller wrapping the port for one call still saw a Registry-minted id on every emitted event.
+- **Impact:** Consumers could not pre-mint an id and use it as a correlation key across stores, because the id they supplied was ignored and the id actually used never came back on the port result. Cross-store joins between an application's own quality records, its incident rows, and OpenTelemetry spans were only possible on an id the application could not see.
+- **Resolution path:** Shipped. `startOperation` and `withOperation` each gained an optional final `perCallContext?: ObservabilityContext` parameter, and all five Registry port methods now pass `getObservabilityContext(this)` through. Precedence resolves per-call context first, then Registry-level context, then a fresh mint. Purely additive. Nine tests cover all four precedence conditions across all five methods.
+
+---
+
 # 2026-08-11 PST
 
 ## llm-ports
