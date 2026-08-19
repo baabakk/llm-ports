@@ -55,7 +55,40 @@ With `instrumentation` supplied, every call on the Registry's `LLMPort` for `gen
 - `llm.operation.failed` — when the whole chain failed. Carries `error`, `attempts_made`, `providers_tried`, `total_duration_ms`.
 - `llm.operation.cancelled` — when an `AbortError` propagated. Carries `cancelled_at_attempt`, `providers_tried_before_cancel`, `total_duration_ms`.
 
-Every event across one operation shares a single `operation_id`. Every attempt within an operation gets its own `attempt_id`. Streams (`streamText`, `streamStructured`) are not instrumented yet; alpha.30 wires the streaming path.
+Every event across one operation shares a single `operation_id`. Every attempt within an operation gets its own `attempt_id`. Streaming methods (`streamText`, `streamStructured`) emit the same lifecycle since alpha.30, plus `AttemptCompletedData.stream_stats` (ttft_ms, chunk_count, inter-chunk p50/p99, termination) and optional per-chunk `llm.stream.chunk` events under `CapturePolicy.stream_chunk_capture: "full"`.
+
+### Per-call `operation_id` precedence (alpha.31)
+
+The `operation_id` a Registry method uses is picked from three levels of precedence, checked in order:
+
+1. **Per-call context (alpha.31).** Wrap the port with `withObservabilityContext(port, { operation_id })` and invoke through the wrapped instance. That id lands on every emitted lifecycle event for that call. This is the level to use when a caller mints its own correlation id (e.g. a capability wrapper that also writes a quality-tracker row keyed on the same id).
+2. **Registry-level context (alpha.29).** Set `Instrumentation.context.operation_id` on the Registry once, and every call reuses it. This is the level to use when an outer scope wants many Registry calls stitched under a single long-horizon id.
+3. **Fresh mint (default).** `newOperationId()` runs at operation start. This is the pre-alpha.29 behavior and remains the default for uninstrumented consumers.
+
+The three levels are independent: any of them can be present or absent, and the Registry falls through cleanly.
+
+```ts
+import {
+  createRegistryFromEnv,
+  withObservabilityContext,
+} from "@llm-ports/core";
+
+const registry = createRegistryFromEnv({ /* ... instrumentation.config as above ... */ });
+const port = registry.getPort();
+
+// A: fresh mint (default). Registry mints a new operation_id for this call.
+await port.generateText({ taskType: "triage", prompt });
+
+// B: Registry-level context. Every call through `port` reuses "op-outer-123".
+// (configured in the Registry options via `instrumentation.context: { operation_id: "op-outer-123" }`)
+
+// C: per-call context (alpha.31). This one call is pinned to "op-request-42",
+// regardless of any Registry-level context.
+const scoped = withObservabilityContext(port, { operation_id: "op-request-42" });
+await scoped.generateText({ taskType: "triage", prompt });
+```
+
+The precedence applies uniformly to all five port methods: `generateText`, `generateStructured`, `runAgent`, `streamText`, `streamStructured`. Adapter-side agent-loop events (`agent.step.*`, `agent.tool.*`) continue to correlate via `resurrectOperationContext(this)` and land under the same chosen `operation_id`.
 
 ### The shared instrumentation service
 
