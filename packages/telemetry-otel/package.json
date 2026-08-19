@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/telemetry-otel",
-  "version": "0.1.0-alpha.30",
+  "version": "0.1.0-alpha.31.1",
   "description": "OpenTelemetry semantic-conventions bridge for @llm-ports/observability-contract. `createOtelSink({ tracer, meter? })` maps every lifecycle event into gen_ai.* spans + metrics per the OTel gen_ai semconv. Zero runtime dependencies; consumers pass their own OTel tracer/meter (or any object that satisfies the minimal Tracer/Meter interfaces the sink type-checks against).",
   "license": "MIT",
   "author": "Babak Abbaschian",

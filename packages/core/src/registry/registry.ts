@@ -50,6 +50,8 @@ import type {
   ModelPricing,
 } from "../budget/types.js";
 import { InMemoryBudget, InMemoryCost } from "../budget/memory.js";
+import type { AuthBackend } from "../auth/types.js";
+import { InMemoryAuth } from "../auth/memory.js";
 import {
   DEFAULT_VALIDATION_STRATEGY,
   type ValidationStrategy,
@@ -133,6 +135,22 @@ export interface RegistryOptions {
   adapters: Record<string, AdapterRegistration>;
   budget?: BudgetBackend;
   cost?: CostBackend;
+  /**
+   * Alpha.31.1+: where "which aliases have ever authenticated" is stored.
+   * That state decides whether an authentication failure walks to the next
+   * provider (alias never authenticated, so the key is simply dead) or
+   * aborts (alias authenticated earlier, so something changed underneath
+   * the process and quietly degrading would hide it).
+   *
+   * Defaults to a fresh `InMemoryAuth` per Registry, which is exactly
+   * alpha.30's behavior. Pass one shared instance to several registries when
+   * they should agree about a credential — the common case being one
+   * Registry per tenant sharing aliases, or two registries kept for
+   * unrelated configuration reasons.
+   *
+   * Synchronous by design; see the note on `AuthBackend`.
+   */
+  auth?: AuthBackend;
   validationStrategy?: ValidationStrategy;
   /** Override pricing for specific model ids (key = modelId). */
   pricingOverrides?: Record<string, ModelPricing>;
@@ -385,14 +403,22 @@ export class Registry {
    */
   public readonly instrumentation: Instrumentation | undefined;
   /**
-   * Alpha.30+: aliases that have completed at least one successful attempt
-   * in the current process. Populated inside `walkChain` on every success;
-   * read via `hasEverAuthenticated(alias)`. Never reset — a provider that
-   * authenticated once in this process is trusted for the rest of the
-   * process. Process restart is what re-verifies. Sourced from SalesCoach's
+   * Alpha.30+: tracks which aliases have completed at least one successful
+   * attempt. Populated inside `walkChain` on every success; read via
+   * `hasEverAuthenticated(alias)`. Never reset — a provider that
+   * authenticated once is trusted for the lifetime of the backend holding
+   * that state. Sourced from SalesCoach's
    * `TD-LLM-AUTH-ERROR-KILLS-THE-WHOLE-CHAIN`.
+   *
+   * Alpha.31.1+: the store is injectable via `RegistryOptions.auth`, so
+   * several Registry instances can share one view. Alpha.30 kept this as a
+   * private per-instance Set, which meant two instances could reach opposite
+   * verdicts on the same credential depending on which authenticated first.
+   * Defaults to a fresh `InMemoryAuth`, reproducing alpha.30 behavior exactly
+   * for anyone who does not pass the option. See
+   * `TD-LLMPORTS-AUTH-STATE-NOT-PLUGGABLE`.
    */
-  private readonly authenticatedProviders: Set<string> = new Set();
+  public readonly auth: AuthBackend;
   /**
    * Alpha.30+: per-task configuration overrides keyed by normalized
    * task type. Populated from `RegistryOptions.taskDefaults` at construction.
@@ -409,6 +435,7 @@ export class Registry {
     this.adapters = opts.adapters;
     this.budget = opts.budget ?? new InMemoryBudget();
     this.cost = opts.cost ?? new InMemoryCost();
+    this.auth = opts.auth ?? new InMemoryAuth();
     this.validationStrategy = opts.validationStrategy ?? DEFAULT_VALIDATION_STRATEGY;
     this.pricingOverrides = opts.pricingOverrides ?? {};
     this.shouldFallback = resolveRuntimeFallback(opts.runtimeFallback);
@@ -479,7 +506,7 @@ export class Registry {
    * or dashboards.
    */
   hasEverAuthenticated(providerAlias: string): boolean {
-    return this.authenticatedProviders.has(providerAlias);
+    return this.auth.hasEverAuthenticated(providerAlias);
   }
 
   /**
@@ -488,7 +515,7 @@ export class Registry {
    * current process. Never reset.
    */
   markProviderAuthenticated(providerAlias: string): void {
-    this.authenticatedProviders.add(providerAlias);
+    this.auth.markAuthenticated(providerAlias);
   }
 
   /**

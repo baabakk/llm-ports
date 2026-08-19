@@ -112,6 +112,11 @@ export type {
 export { InMemoryBudget, InMemoryCost } from "./budget/memory.js";
 export { computeChatCost, computeEmbeddingCost } from "./budget/cost.js";
 
+// ─── Authentication state (alpha.31.1+) ──────────────────────────────
+
+export type { AuthBackend } from "./auth/types.js";
+export { InMemoryAuth } from "./auth/memory.js";
+
 // ─── Validation ──────────────────────────────────────────────────────
 export {
   buildCorrectionPrompt,

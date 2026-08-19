@@ -19,6 +19,55 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.31.1 — 2026-08-19
+
+Correctness and type-compatibility fixes. No new features. Both items came from consumers reporting real friction, and both are additive.
+
+### `RegistryOptions.auth` — authentication state is now injectable
+
+Alpha.30 began tracking which provider aliases have ever authenticated successfully, because that decides whether an authentication failure should walk to the next provider (the alias never authenticated, so the key is simply dead) or abort (the alias authenticated earlier, so something changed underneath the process and quietly degrading would hide it).
+
+That state was a private field on each Registry instance. An application holding two Registry instances therefore held two independent copies, and the same credential failing on the same alias could be classified differently by each, decided by whichever authenticated first. Nothing logged it and nothing failed loudly.
+
+The store is now injectable, matching the treatment `BudgetBackend` and `CostBackend` already had:
+
+```ts
+import { createRegistryFromEnv, InMemoryAuth } from "@llm-ports/core";
+
+const auth = new InMemoryAuth();
+const fast = createRegistryFromEnv({ adapters, auth });
+const heavy = createRegistryFromEnv({ adapters, auth });
+// A successful auth seen by one is now seen by the other, so both classify
+// a later failure on that alias identically.
+```
+
+New exports: the `AuthBackend` interface and the `InMemoryAuth` default implementation. `Registry.auth` is public so a consumer can inspect or seed it, and a deployment that already knows a key is good can call `markAuthenticated` without making a call first.
+
+**Nothing changes if you do not pass the option.** Each Registry still gets its own fresh `InMemoryAuth`, which reproduces alpha.30 exactly.
+
+**Scope limit, stated plainly.** `AuthBackend` is synchronous, unlike the budget and cost backends. `Registry.hasEverAuthenticated()` is a public sync method and the value is read inside error classification, which is a sync decision path; making it async would break that API and push `await` into error handling for a set-membership test. The practical consequence is that this closes the reported defect (several Registry instances in one process) and does not by itself perform blocking cross-process reads. An implementation can serve a locally-cached snapshot that some other mechanism refreshes, but that refresh is the implementation's concern. A genuinely async variant remains open work.
+
+Reported as `TD-LLMPORTS-AUTH-STATE-NOT-PLUGGABLE`.
+
+### `@llm-ports/telemetry-otel` — the `Tracer` interface now unifies with `@opentelemetry/api`
+
+The package declares its own minimal `Tracer`, `SpanOptions`, and `Attributes` types so it can stay dependency-free. Two of those declarations did not unify with the real OpenTelemetry types, so every adopter had to add an `unknown` cast when passing a real tracer to `createOtelSink`:
+
+- `Tracer.startSpan` was arity-2 while the real one is `startSpan(name, options?, context?)`. TypeScript will not widen a two-parameter function type to accept a three-parameter one. The third parameter is now declared and typed `unknown`, since the sink never passes it and declaring it this way avoids taking `@opentelemetry/api` as a peer dependency.
+- `AttributeValue`'s array variants were `ReadonlyArray<...>` while the real ones are mutable `Array<...>`. TypeScript will not assign a readonly array to a mutable one. Now mutable.
+
+Both were safe at runtime; the cost was compile-time only. Adopters carrying the cast can remove it. Reported as `TD-LLMPORTS-TELEMETRY-OTEL-TRACER-VARIANCE`.
+
+### Correction to the alpha.30 release notes
+
+The alpha.30 entry below states "fully additive; existing consumers see identical behavior when they don't opt into the new fields." **That was not true for consumers holding more than one Registry instance.** For them, alpha.30's per-instance authentication tracking changed error classification on code that was never touched and never opted in. The claim is corrected here rather than edited in place, so the original text and its correction both stay visible. The underlying defect is fixed above.
+
+### Verification
+
+11 new tests in `packages/core/tests/auth-backend.test.ts` cover the default isolation, shared-backend convergence, both registries agreeing on one credential, custom implementations, and `InMemoryAuth` in isolation. The existing 17-test authentication suite is unchanged and still passes. Core 597 of 597 (up from 586). Full workspace green across 13 packages.
+
+---
+
 ## v0.1.0-alpha.31 — 2026-08-19
 
 ### Scope note

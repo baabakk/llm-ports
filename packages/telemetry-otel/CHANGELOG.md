@@ -1,5 +1,15 @@
 # @llm-ports/telemetry-otel
 
+## 0.1.0-alpha.31.1
+
+### Patch Changes
+
+- The package's minimal `Tracer` and `AttributeValue` declarations now unify with the real `@opentelemetry/api` types, so adopters can drop the `unknown` cast previously required at `createOtelSink({ tracer })`.
+
+  `Tracer.startSpan` is widened to arity-3 (`name`, `options?`, `context?`) to match the real signature; the third parameter is typed `unknown` because this sink never passes it, which keeps the package free of a peer dependency on `@opentelemetry/api`. `AttributeValue`'s array variants change from `ReadonlyArray<...>` to mutable `Array<...>`, since TypeScript will not assign a readonly array to a mutable one.
+
+  Type-only change; zero runtime effect. See `TD-LLMPORTS-TELEMETRY-OTEL-TRACER-VARIANCE`.
+
 ## 0.1.0-alpha.30
 
 ### Patch Changes

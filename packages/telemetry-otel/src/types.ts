@@ -23,9 +23,16 @@ export type AttributeValue =
   | string
   | number
   | boolean
-  | ReadonlyArray<null | undefined | string>
-  | ReadonlyArray<null | undefined | number>
-  | ReadonlyArray<null | undefined | boolean>;
+  // Mutable arrays, not ReadonlyArray. `@opentelemetry/api` declares these
+  // as mutable `Array<...>`, and TypeScript will not assign a
+  // `readonly T[]` to a mutable `T[]`. Declaring them readonly here made a
+  // real OTel `Attributes` value fail to unify with this one, forcing every
+  // adopter to add an `unknown` cast when passing a real tracer to
+  // `createOtelSink`. Fixed in alpha.31.1; see
+  // TD-LLMPORTS-TELEMETRY-OTEL-TRACER-VARIANCE.
+  | Array<null | undefined | string>
+  | Array<null | undefined | number>
+  | Array<null | undefined | boolean>;
 
 /** Attribute bag matching OTel's Attributes. */
 export type Attributes = Record<string, AttributeValue | undefined>;
@@ -59,7 +66,19 @@ export interface SpanOptions {
 }
 
 export interface Tracer {
-  startSpan(name: string, options?: SpanOptions): Span;
+  /**
+   * Arity-3 to match `@opentelemetry/api`'s
+   * `startSpan(name, options?, context?)`. The third parameter is opaque to
+   * this sink, which never passes it, so it is declared `unknown` rather
+   * than pulling `@opentelemetry/api` in as a peer dependency.
+   *
+   * Declaring this arity-2 (alpha.30) meant a real OTel `Tracer` would not
+   * unify with this interface, because TypeScript will not widen a
+   * two-parameter function type to accept a three-parameter one. Every
+   * adopter had to add an `unknown` cast at the `createOtelSink` call site.
+   * Fixed in alpha.31.1; see TD-LLMPORTS-TELEMETRY-OTEL-TRACER-VARIANCE.
+   */
+  startSpan(name: string, options?: SpanOptions, context?: unknown): Span;
 }
 
 export interface HistogramOptions {

@@ -133,10 +133,13 @@ When a release ships contents other than what was queued here, the displacement 
 
 | Item | State | Notes |
 |---|---|---|
-| Shared authentication state across Registry instances (`authBackend`) | Queued, correctness | Alpha.30 made per-instance authentication tracking decide walk-versus-abort on auth failures. It is the only cross-cutting Registry state without an injectable backend, so two Registry instances classify the same credential differently. Follows the existing `budgetBackend` / `costBackend` shape, defaulting to today's behavior. Carries a docs correction: alpha.30's "fully additive, identical behavior" claim is false for multi-registry consumers. |
-| `@llm-ports/eval` persistence backends beyond SQLite (Postgres, ClickHouse) | Queued, displaced from alpha.31 | Stated as alpha.31 scope, displaced by the per-call `operation_id` hotfix that shipped under that number. Recorded here so the deferral is visible rather than implied. |
-| Evaluation-workflow tooling | Queued, displaced from alpha.31 | Same displacement as above. |
-| Registry-instance sharing semantics, documented | Queued, docs | One explicit statement of what is and is not shared across Registry instances. Currently answerable only by reading `registry.ts`. |
+| Shared authentication state across Registry instances (`RegistryOptions.auth`) | **Shipped in `alpha.31.1`** | Injectable `AuthBackend` plus an `InMemoryAuth` default, matching the `budget` / `cost` shape. Default behavior is unchanged. Synchronous by design, so it closes the multi-instance-one-process case and not cross-process sharing; see the scope limit in the alpha.31.1 changelog entry. |
+| `@llm-ports/telemetry-otel` `Tracer` type compatibility | **Shipped in `alpha.31.1`** | `startSpan` widened to arity-3, `AttributeValue` array variants made mutable. Real `@opentelemetry/api` tracers now unify without a cast. |
+| Alpha.30 additive-compatibility correction | **Shipped in `alpha.31.1`** | The alpha.30 notes claimed identical behavior for consumers who did not opt in, which was false for multi-registry consumers. Corrected in the alpha.31.1 entry rather than edited in place. |
+| `@llm-ports/eval` persistence backends beyond SQLite (Postgres, ClickHouse) | Queued for `alpha.31.2`, displaced from alpha.31 | Stated as alpha.31 scope, displaced by the per-call `operation_id` hotfix that shipped under that number. Recorded here so the deferral is visible rather than implied. |
+| Evaluation-workflow tooling | Queued for `alpha.31.2`, displaced from alpha.31 | Same displacement as above. Scope needs pinning against documented intent before implementation, rather than being inferred from the phrase alone. |
+| Cross-process shared authentication state (async `AuthBackend`) | Open, no target | The sync interface shipped in alpha.31.1 cannot perform blocking cross-process reads. Wanted by multi-process deployments. Needs either an async variant of the interface or an async-refresh contract alongside the sync read. |
+| Registry-instance sharing semantics, documented | Queued | One explicit statement of what is and is not shared across Registry instances. Partially addressed by the `auth` option's documentation; the full inventory is still owed. |
 
 Items graduate from this list into a release's changelog when they ship. Items that slip record the slip.
 

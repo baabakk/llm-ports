@@ -1,5 +1,17 @@
 # @llm-ports/core
 
+## 0.1.0-alpha.31.1
+
+### Patch Changes
+
+- `RegistryOptions.auth` — authentication state ("which aliases have ever authenticated") is now injectable via a new `AuthBackend` interface, with `InMemoryAuth` as the default implementation. Alpha.30 kept that state as a private per-instance Set, so two Registry instances held independent copies and could classify the same credential differently depending on which authenticated first. Pass one shared backend to several registries to make them agree.
+
+  New exports: `AuthBackend` (type), `InMemoryAuth` (class). `Registry.auth` is public so consumers can inspect or seed the backend.
+
+  Fully additive. A Registry constructed without the option gets its own fresh `InMemoryAuth`, reproducing alpha.30 behavior exactly.
+
+  Scope limit: the interface is synchronous, because `Registry.hasEverAuthenticated()` is a public sync method read inside sync error classification. This closes the several-instances-in-one-process case, not cross-process sharing. See `TD-LLMPORTS-AUTH-STATE-NOT-PLUGGABLE`.
+
 ## 0.1.0-alpha.31
 
 ### Patch Changes
