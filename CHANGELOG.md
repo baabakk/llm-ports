@@ -19,6 +19,50 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.31 — 2026-08-19
+
+### What changed
+
+Per-call `operation_id` precedence via `withObservabilityContext(port, ctx)`. Alpha.29 shipped `Instrumentation.context.operation_id` as a Registry-level (config-time) pinning slot, but the Registry still minted a fresh id per port method call regardless of what the caller wrapped the port with. Alpha.31 closes that gap: the Registry's five port methods (`generateText`, `generateStructured`, `runAgent`, `streamText`, `streamStructured`) now pass `getObservabilityContext(this)` into `withOperation` / `startOperation`, honoring a caller-supplied per-call context first. Fully additive; existing callers see identical behavior.
+
+### New precedence chain
+
+Any of the three levels may be present or absent — the Registry falls through in order:
+
+1. `withObservabilityContext(port, { operation_id }).method(...)` — caller's id lands on every emitted lifecycle event for that call.
+2. Registry-level `Instrumentation.context.operation_id` — the alpha.29 behavior, preserved.
+3. Fresh mint via `newOperationId()` — the pre-alpha.29 behavior, still the default for uninstrumented consumers.
+
+### API changes
+
+- `startOperation(instrumentation, params, perCallContext?)` — new optional third parameter `perCallContext?: ObservabilityContext`.
+- `withOperation(instrumentation, params, work, perCallContext?)` — new optional fourth parameter.
+
+Both default to `undefined`; existing call sites see no change.
+
+### Why it exists
+
+BEPA's Plan 58 §5.4 slice 3b (quality-tracker re-key on `operation_id`) needed a way for capability wrappers to pre-mint an id and have it flow through every lifecycle event, enabling cross-store joins between quality-tracker Redis entries, incident-logger DB rows, and OpenTelemetry spans by shared `operation_id`. Alpha.31 unblocks that. Any consumer with the same shape (facade wrapping the port at a per-call boundary) benefits.
+
+### Verification
+
+9 new tests in `packages/core/tests/per-call-operation-id.test.ts` cover per-call/Registry-level/fresh-mint/both-set precedence on `generateText`, applied consistently to all five port methods, plus distinct-scoped-ports-for-distinct-calls. Core 586/586 (was 577 + 9 new). Full workspace green (13 packages, zero regressions).
+
+### Migration notes
+
+Bump `@llm-ports/core` (plus any adapter you depend on — every adapter and capabilities package bumped in lockstep because their workspace deps promote): `alpha.30` → `alpha.31`. No code changes required. Opting into per-call context is one line at the call site:
+
+```ts
+import { withObservabilityContext } from "@llm-ports/core";
+
+const scopedPort = withObservabilityContext(registry.getPort(), {
+  operation_id: myMintedId,
+});
+const result = await scopedPort.generateText({ ... });
+// Every emitted event (llm.operation.started, llm.attempt.*, .completed, ...)
+// carries operation_id = myMintedId.
+```
+
 ## v0.1.0-alpha.30 — 2026-08-14
 
 ### What changed

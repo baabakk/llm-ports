@@ -89,7 +89,10 @@ import {
   type ManualAttemptHandle,
   type OperationContext,
 } from "../instrumentation.js";
-import { withObservabilityContext } from "../observability-context.js";
+import {
+  getObservabilityContext,
+  withObservabilityContext,
+} from "../observability-context.js";
 import type {
   CacheStats,
   CapturePolicy,
@@ -1378,6 +1381,14 @@ class RegistryPort implements LLMPort {
         );
         return result;
       },
+      // Alpha.31+: honor a caller-supplied per-call operation_id. When a
+      // consumer wraps the port with `withObservabilityContext(port, ctx)`
+      // for one call, `getObservabilityContext(this)` returns that ctx
+      // and its `operation_id` flows into every lifecycle event via
+      // `startOperation`'s precedence chain (per-call > registry-level >
+      // fresh mint). Returns undefined for unwrapped consumers, so the
+      // Registry keeps minting fresh ids for everyone else.
+      getObservabilityContext(this),
     );
   }
 
@@ -1429,6 +1440,7 @@ class RegistryPort implements LLMPort {
         );
         return result;
       },
+      getObservabilityContext(this),
     );
   }
 
@@ -1615,11 +1627,17 @@ class RegistryPort implements LLMPort {
     // span the true operation lifetime. `startOperation` +
     // `completeOperation` / `failOperation` / `cancelOperation` share
     // one emission path with `withOperation`.
-    const opHandle = startOperation(this.registry.instrumentation, {
-      taskType,
-      method: "streamText",
-      providerChain,
-    });
+    const opHandle = startOperation(
+      this.registry.instrumentation,
+      {
+        taskType,
+        method: "streamText",
+        providerChain,
+      },
+      // Alpha.31+: per-call operation_id precedence (same as
+      // generateText / generateStructured / runAgent).
+      getObservabilityContext(this),
+    );
     const opCtx = opHandle?.opCtx;
     maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
 
@@ -1692,11 +1710,16 @@ class RegistryPort implements LLMPort {
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
 
-    const opHandle = startOperation(this.registry.instrumentation, {
-      taskType,
-      method: "streamStructured",
-      providerChain,
-    });
+    const opHandle = startOperation(
+      this.registry.instrumentation,
+      {
+        taskType,
+        method: "streamStructured",
+        providerChain,
+      },
+      // Alpha.31+: per-call operation_id precedence.
+      getObservabilityContext(this),
+    );
     const opCtx = opHandle?.opCtx;
     maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
 
@@ -1800,6 +1823,7 @@ class RegistryPort implements LLMPort {
         );
         return result;
       },
+      getObservabilityContext(this),
     );
   }
 }

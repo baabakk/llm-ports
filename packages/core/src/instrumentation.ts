@@ -425,14 +425,33 @@ export interface ManualOperationHandle {
  *
  * When `instrumentation` is undefined, returns undefined so callers
  * pay zero cost (matches `withOperation`'s no-op semantics).
+ *
+ * Per-call `operation_id` precedence (alpha.31+):
+ *
+ *   1. `perCallContext.operation_id` — caller-supplied via
+ *      `withObservabilityContext(port, { operation_id })` on the wrapped
+ *      port instance. The Registry's port methods now pass
+ *      `getObservabilityContext(this)` through so a caller who wraps
+ *      the port for one call gets their id honored.
+ *   2. `instrumentation.context.operation_id` — Registry-level context
+ *      set at construction time (still supported for setups that pin
+ *      one id per Registry instance).
+ *   3. A fresh id from `newOperationId()`.
+ *
+ * Consumers who never supply either context keep getting the fresh
+ * mint; the change is fully additive.
  */
 export function startOperation(
   instrumentation: Instrumentation | undefined,
   params: OperationStartParams,
+  perCallContext?: ObservabilityContext,
 ): ManualOperationHandle | undefined {
   if (!instrumentation) return undefined;
 
-  const operationId = instrumentation.context?.operation_id ?? newOperationId();
+  const operationId =
+    perCallContext?.operation_id
+    ?? instrumentation.context?.operation_id
+    ?? newOperationId();
   const handle = newOperationHandle();
   const opCtx: OperationContext = {
     instrumentation,
@@ -542,13 +561,23 @@ export function cancelOperation(handle: ManualOperationHandle | undefined): void
  * Implementation composes the manual hatches (`startOperation` +
  * `completeOperation` / `failOperation` / `cancelOperation`) so both
  * wrap-around callers and streaming callers share one emission path.
+ *
+ * Alpha.31+: `perCallContext` accepts a per-call `ObservabilityContext`
+ * so callers who wrap the port for one call via
+ * `withObservabilityContext(port, { operation_id })` get their id
+ * honored by `startOperation` (see the precedence chain on that
+ * function). The Registry's port methods pass
+ * `getObservabilityContext(this)` through, so a BEPA-style capability
+ * wrapper can pre-mint an operation_id and have it flow into every
+ * lifecycle event without a config-time Registry rebuild.
  */
 export async function withOperation<T>(
   instrumentation: Instrumentation | undefined,
   params: OperationStartParams,
   work: (opCtx: OperationContext | undefined) => Promise<T>,
+  perCallContext?: ObservabilityContext,
 ): Promise<T> {
-  const handle = startOperation(instrumentation, params);
+  const handle = startOperation(instrumentation, params, perCallContext);
   if (!handle) {
     return work(undefined);
   }

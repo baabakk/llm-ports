@@ -63,6 +63,7 @@
     "alpha-28-observability-contract-foundation",
     "alpha-29-runtime-instrumentation",
     "alpha-30-adapter-emission-streaming-cache-otel",
+    "alpha-31-per-call-operation-id",
     "alpha-9-dangerously-allow-browser",
     "alpha-9-gemini-parity",
     "alpha-9-list-models",
