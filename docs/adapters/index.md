@@ -1,13 +1,19 @@
 # Adapters
 
-Four adapters ship with v0.1, covering 14+ providers in total. Plus a 5th private package (`adapter-contract-tests`) that is not published; it's the shared conformance suite every adapter must pass.
+Five LLM adapters ship with v0.1, covering 14+ providers in total. A sixth private package (`adapter-contract-tests`) is not published; it's the shared conformance suite every adapter must pass.
+
+alpha.30 adds two subprocess-driven agent adapters — `@llm-ports/adapter-codex` and `@llm-ports/adapter-aider` — plus a companion observability adapter, [`@llm-ports/telemetry-otel`](/adapters/telemetry-otel), that turns any `ObservabilitySink` slot into an OpenTelemetry gen_ai bridge.
 
 | Adapter | Covers | Implements |
 |---------|--------|------------|
 | [`@llm-ports/adapter-anthropic`](/adapters/anthropic) | Anthropic Claude (Opus, Sonnet, Haiku) | `LLMPort` |
 | [`@llm-ports/adapter-openai`](/adapters/openai) | OpenAI + 10+ compat providers via `baseURL` (Azure OpenAI, Groq, Together AI, Fireworks AI, DeepInfra, Perplexity, Cerebras, LiteLLM proxy, ...) | `LLMPort`, `EmbeddingsPort` |
+| [`@llm-ports/adapter-google`](/adapters/google) | Google Gemini (Pro, Flash) | `LLMPort` |
 | [`@llm-ports/adapter-ollama`](/adapters/ollama) | Local LLMs via the Ollama daemon | `LLMPort`, `EmbeddingsPort`, model management |
 | [`@llm-ports/adapter-vercel`](/adapters/vercel) | Migration from `@ai-sdk/*` | `LLMPort`, `EmbeddingsPort` (limited multimodal in v0.1) |
+| `@llm-ports/adapter-codex` | OpenAI Codex CLI (subprocess) | `LLMPort` (`runAgent` only) |
+| `@llm-ports/adapter-aider` | Aider CLI (subprocess) | `LLMPort` (`runAgent` only) |
+| [`@llm-ports/telemetry-otel`](/adapters/telemetry-otel) | OpenTelemetry gen_ai semconv bridge (companion) | `ObservabilitySink` factory |
 
 ## Feature matrix
 

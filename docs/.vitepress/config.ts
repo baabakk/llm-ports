@@ -12,6 +12,13 @@ export default defineConfig({
   lang: "en-US",
   cleanUrls: true,
   lastUpdated: true,
+  // The concepts/observability + evaluations pages link to per-package
+  // READMEs under ../../packages/ — those paths resolve on GitHub but
+  // not inside the docs site's own routing. Ignore the intentional
+  // out-of-site pattern so the build doesn't false-fail on them.
+  // Match the resolved form vitepress checks (post-normalize, extension
+  // stripped by cleanUrls) rather than the raw href.
+  ignoreDeadLinks: [/\/packages\//],
 
   head: [
     ["meta", { name: "theme-color", content: "#3c8772" }],
@@ -65,6 +72,7 @@ export default defineConfig({
             { text: "Cache Control", link: "/concepts/cache" },
             { text: "Validation Strategies", link: "/concepts/validation-strategies" },
             { text: "Observability", link: "/concepts/observability" },
+            { text: "Streaming Observability", link: "/concepts/streaming" },
             { text: "Evaluations", link: "/concepts/evaluations" },
             { text: "Capability Detection", link: "/concepts/capability-detection" },
           ],
@@ -107,6 +115,7 @@ export default defineConfig({
             { text: "Google Gemini", link: "/adapters/google" },
             { text: "Ollama (local)", link: "/adapters/ollama" },
             { text: "Vercel AI SDK", link: "/adapters/vercel" },
+            { text: "OpenTelemetry sink (telemetry-otel)", link: "/adapters/telemetry-otel" },
           ],
         },
         {
@@ -127,6 +136,7 @@ export default defineConfig({
             { text: "alpha.26 → alpha.27 (⚠ BREAKING removal)", link: "/migration/alpha-26-to-alpha-27" },
             { text: "alpha.27 → alpha.28 (additive)", link: "/migration/alpha-27-to-alpha-28" },
             { text: "alpha.28 → alpha.29 (additive)", link: "/migration/alpha-28-to-alpha-29" },
+            { text: "alpha.29 → alpha.30 (additive)", link: "/migration/alpha-29-to-alpha-30" },
           ],
         },
         {

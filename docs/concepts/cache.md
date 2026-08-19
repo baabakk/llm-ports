@@ -160,6 +160,61 @@ The adapter sends `config.cachedContent = cached.name` on the `generateContent` 
 
 The cached-content lifecycle helper that wraps `cachedContents.create()` ships in `@llm-ports/capabilities` in beta.2. Until then callers manage the handle themselves (per the example above).
 
+## Cache accounting on observability events (alpha.30+)
+
+Since `0.1.0-alpha.30`, the Registry folds every adapter's native cache counts into one canonical `CacheStats.provider_cache` shape on `llm.attempt.completed`. Consumers no longer need per-adapter branching on cache accounting — a single dashboard against `data.cache_stats.provider_cache.*` works across OpenAI, Anthropic, Google.
+
+### Provider → contract shape
+
+| Provider | Native usage field | → `provider_cache.*` field |
+|---|---|---|
+| OpenAI | `usage.prompt_tokens_details.cached_tokens` | `read_input_tokens` |
+| Anthropic | `usage.cache_read_input_tokens` | `read_input_tokens` |
+| Anthropic | `usage.cache_creation_input_tokens` | `write_input_tokens` |
+| Google | `usageMetadata.cachedContentTokenCount` | `read_input_tokens` |
+| Ollama | (no cache surface) | field omitted |
+| Vercel | (no cache surface) | field omitted |
+
+All three cloud adapters already push their native counts through `TokenUsage.cacheReadTokens` / `.cacheWriteTokens` before the Registry sees the result; the normalization shape is derived there.
+
+### Status enum
+
+Derivation is deterministic from `read`, `write`, and `input`:
+
+| Condition | `provider_cache.status` |
+|---|---|
+| `read == 0` AND any cache field reported | `"miss"` (cache consulted, no hit) |
+| `read > 0` AND `read >= input && input > 0` | `"hit"` (fully served from cache) |
+| `read > 0` AND `read < input` | `"partial"` (prefix cached, tail fresh) |
+| neither `read` nor `write` reported | `cache_stats` omitted (adapter silent) |
+
+`provider_reported: true` accompanies the shape whenever it's constructed — absence of the field means silence, not "provider reported zero."
+
+### Where it lands
+
+`llm.attempt.completed` on every method that goes through the Registry — non-streaming (`generateText`, `generateStructured`, `runAgent`) via the shared `toContractMetricsBase` extractor, and streaming (`streamText`, `streamStructured`) via the same helper reading `StreamCompleteMetadata.usage` in the shared streaming close helper. Same shape, same code path — the stream and non-stream cases can't drift.
+
+### OTel mapping
+
+When you wire the [`@llm-ports/telemetry-otel`](/adapters/telemetry-otel) sink, `provider_cache.read_input_tokens` becomes a sample on the `gen_ai.client.cache.read_tokens` histogram dimensioned by `gen_ai.response.model`. Only emitted when `> 0`.
+
+### Consumer example
+
+```ts
+sink.on("llm.attempt.completed", (event) => {
+  const pc = event.data.cache_stats?.provider_cache;
+  if (!pc) return; // adapter silent about cache
+  if (pc.status === "hit") {
+    metrics.increment("cache.hits", 1, { model: event.data.final_model_id });
+  } else if (pc.status === "partial") {
+    const savings = (pc.read_input_tokens ?? 0) / event.data.usage.inputTokens;
+    metrics.gauge("cache.hit_ratio", savings, { model: event.data.final_model_id });
+  }
+});
+```
+
+The alpha.19 `cost.cacheSavingsUSD` field continues to work in parallel — the two surfaces cover different questions. `cacheSavingsUSD` answers "what did we save in dollars this call?"; `provider_cache` answers "what does the provider report about cache behavior?"
+
 ## Shape stability promise
 
 The shape locked in alpha.19. The per-mode behaviors documented above are verified in alpha.19.1. Future beta minors will extend behaviors without breaking the shape:

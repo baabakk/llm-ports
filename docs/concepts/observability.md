@@ -139,15 +139,48 @@ Only `evaluation.recorded` events land in the store; lifecycle events are silent
 
 See [`docs/concepts/evaluations.md`](./evaluations.md) for the full write / query surface.
 
-### Deferred to alpha.30
+### Shipped in alpha.30
 
-- **Adapter-level operation/attempt emission.** Direct-adapter callers (bypassing the Registry) see no contract events yet.
-- **Agent step + tool events** (`agent.step.*`, `agent.tool.*`) inside `runAgent`.
-- **Provider cache normalization** (`CacheStats.provider_cache`) across in-process adapters.
-- **Streaming instrumentation** for `streamText` / `streamStructured`.
-- **OpenTelemetry semconv adapter** (`@llm-ports/telemetry-otel`).
+Every alpha.29 carve-out landed:
 
-Filed in the repo's `TECH-DEBT.md` as `TD-ALPHA29-ADAPTER-EMIT-DEFERRED` and `TD-ALPHA29-AGENT-STEP-EVENTS-DEFERRED`.
+- **Streaming instrumentation.** `streamText` / `streamStructured` now emit the full operation + attempt lifecycle plus `AttemptCompletedData.stream_stats` (`ttft_ms`, `chunk_count`, inter-chunk `p50`/`p99`, `termination`). Per-chunk `llm.stream.chunk` events are opt-in via `CapturePolicy.stream_chunk_capture === "full"`. See the [Streaming Observability guide](./streaming.md).
+- **Provider cache normalization.** OpenAI (`cached_tokens`), Anthropic (`cache_read/create_input_tokens`), and Google (`cachedContentTokenCount`) fold into `AttemptCompletedData.cache_stats.provider_cache` with a canonical status enum (`hit` / `partial` / `miss` / omitted). See the [Cache Control guide's alpha.30 section](./cache.md#cache-accounting-on-observability-events-alpha30).
+- **Agent step + tool events** (`agent.step.*`, `agent.tool.*`) — see the "Agent-loop events" section below.
+- **Adapter-side emission** — codex + aider adapters route through the shared `withOperation` + `withAttempt` service instead of hand-rolling `sink.emit`. Direct-adapter callers see the same lifecycle events the Registry produces.
+- **OpenTelemetry semconv bridge** — new companion package [`@llm-ports/telemetry-otel`](../adapters/telemetry-otel.md). `createOtelSink({ tracer, meter? })` maps every contract event to OTel gen_ai spans + metrics.
+
+`TD-ALPHA29-ADAPTER-EMIT-DEFERRED` and `TD-ALPHA29-AGENT-STEP-EVENTS-DEFERRED` both close on alpha.30.
+
+### Agent-loop events (alpha.30+)
+
+The three in-process adapters that own their runAgent tool-use loop (openai, anthropic, google) emit correlated per-step + per-tool events for every `runAgent` call, threaded through `resurrectOperationContext(this)` inside the adapter method.
+
+Per LLM turn:
+- `agent.step.started` — `step_index` (1-based), `step_type: "llm"` (or `"tool"` / `"validation"` on adapters that later add those step kinds).
+- `agent.step.completed` — `duration_ms`, `usage`, `cost`.
+
+Per tool call:
+- `agent.tool.called` — `tool_name`, `tool_call_id`, `arguments_digest: sha256Hex(rawArgs)`. Content-free by default.
+- `agent.tool.returned` — `result_digest`, `duration_ms`, optional `error: ErrorInfo` when the tool threw. Content-free by default.
+
+All events share the outer `operation_id`, so an aggregating sink sees the full step + tool tree stitched under one span (or one OTel span, when wired through the telemetry-otel bridge).
+
+**Direct-adapter callers.** The same events fire on direct-adapter calls (bypassing the Registry) when the caller has wrapped the port with `withObservabilityContext(port, ctx)` and set `ObservabilityContext.operation_handle` to a running operation. When no outer scope has opened one, `resurrectOperationContext(this)` returns undefined and the four emit helpers no-op — safe by default.
+
+### `withObservabilityContext` binding change (alpha.30)
+
+`withObservabilityContext` now binds methods to the wrapped proxy (receiver) instead of the underlying target. This is what enables `resurrectOperationContext(this)` inside adapter runAgent methods — `this` resolves to the proxy, which is the instance the context is registered against.
+
+Non-breaking: destructured calls (`const { generateText } = wrappedPort; generateText(...)`) still work because the receiver at bind time is the proxy. Every existing test continues to pass. The change only opens the door for adapters to resurrect the outer op context via `this`.
+
+### Capture policy — `responsePreviewMaxChars` + `stream_chunk_capture`
+
+Two `CapturePolicy` fields exercised by alpha.30 additions:
+
+- **`responsePreviewMaxChars: number`** (default `0` in strict, `200` in permissive). Gates the `response_preview` field on `llm.attempt.completed`. Preview lands only when `content === "full" | "redacted"` AND `responsePreviewMaxChars > 0`. `response_char_count` (the count, not the content) always emits regardless.
+- **`stream_chunk_capture: "off" | "sampled" | "full"`** (default `"off"`). Gates per-chunk `llm.stream.chunk` events on streamed methods. `"full"` fires one event per chunk (with `chunk_content` further gated by the content policy); `"sampled"` is reserved for future rate-limited emission; `"off"` yields aggregate `stream_stats` only.
+
+Both defaults keep the strict-by-default posture. Opt in via `Instrumentation.capturePolicy` at Registry setup.
 
 ---
 
