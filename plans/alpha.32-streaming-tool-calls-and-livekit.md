@@ -2,7 +2,7 @@
 
 **Status:** Draft, not approved.
 **Date:** 2026-08-19
-**Motivating consumer:** a realtime voice agent built on LiveKit Agents that currently constructs a provider plugin directly, with no fallback chain, no cost ceiling, no rate limit, and no task routing.
+**Motivating consumer:** a realtime voice agent built on LiveKit Agents that currently constructs a provider plugin directly, with no fallback chain, no cost ceiling, no rate limit, and no task routing. Verified at source; see section 2b.
 **Numbering note:** labelled `alpha.32`. The queued `alpha.31.2` (evaluation-store persistence backends) is independent and mechanical; whichever ships first takes the lower number. The numbers are labels, not a dependency claim.
 
 ---
@@ -26,6 +26,22 @@ Read directly in `packages/core/src/ports/llm-port.ts`:
 - No tool-call delta type exists anywhere in `packages/core/src`.
 
 So today a caller can stream text without tools, or use tools without streaming. A realtime voice agent needs both at once: tokens streaming out for speech synthesis, and tool calls surfaced mid-stream.
+
+## 2b. The consumer, verified at source
+
+Read directly in the consumer repository rather than inferred from its tech-debt entry. Every claim below is a first-hand source read.
+
+- **Framework and language.** `@livekit/agents` ^1.6.1, TypeScript, ESM, Node >= 20. The integration package therefore targets `@livekit/agents` ^1.6, and language fit is exact.
+- **Tools are in use, and the consumer executes them.** `src/coach.ts` defines two tools through LiveKit's own `llm.tool({...})` helper: `select_framework` and `save_plan_draft`, both with zod parameter schemas and both carrying an `execute` handler implemented in the consumer's code. This settles the design question in section 3 with evidence rather than reasoning: the framework owns the loop and runs the handler, so the port must **surface** tool calls, never execute them.
+- **Parameter schemas are zod**, which matches this library's existing `ToolDefinition` shape. No schema-dialect translation is needed on the consumer's side.
+- **The swap really is one constructor.** `src/agent.ts:117-119` builds `new openai.LLM({ model: ... })` and hands it to `new voice.AgentSession({ vad, stt, llm, tts, turnDetection })` at line 136. Speech recognition, synthesis, voice-activity detection, turn detection, the crash guard, the session sync, and both tools are untouched by the change. The consumer is roughly 1,400 lines total across eight files, so blast radius is small and verifiable by reading.
+- **The provider history matches the motivating story.** The repository depends on both `@livekit/agents-plugin-cerebras` and `@livekit/agents-plugin-openai`, and `src/agent.ts` carries a dated comment recording the move from Cerebras to OpenAI.
+
+### Two findings the tech-debt entry did not capture
+
+**A provider capability gap is being worked around in the audio path.** `src/sanitizing-tts.ts` wraps the text-to-speech component specifically to scrub leaked tool-call JSON and code fences out of the coach's text before synthesis. It exists because one provider emitted tool-call arguments as plain spoken text instead of using the tool channel. That is a **provider capability defect being compensated for downstream, in the audio layer, by a consumer that had no way to express "this task needs a provider whose tool-calling actually works."** It is the strongest concrete argument yet for the capability-declaration model that this plan defers, and it should be cited when that work is scoped: the alternative to declarative capability routing is a text scrubber in front of a speech synthesizer.
+
+**The framework plugin constrains model choice at the type level.** A comment at `src/agent.ts:110-116` records that the desired model could not be selected because the plugin's `ChatModels` union does not include that tier, so a larger model was chosen instead. This library treats model identifiers as configuration strings, so that constraint disappears on adoption. Minor next to governance, but it is a real friction the consumer hit and wrote down, and it costs nothing to mention in the integration's documentation.
 
 ## 3. A naming correction that came from reading the target contract
 
@@ -61,7 +77,7 @@ streamChat(options: StreamChatOptions): AsyncIterable<ChatStreamEvent>;
 
 **4.4 The tool-schema-across-failover guarantee, with a test.** Tool schemas must be converted **per attempt**, by the adapter serving that attempt, never once upstream and reused. This is believed true today by construction, but "believed true by construction" is not a claim that can be made publicly. A test must exist that fails if schema preparation is hoisted above the attempt boundary. A defect of exactly this shape is reported in another project, where a fallback model rejects the primary model's tool definitions, which makes this a differentiator worth naming rather than an internal detail.
 
-**4.5 One adapter, not all of them.** `adapter-openai` only for this release. It covers both providers the motivating consumer uses, since OpenAI-compatible endpoints reach through it via `baseURL`. Other adapters declare the capability absent and are unaffected.
+**4.5 One adapter, not all of them.** `adapter-openai` only for this release. Confirmed sufficient by section 2b: the consumer's two providers are OpenAI and Cerebras, and Cerebras reaches through the same adapter via a `baseURL` override. Other adapters declare the capability absent and are unaffected.
 
 **4.6 `@llm-ports/integration-livekit`.** A class implementing LiveKit's `LLM` abstract with `chat()` returning an `LLMStream`, adapting `ChatContext` inward and `ChatChunk` outward.
 
@@ -104,3 +120,5 @@ This is a genuine risk to the premise, and it should be treated as one. If a cha
 `streamChat` ships on `LLMPort` and `adapter-openai`, routed and gated through the Registry with instrumentation. The per-attempt schema-conversion guarantee has a test that fails on the hoisted-preparation behavior. `@llm-ports/integration-livekit` exists with a contract test. The motivating consumer runs on it through a real call, and a deliberately revoked primary key results in a working conversation on the fallback provider rather than silence.
 
 That last sentence is the actual acceptance test. Everything above it is scaffolding.
+
+Concretely, on the consumer side, done means `src/agent.ts:117` constructs the integration's LLM instead of `openai.LLM`, nothing else in those eight files changes, both existing tools still fire, and `src/sanitizing-tts.ts` can stay exactly where it is. Removing that scrubber is not in scope here; it becomes possible only once capability-aware routing can guarantee a provider whose tool channel works, and that is deliberately deferred.
