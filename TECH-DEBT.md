@@ -8,6 +8,26 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-08-19T22:30 PDT
+
+## llm-ports
+
+### TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING: `streamText` and `streamStructured` cannot fall back, because an async generator throws too late for the chain walker to see it
+
+- **Severity:** High
+- **Status:** Open. Found 2026-08-19 while building `streamChat`, which hit it immediately and works around it locally.
+- **Files:** `packages/core/src/registry/registry.ts` (`walkStreamChain`, and the `streamText` / `streamStructured` call sites), `packages/adapter-*/src/adapter.ts` (every `async *streamText`)
+- **Problem:** `walkStreamChain` opens a provider's stream inside a `try` and treats a throw as the signal to walk to the next provider. That works only if opening the stream can throw.
+
+  Every adapter implements streaming as `async *streamText(...)`. Calling an async generator function returns a generator object **without executing a single line of its body**. The `await executeChatStream(...)` that actually contacts the provider does not run until the consumer calls `next()`, which happens long after the walker has returned.
+
+  So the walker sees a successful open for a provider that is in fact unreachable, records the attempt as started, marks the alias authenticated, and returns. The real failure surfaces later, during consumer iteration, where there is no chain left to walk.
+- **Impact:** **Runtime fallback silently does not work for the streamed methods.** A consumer with a three-provider chain who configured `runtimeFallback: "aggressive"` gets no failover on `streamText` at all: the first provider's failure reaches them directly. This is invisible in tests that stub streams as plain arrays or as generators that yield before failing, which is why it survived to now. It is exactly the class of defect the streaming path was supposed to be protected against.
+- **Resolution path:** Prime the stream inside the walker, as `streamChat` now does. `walkStreamChain`'s `openStream` accepts `S | Promise<S>` and awaits it (already shipped in alpha.32), so the remaining work is to change the `streamText` and `streamStructured` call sites to pull their first event through `primeStream` and replay it through `replayPrimed`, both already present in `registry.ts`.
+
+  The cost is one buffered event per stream, which is what `replayPrimed` exists to give back, and a slightly earlier first provider contact. Neither is observable to a consumer. Add a test for each method that fails a provider at first-iteration rather than at call time, since that is the shape the current tests do not produce.
+- **Note on scope:** deliberately not fixed in alpha.32. Changing the failure semantics of two shipped methods is a behaviour change that deserves its own release and its own notes, rather than riding along inside a new-feature release where nobody would look for it.
+
 # 2026-08-19T17:30 PDT
 
 ## llm-ports
