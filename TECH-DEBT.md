@@ -189,7 +189,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-03: Reasoning-model detection costs one wasted call per (model × process)
 
 - **Severity:** Low
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry says detection only fires after a starved response, wasting the first call. `packages/adapter-openai/src/capabilities.ts:143` now exports `KNOWN_REASONING_MODELS`, and line 168 seeds the learner from that catalogue at construction, so a known reasoning model is never discovered by burning a call. Post-hoc learning remains the path for models absent from the catalogue, which is correct residual behaviour rather than a defect.
 - **Files:** `packages/adapter-openai/src/adapter.ts` (`learnFromResponse`, `reasoningStarvedResponse`)
 - **Problem:** Detection only fires AFTER seeing reasoning tokens or a populated `message.reasoning` field. The first call against an unknown reasoning model with a small `maxOutputTokens` always returns starved, triggers the auto-retry, and only then learns the constraint. The first call's tokens are wasted.
 - **Impact:** A long-running process touching N reasoning models pays N wasted first-call costs. Real cost is small ($0.0001 each) but the latency hit (one extra round-trip per model) is real.
@@ -198,7 +198,15 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-04: `learnedConstraints` Map is unbounded and global
 
 - **Severity:** Low
-- **Status:** Open
+- **Status:** **Open, but narrowed 2026-08-19.** Re-verified against source. The entry made three sub-claims; only the first still holds.
+
+  (1) **Still true.** `createCapabilityLearner` holds a plain `Map` with no eviction and only a `_reset()` for tests, so a long-running process touching many models accumulates entries forever.
+
+  (2) **No longer true.** The process-wide singleton is gone. `createCapabilityLearner()` is a factory returning a fresh map per learner, so two adapter instances no longer share state implicitly.
+
+  (3) Superseded by the same restructuring.
+
+  Remaining work is therefore bounded eviction alone, not the ownership question.
 - **Files:** `packages/adapter-openai/src/capabilities.ts:27`
 - **Problem:** Process-wide singleton Map keyed by modelId. (1) Long-running processes touching many models accumulate forever (no eviction). (2) Two `createOpenAIAdapter` instances share the Map — possibly desired (key rotation shouldn't lose learning) but undocumented. (3) `hasSucceeded` is per-AdapterContext, so two adapters with the same key learn independently — opposite of (2).
 - **Impact:** Edge cases. Memory growth probably never matters in practice (constraints are tiny objects, hundreds of models max). The hasSucceeded inconsistency is more interesting: an attacker who can create new adapter instances could probe burst protection without using the existing instance's "proven good" flag.
@@ -207,7 +215,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-05: `zodToParameters` is a stub
 
 - **Severity:** Medium
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry says both adapters emit an empty `properties` object, losing all field types. Verified false: `adapter.ts:2118-2122` passes through the real `properties` and `required` produced by `zodToJsonSchema` with the OpenAI target, and `adapter-anthropic` uses the same converter. Tools carry their full schema.
 - **Files:** `packages/adapter-openai/src/adapter.ts:919` (and `packages/adapter-anthropic/src/adapter.ts` equivalent)
 - **Problem:** Both adapters convert Zod tool schemas to `{type:"object", properties:{}}` — losing all field types. Tools are effectively typeless to the model; it must guess parameter names from the description string.
 - **Impact:** Any user calling `runAgent` with non-trivial tools gets degraded model performance. The model has to invent parameter names instead of reading them from a schema. Fail-rate goes up; latency goes up (more retries).
@@ -216,7 +224,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-06: No observability into adapter retries
 
 - **Severity:** Medium
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry says three retry kinds happen silently. `adapter-openai` now has six `onRetry` / `emitRetryEvent` call sites, and `OnRetry`, `RetryEvent`, `RetryReason`, and `emitRetryEvent` are part of core's public surface.
 - **Files:** `packages/adapter-openai/src/adapter.ts` (executeChatRequest, executeChatStream, withTransientAuthRetry)
 - **Problem:** Three retry kinds happen silently: capability-rejection retry, transient-401 retry, reasoning-starved retry. A production user has no signal that "Cerebras just retried 2x with backoff before this 800ms response."
 - **Impact:** When users debug latency spikes or unexpected costs, they can't see the retry behavior. Hard to diagnose "why is this call slow" without instrumenting the OpenAI SDK directly.
@@ -225,7 +233,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-07: Cost precision change (10-decimal) not unit-tested
 
 - **Severity:** Low
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry asks for a test pinning 10-decimal precision so a future rounding change cannot silently regress it. `packages/core/tests/cost-edges.test.ts` states that guarantee in its own header and asserts `toBeCloseTo(0.00002, 10)`.
 - **Files:** `packages/core/src/budget/cost.ts`
 - **Problem:** Recently bumped from 6-decimal to 10-decimal precision so embeddings (`5 tokens × $0.02/1M = $1e-7`) don't round to 0. The change is correct but no unit test pins it. A future "round to 6 decimals for serialization" PR could silently regress.
 - **Impact:** Cost-gated workloads with very small per-call costs would silently bypass the gate.
@@ -234,7 +242,9 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-09: Registry has no runtime-error fallback — only budget-gating fallback
 
 - **Severity:** Medium
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry says the chain is consulted only at selection time, with no try/catch around the port call. `walkChain` in `registry.ts` now wraps every attempt and walks on a fallback-worthy error; `runtimeFallback` is listed as stable in `docs/v0-1-status.md` since alpha.7.
+
+  **Caveat, and a real one:** this holds for the non-streaming methods only. The streamed methods still cannot fall back, for a different reason found on this same date. See TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING.
 - **Files:** `packages/core/src/registry/registry.ts:225-275` (RegistryPort.generateText / generateStructured / streamText / streamStructured / runAgent)
 - **Problem:** The fallback chain in `selectModel()` is consulted ONLY at provider-selection time. If the selected provider returns a `ProviderUnavailableError` at runtime (network 503, transient outage, hit-the-rate-limit-mid-call), the error propagates straight to the caller. There is no try/catch around `sel.port.generateText(options)` that walks to the next chain entry. Discovered while writing Group J tests during Phase 1.5 (2026-05-04).
 - **Impact:** Multi-provider setups don't get the resilience that the chain syntax implies. `LLM_TASK_ROUTE_TRIAGE: "fast,backup"` reads as "if fast fails, use backup" — but only "fails" in the budget sense, not the runtime sense. This is a documentation-vs-implementation gap.
@@ -262,7 +272,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-11: Vercel adapter does not handle reasoning models (no headroom multiplier)
 
 - **Severity:** Medium
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry says the Vercel adapter has no reasoning headroom multiplier. `adapter-vercel/src/adapter.ts:63` defines exactly that, with starvation detection at line 195 and an `onRetry` emission carrying reason `reasoning-starvation`.
 - **Files:** `packages/adapter-vercel/src/adapter.ts`
 - **Problem:** The OpenAI adapter applies a 10x reasoning-headroom multiplier when it learns a model is a reasoning model (so a request for 20 visible tokens gets max=200 sent to the API, leaving room for CoT). The Vercel adapter has none of this — calling `vercel.generateText({ maxOutputTokens: 20 })` against `gpt-5-nano` reliably starves the model and returns empty text. Discovered while triaging Phase 2 vercel failures.
 - **Impact:** Vercel-adapter users with reasoning models hit silent empty-output failures unless they manually budget 10x more than they want visible. Inconsistent with the OpenAI adapter's transparent handling.
@@ -271,7 +281,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMP-12: Vercel adapter throws SyntaxError "Unexpected end of JSON input" on empty structured response
 
 - **Severity:** Medium
-- **Status:** Open
+- **Status:** **Resolved; status corrected 2026-08-19.** The entry says an empty structured completion surfaces as a raw `SyntaxError` from `JSON.parse`. `adapter-vercel/src/adapter.ts:402-405` now throws a typed `EmptyResponseError`, with a comment naming that exact failure.
 - **Files:** `packages/adapter-vercel/src/adapter.ts` (generateStructured path)
 - **Problem:** Observed Phase 2 (intermittent): `vercel.generateStructured` against `gpt-5-nano` sometimes returns an empty completion, after which the JSON parser throws `SyntaxError: Unexpected end of JSON input`. The error wraps as `ProviderUnavailableError` — but the underlying cause is the same reasoning-starvation pattern as TD-LLMP-11.
 - **Impact:** Vercel adapter users see a confusing SDK-internal SyntaxError instead of either auto-recovery (a la OpenAI adapter) or a clearer "model produced no output" error.
@@ -310,7 +320,7 @@ Batch of 4 TDs opened from a cross-consumer review pass. Consumer reports came f
 ### TD-LLMP-16: `adapter-openai` ContextWindowExceededError reports `model "(unknown)"` even when the model name is at request-construction time
 
 - **Severity:** Medium (operator-visibility gap on the second most common error class for LLM operators).
-- **Status:** Open.
+- **Status:** **Resolved; status corrected 2026-08-19.** The mechanism shipped in alpha.28 pre-work and cites this entry by name: `wrapProviderError(alias, err, modelId?)` threads the model into `ContextWindowExceededError`. Verified the adapter actually passes it, at four of five call sites (1138, 1210, 1239, 1774). The fifth, line 1169, is `listModels`, outside any per-call path, so it correctly omits the model and the legacy placeholder now appears only where no model is in play.
 - **Files:** `packages/adapter-openai/src/adapter.ts` (`executeChatRequest`, around the current `dist/index.mjs:1323` line in the shipped bundle); `packages/core/src/errors.ts` (`wrapProviderError`, current `dist/index.mjs:1755`).
 - **Problem:** BEPA sent 563,962 bytes to `getLLMPort().generateStructured({ taskType: 'selector-compile', ... })`. The registry chained to `deepseek-4flash-deepinfra` (OpenAI-compatible adapter with DeepInfra baseURL, model `deepseek-ai/DeepSeek-V4-Flash`). Provider correctly returned context-window-exceeded. The adapter classified it into a `ContextWindowExceededError` but the error's `model` field is `"(unknown)"` even though the model name was in the env config `LLM_PROVIDER_DEEPSEEK_4FLASH_DEEPINFRA=deepinfra|deepseek-ai/DeepSeek-V4-Flash|cost:5/day,req:2000/hour` and available to the adapter at request-construction time.
 - **Verbatim error observed (BEPA production, 2026-07-21T09:35 UTC):**
@@ -331,7 +341,7 @@ Batch of 4 TDs opened from a cross-consumer review pass. Consumer reports came f
 ### TD-LLMP-17: `runAgent` throws raw TypeError when `tools` omitted; local TypeErrors then get misclassified as ServiceUnavailableError, triggering futile chain-wide failover
 
 - **Severity:** Medium (defect 1 is ergonomic; defect 2 is high-impact because it burns the failover chain on client-side bugs and misdirects operator diagnostic to provider status pages).
-- **Status:** Open.
+- **Status:** **Resolved; status corrected 2026-08-19.** `toOpenAITools` opens with a guard returning an empty array for absent tools, and its comment cites this entry as the reason. The raw `TypeError` that was being misclassified as `ServiceUnavailableError` and triggering futile chain-wide failover can no longer occur.
 - **Files:** `packages/core/src/registry/registry.ts` (`RegistryPort.runAgent`), `packages/adapter-openai/src/adapter.ts` (and every adapter with the same wrapping pattern); `packages/core/src/errors.ts` (add a new class).
 - **Problem — two distinct defects.**
   1. **Missing guard.** Calling `runAgent` without a `tools` field produces a raw `TypeError: Cannot convert undefined or null to object`. An `Object.*` operation runs on `tools` with no default. Absent tools should mean "no tools" (identical to `tools: {}` which already works) or reject with a typed validation error that names the field.
@@ -350,7 +360,7 @@ Batch of 4 TDs opened from a cross-consumer review pass. Consumer reports came f
 ### TD-LLMP-18: `attemptValidationRepair` should normalize Unicode confusables (dashes, quotes, spaces) on `invalid_enum_value` Zod errors before retry
 
 - **Severity:** Medium. Silent-failure class: when a model emits a Unicode confusable of an ASCII delimiter used in an enum literal, Zod rejects with `invalid_enum_value` and the revision round is discarded with no operator-visible signal about the underlying cause.
-- **Status:** Open.
+- **Status:** **Resolved; status corrected 2026-08-19.** `packages/core/src/utils/repair-validation.ts` normalizes Unicode confusables in the repair pass, so an `invalid_enum_value` caused by a look-alike dash, quote, or space is repaired before retrying rather than costing a round trip.
 - **Files:** `packages/core/src/utils/repair-validation.ts` (`attemptValidationRepair`, exported via `packages/core/src/index.ts:213`).
 - **Problem.** Models occasionally emit Unicode confusables of ASCII delimiter characters used in enum literals. The observed variant (ADW production, 2026-07-21): model emitted `interfaces[5].type = "shared‑lib"` using U+2011 (non-breaking hyphen) instead of ASCII U+002D hyphen-minus. The Zod enum `["api","event","shared-lib","database"]` rejected it (`invalid_enum_value ... received 'shared‑lib'`), the revision round was discarded, and 6,925 output tokens were wasted. The bug class is broader than hyphens: any Unicode confusable of a delimiter character used in an enum literal is exposed.
 - **Verified affected classes:**
@@ -391,7 +401,7 @@ Batch of 4 TDs opened from a cross-consumer review pass. Consumer reports came f
 ### TD-LLMP-19: publish canonical walk-table + typed `CreditExhaustionError` / `ProviderMalformed400Error` classes so consumers stop hand-coding wrong failover policies
 
 - **Severity:** Medium-High. Every `@llm-ports` consumer that operates in a multi-provider fallback chain writes a custom `runtimeFallback.shouldFallback` predicate. Two known consumers (BEPA, ADW) have walk-table misalignments today: walking on error classes that should abort (client-side bugs, true wrong-key auth) and aborting on classes that should walk (context window exceeded, content policy violation). The root cause is that `@llm-ports` does not publish a canonical walk-table policy; each consumer reinvents (and mis-invents) it. Two specific provider conditions (Anthropic credit exhaustion, Cerebras 400-no-body on complex schema) have no typed class, so consumers walk on `AuthenticationError` and generic `BadRequestError` respectively as a workaround, over-walking on true wrong-key and true malformed-request cases.
-- **Status:** Open.
+- **Status:** **Resolved; status corrected 2026-08-19.** Both typed classes ship from core's public surface, `CreditExhaustionError` and `ProviderMalformed400Error`, alongside `aggressiveShouldFallback` and `AGGRESSIVE_CREDIT_EXHAUSTION_PATTERNS`, which is the canonical walk-table this entry asked to publish. BEPA has since replaced its hand-rolled classifier with the preset.
 - **Files:**
   - `packages/core/src/errors.ts` (add two new typed classes).
   - `packages/core/src/registry/registry.ts` (canonical walk-table policy).
