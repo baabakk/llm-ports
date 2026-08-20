@@ -1,5 +1,29 @@
 # @llm-ports/eval
 
+## 0.1.0-alpha.31.2
+
+### Minor Changes
+
+- **Postgres backend.** `createPostgresEvaluationStore` implements `EvaluationStore` with semantics identical to the SQLite backend, so the two are swappable without changing call sites. `pg` is an optional peer dependency loaded through the same lazy-require pattern, so consumers who do not install it get a helpful construction-time error rather than a broken install.
+
+  Dedup is materially better than SQLite's: `INSERT ... ON CONFLICT DO NOTHING` covers both unique constraints in one statement and returns an exact `rowCount`, which is the boolean the contract asks for. That removes the exception-as-control-flow and the separate `idempotency_key` pre-read the SQLite backend needs, and with them the read-then-write race between that pre-check and the insert.
+
+  A caller-supplied pool is never closed by `close()`, since it may be serving the rest of the application; only a pool the store constructed is. `tableName` is validated against a plain-identifier pattern rather than escaped, because SQL identifiers cannot be bound as parameters.
+
+- **`OperationSource` port.** This package stores evaluations, not what was evaluated: `EvaluationTarget` is a `{ kind, id }` pointer and the sink bridge forwards only `evaluation.recorded`. Anything needing the prompt or response now reads through a read-only port the consumer implements over infrastructure they already run, rather than a second store duplicating their log pipeline. `createInMemoryOperationSource` ships as a reference implementation.
+
+  Content on the port is optional by design, because `CapturePolicy` governs retention and defaults to strict. Absent content is reported as `content_not_retained`, never thrown and never silently skipped.
+
+- **Analysis.** `aggregateScores`, `detectRegression`, and `sampleEvaluations`, all over the store alone with no source required. Bounded numeric scores normalize to 0..1 so differently-scaled rubrics are comparable; booleans map to 1 and 0 so a mean reads as a pass rate; categorical and text scores are counted rather than averaged.
+
+  `detectRegression` returns deltas and counts and **never a verdict**. No significance testing, no pass/fail. Thin groups are listed in `lowSampleKeys` rather than filtered out. `sampleEvaluations` accepts a seed, which makes a review queue resumable.
+
+- **Batch judging and A/B comparison.** `runBatchJudge` and `runComparison`. Both take caller-supplied functions for the model work, so **this package never calls a model and does not depend on `@llm-ports/core`**; judging inherits the caller's routing, fallback, and budget gating for free.
+
+  Runs are idempotent by derived evaluation id, so a re-run writes nothing and reports duplicates. A budget refusal **stops the run** and reports `stoppedEarly` with counts, rather than quietly completing what it can afford.
+
+  `runComparison` **sends no requests by default**, scoring the recorded response. Live replay is opt-in via `replay`, because the difference between the two modes is a bill.
+
 ## 0.1.0-alpha.30
 
 ### Patch Changes

@@ -29,6 +29,7 @@ import {
   createPostgresEvaluationStore,
   type EvaluationStore,
 } from "../src/index.js";
+import { peerMissingError } from "../src/postgres.js";
 
 // ─── A minimal in-process fake of the `pg` Pool surface ─────────────
 
@@ -362,10 +363,22 @@ describe("Postgres store — pool ownership", () => {
 // ─── Construction guards ────────────────────────────────────────────
 
 describe("Postgres store — construction", () => {
-  it("throws a helpful error when the pg peer is unavailable", () => {
-    expect(() => createPostgresEvaluationStore({ connectionString: "postgresql://x/y" })).toThrow(
-      /requires the `pg` peer dependency/,
-    );
+  it("names the missing peer, the fix, and the underlying cause", () => {
+    // Asserted against the error builder rather than by calling the
+    // factory, because whether `pg` is resolvable depends on what else
+    // the workspace has installed. A test that called the factory would
+    // pass in a clean checkout and fail the moment anything pulled `pg`
+    // in, which is the module graph deciding the result rather than the
+    // code under test.
+    const err = peerMissingError(new Error("Cannot find module 'pg'"));
+    expect(err.message).toMatch(/requires the `pg` peer dependency/);
+    expect(err.message).toMatch(/npm i pg/);
+    expect(err.message).toMatch(/createInMemoryEvaluationStore/);
+    expect(err.message).toMatch(/Cannot find module 'pg'/);
+  });
+
+  it("stringifies a non-Error cause rather than printing [object Object]", () => {
+    expect(peerMissingError("boom").message).toMatch(/Underlying error: boom/);
   });
 
   it("rejects a tableName that is not a plain identifier", () => {

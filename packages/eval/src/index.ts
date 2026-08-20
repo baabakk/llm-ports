@@ -17,6 +17,17 @@
  *    Postgres backend. Peer-dep on `pg`. Accepts an existing pool
  *    instead, for applications that already manage one.
  *
+ * Workflow layer (alpha.31.2):
+ *  - `OperationSource` — a read-only port over recorded operations.
+ *    This package stores evaluations, not what was evaluated, so
+ *    anything needing the prompt or response reads through a source the
+ *    consumer implements over infrastructure they already run.
+ *  - `aggregateScores` / `detectRegression` / `sampleEvaluations` —
+ *    analysis over the store alone; no source required.
+ *  - `runBatchJudge` / `runComparison` — judging and A/B comparison.
+ *    Both take caller-supplied functions to do the model work, so this
+ *    package never calls a model and never depends on `@llm-ports/core`.
+ *
  * Bridge for the observability sink:
  *  - `toObservabilitySink(store)` — adapt any `EvaluationStore` to
  *    the contract's `ObservabilitySink` interface, forwarding only
@@ -33,3 +44,43 @@ export type { CreatePostgresEvaluationStoreOptions } from "./postgres.js";
 export { toObservabilitySink } from "./sink-bridge.js";
 export type { ToObservabilitySinkOptions } from "./sink-bridge.js";
 export type { EvaluationQuery, EvaluationStore, EvaluationTargetKind } from "./types.js";
+
+// ─── Workflow layer (alpha.31.2) ────────────────────────────────────
+
+export { createInMemoryOperationSource } from "./operation-source.js";
+export type {
+  OperationQuery,
+  OperationSource,
+  RecordedMessage,
+  RecordedOperation,
+} from "./operation-source.js";
+
+export {
+  aggregateRefs,
+  aggregateScores,
+  detectRegression,
+  sampleEvaluations,
+  scoreToNumber,
+} from "./analysis.js";
+export type {
+  DetectRegressionOptions,
+  GroupByField,
+  RegressionChange,
+  RegressionReport,
+  SampleOptions,
+  ScoreAggregate,
+} from "./analysis.js";
+
+export { defaultIsBudgetError, runBatchJudge, runComparison } from "./judge.js";
+export type {
+  BatchRunReport,
+  CompareJudgeFn,
+  ComparisonReport,
+  JudgeFn,
+  JudgeVerdict,
+  ReplayFn,
+  RunBatchJudgeOptions,
+  RunComparisonOptions,
+  SkipReason,
+  SkippedOperation,
+} from "./judge.js";

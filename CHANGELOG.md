@@ -19,6 +19,36 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.31.2 — 2026-08-19
+
+Pays the evaluation scope announced for alpha.31 and displaced by the hotfix that shipped under that number. `@llm-ports/eval` only; no other package changes.
+
+### Postgres backend
+
+`createPostgresEvaluationStore` implements `EvaluationStore` with semantics identical to the SQLite backend. `pg` is an optional peer. Dedup uses `ON CONFLICT DO NOTHING`, which returns the exact boolean the contract requires in one statement, removing SQLite's exception-as-control-flow and its read-then-write race.
+
+**ClickHouse is withdrawn, not deferred.** Its deduplication happens only during background merges at unpredictable times, and ClickHouse's own documentation says the `FINAL` read modifier "offers eventual correctness only, it does not guarantee rows will be deduplicated, and you should not rely on it." `insert_deduplication_token` fits better but is window-bounded and still cannot produce `write()`'s exact boolean. The mismatch is structural rather than a matter of effort.
+
+### The workflow layer
+
+Verified while building it: **this package stores evaluations, not what was evaluated.** `EvaluationTarget` is a pointer, the sink bridge forwards only `evaluation.recorded`, and `request_fingerprint` is a hash. Regression detection is unaffected; judging, review, and comparison are not.
+
+The answer is `OperationSource`, a read-only port implemented by the consumer over infrastructure they already run, rather than a second store here duplicating their log pipeline. Content on it is optional, because `CapturePolicy` defaults to strict, and absent content is reported rather than thrown.
+
+New: `aggregateScores`, `detectRegression`, `sampleEvaluations`, `runBatchJudge`, `runComparison`, `createInMemoryOperationSource`.
+
+### Three decisions worth reading before you use it
+
+- **`detectRegression` never returns a verdict.** Deltas and counts only. Significance testing on the sample sizes typical here is a real statistical problem, and a confident answer from eleven samples is worse than a number beside the count.
+- **A budget refusal stops a judge run.** It does not complete what it can afford. A partial evaluation that looks complete is worse than a refused one.
+- **`runComparison` sends nothing by default.** It scores the recorded response. Live replay is opt-in, because the difference is a bill.
+
+This package still does not call a model, and still does not depend on `@llm-ports/core`. Judges and replay functions are supplied by the caller, so evaluation inherits the caller's governance rather than reimplementing it.
+
+### Verification
+
+57 new tests. Eval package 94 of 94. Full workspace green across 13 packages, with one caveat recorded honestly: `TD-LLMPORTS-FINGERPRINT-CACHE-FLAKY-TEST` documents a non-deterministic test in `adapter-openai` found during this release's verification, which weakens "workspace green" as a signal until it is fixed.
+
 ## v0.1.0-alpha.31.1 — 2026-08-19
 
 Correctness and type-compatibility fixes. No new features. Both items came from consumers reporting real friction, and both are additive.

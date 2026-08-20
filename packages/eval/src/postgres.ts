@@ -234,13 +234,29 @@ function loadPg(): PgPoolConstructor {
     if (!Pool) throw new Error("`pg` module did not export a Pool constructor");
     return Pool;
   } catch (err) {
-    throw new Error(
-      "@llm-ports/eval: Postgres backend requires the `pg` peer dependency. " +
-        "Install it (`npm i pg`) or use `createInMemoryEvaluationStore()` / " +
-        "`createSqliteEvaluationStore()` instead. " +
-        `Underlying error: ${(err as Error).message}`,
-    );
+    throw peerMissingError(err);
   }
+}
+
+/**
+ * The error a consumer sees when the `pg` peer cannot be loaded.
+ *
+ * Split out of `loadPg` so it can be tested directly. A test that
+ * asserted this path by calling the factory would depend on whether `pg`
+ * happens to be resolvable in the workspace at that moment, which is not
+ * something a test controls: it passes in a clean checkout and fails
+ * once anything installs `pg`. Testing the message instead of the
+ * module graph keeps the assertion deterministic.
+ *
+ * @internal Exported for tests, not part of the public API.
+ */
+export function peerMissingError(cause: unknown): Error {
+  return new Error(
+    "@llm-ports/eval: Postgres backend requires the `pg` peer dependency. " +
+      "Install it (`npm i pg`) or use `createInMemoryEvaluationStore()` / " +
+      "`createSqliteEvaluationStore()` instead. " +
+      `Underlying error: ${cause instanceof Error ? cause.message : String(cause)}`,
+  );
 }
 
 // ─── SQL ────────────────────────────────────────────────────────────

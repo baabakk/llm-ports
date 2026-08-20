@@ -210,3 +210,95 @@ Both paths hit the same dedup, so mixing them is safe.
 - [`docs/concepts/observability.md`](./observability.md) — the full observability contract surface, including the alpha.29 Registry-level lifecycle emission.
 - [`packages/eval/README.md`](../../packages/eval/README.md) — the package-level reference including CRUD API details and full option lists.
 - [`packages/observability-contract/README.md`](../../packages/observability-contract/README.md) — the contract package itself.
+
+---
+
+## Beyond storage: the workflow layer (alpha.31.2)
+
+Storing evaluations is the noun. The workflow layer is the verb: producing them in bulk, sampling them for review, and comparing arms against each other.
+
+### The constraint that shapes all of it
+
+**This package stores evaluations. It does not store what was evaluated.**
+
+`EvaluationTarget` is a `{ kind, id }` pointer, and the sink bridge forwards only `evaluation.recorded` events. Nothing here holds an operation's messages, its response, or its parameters. `request_fingerprint` is a hash, and a hash cannot be replayed.
+
+Regression detection is unaffected, because it aggregates scores. Anything that needs to see what the model actually did (judging, human review, A/B comparison) needs the operation itself.
+
+### `OperationSource`: a port, not a second store
+
+Rather than adding operation storage here, which would duplicate the log pipeline you already run and make this library the external system it exists to abstract, you implement a read-only port over whatever already holds your operations.
+
+```ts
+import type { OperationSource } from "@llm-ports/eval";
+
+const source: OperationSource = {
+  async get(operationId) { /* read one row from your store */ },
+  async find(query)      { /* read many, newest first */ },
+};
+```
+
+`createInMemoryOperationSource()` ships as a reference implementation for tests and as a worked example of the query semantics.
+
+**Content is optional on purpose.** `CapturePolicy` governs whether request and response content is retained at all, and defaults to strict. A source may legitimately return an operation with identifiers, timings, usage, and cost but no messages and no response. Every function here treats that as a reported outcome, `content_not_retained`, rather than an error, so a strict capture policy shows up as a result field instead of an empty report you misread as "nothing to evaluate."
+
+### Analysis, which needs no source
+
+```ts
+import { aggregateScores, detectRegression, sampleEvaluations } from "@llm-ports/eval";
+
+const byEvaluator = await aggregateScores(store, "evaluator_name");
+
+const report = await detectRegression(store, {
+  boundary: "2026-08-01T00:00:00.000Z",
+  groupBy: "evaluator_name",
+});
+
+const queue = await sampleEvaluations(store, { size: 25, seed: 1 });
+```
+
+Bounded numeric scores are normalized to 0..1 so a 1-to-5 rubric and a 0-to-1 rubric are comparable without rescaling by hand. Booleans map to 1 and 0, which makes a mean read as a pass rate. Categorical and text scores have no ordering this package can invent, so they are counted rather than averaged.
+
+Sampling accepts a `seed`, which makes a review queue resumable and a test reproducible.
+
+**`detectRegression` returns deltas and counts, never verdicts.** There is no "regressed" field and no significance test. Doing significance properly on the sample sizes typical here is a genuine statistical problem, and a confident answer computed from eleven samples is worse than a number next to the count. Groups thinner than `minSampleSize` are listed in `lowSampleKeys`, reported rather than filtered, because thin data is itself the signal.
+
+### Batch judging
+
+```ts
+import { runBatchJudge } from "@llm-ports/eval";
+
+const report = await runBatchJudge({
+  source,
+  store,
+  query: { task_type: "triage", limit: 500 },
+  evaluatorName: "helpfulness",
+  evaluatorVersion: "1",
+  judge: async (op) => ({
+    score: { score_type: "numeric", value: await myScore(op), min: 0, max: 1 },
+  }),
+});
+```
+
+**This package never calls a model.** You supply the judge, so judging inherits your Registry's routing, fallback, and budget gating for free, and nothing here needs `@llm-ports/core`.
+
+Runs are **idempotent**: evaluation ids derive from the operation id plus evaluator name and version, so a re-run writes nothing and reports `duplicates`. Bump `evaluatorVersion` when the rubric changes and the same operations become judgeable again.
+
+**A budget refusal stops the run.** It does not quietly finish what it can afford. The report carries `stoppedEarly` and `stopReason` alongside the counts, because a partial evaluation that looks complete is worse than a refused one: the numbers are real and the gap in them is invisible.
+
+### A/B comparison
+
+```ts
+// Default: scores the recorded response. Sends nothing, spends nothing.
+await runComparison({ source, store, query, arms: ["a", "b"], judge, evaluatorName: "j", comparisonId: "c1" });
+
+// Opt in to real traffic and a real bill.
+await runComparison({
+  source, store, query, arms: ["fast", "smart"], judge, evaluatorName: "j", comparisonId: "c2",
+  replay: async (messages, arm) => (await myPort.generateText({ taskType: arm, messages })).text,
+});
+```
+
+Omitting `replay` is the default and **sends no requests**: every arm scores the response already recorded. Supplying it re-runs each request once per arm, which is a genuine A/B test and which costs money. The difference is opt-in precisely because it is a bill.
+
+Every evaluation in a comparison shares its `comparisonId` in the id, so the whole comparison can be pulled back out.
