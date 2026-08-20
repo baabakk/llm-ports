@@ -13,6 +13,9 @@
  *  - `createSqliteEvaluationStore({ dbPath })` — durable SQLite
  *    backend. Peer-dep on `better-sqlite3`; consumers opt in by
  *    installing that package.
+ *  - `createPostgresEvaluationStore({ connectionString })` — durable
+ *    Postgres backend. Peer-dep on `pg`. Accepts an existing pool
+ *    instead, for applications that already manage one.
  *
  * Bridge for the observability sink:
  *  - `toObservabilitySink(store)` — adapt any `EvaluationStore` to
@@ -25,6 +28,8 @@
 export { createInMemoryEvaluationStore } from "./in-memory.js";
 export { createSqliteEvaluationStore } from "./sqlite.js";
 export type { CreateSqliteEvaluationStoreOptions } from "./sqlite.js";
+export { createPostgresEvaluationStore } from "./postgres.js";
+export type { CreatePostgresEvaluationStoreOptions } from "./postgres.js";
 export { toObservabilitySink } from "./sink-bridge.js";
 export type { ToObservabilitySinkOptions } from "./sink-bridge.js";
 export type { EvaluationQuery, EvaluationStore, EvaluationTargetKind } from "./types.js";

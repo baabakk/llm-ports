@@ -25,10 +25,14 @@
   },
   "peerDependencies": {
     "@llm-ports/observability-contract": "workspace:*",
-    "better-sqlite3": ">=11 <13"
+    "better-sqlite3": ">=11 <13",
+    "pg": ">=8 <10"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
+      "optional": true
+    },
+    "pg": {
       "optional": true
     }
   },
@@ -44,6 +48,7 @@
     "llm-judge",
     "sqlite",
     "eval-storage",
+    "postgres",
     "post-hoc-scoring"
   ],
   "author": "Babak Abbaschian",

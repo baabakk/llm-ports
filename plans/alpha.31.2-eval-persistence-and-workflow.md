@@ -1,6 +1,6 @@
 # alpha.31.2 — evaluation persistence and evaluation-workflow tooling
 
-**Status:** Draft, not approved.
+**Status:** **Approved 2026-08-19.** Both halves in scope, all four section-5 recommendations accepted as written. Those questions are now settled decisions and are restated in section 5 as such; reopening any of them is a new plan, not an amendment.
 **Date:** 2026-08-19
 **Scope decision:** both halves together, by owner decision. This is the announced alpha.31 scope, displaced once, now being paid.
 
@@ -111,15 +111,17 @@ Phases 1 through 3 have no unresolved design questions. Phases 4 and 5 depend on
 
 ---
 
-## 5. Open questions
+## 5. Settled decisions
 
-**5.1 Does A/B comparison replay live, or score stored outputs?** Replaying sends real requests and costs real money, and results move as providers change underneath. Scoring stored outputs is free and reproducible but can only compare what was already run, which is not an A/B test. **Recommendation: support both, defaulting to scoring stored outputs**, with live replay explicitly opted into, since a tool that silently spends money on a comparison is a bad tool.
+Approved 2026-08-19. These were the open questions; they are now the contract.
 
-**5.2 Should batch judge runs respect budget gating?** A judge run over ten thousand operations is a large spend. It routes through the port, so gating applies by default, but a budget refusal mid-run needs defined semantics: stop, or complete what is affordable and report the shortfall. **Recommendation: stop and report**, since a silently partial evaluation is worse than a refused one.
+**5.1 A/B comparison scores stored outputs by default; live replay is opt-in.** Both modes ship. The default never sends a request or spends money. Live replay requires an explicit flag, and the API name must make the spend obvious at the call site rather than in documentation.
 
-**5.3 Does the judge itself get evaluated?** `EvaluationRef` carries `evaluator_name` and `evaluator_version`, so judge drift is detectable in principle. Whether tooling ships for it is a scope question, not a design one.
+**5.2 A budget refusal mid-judge-run stops the run and reports.** It does not complete what is affordable and return quietly. The result reports how many operations were judged, how many remain, and that the stop was budget-caused, so a partial evaluation can never be mistaken for a complete one.
 
-**5.4 Is regression detection statistical or threshold-based?** Threshold comparison is trivial and noisy. Proper significance testing on small samples is a genuine problem and easy to get wrong. **Recommendation: ship deltas and counts, not verdicts**, and let the consumer decide what a meaningful change is.
+**5.3 Judge-drift tooling is out of scope for this release.** `EvaluationRef` already carries `evaluator_name` and `evaluator_version`, so drift stays detectable by query. No tooling ships for it here.
+
+**5.4 Regression detection reports deltas and counts, never verdicts.** No significance testing, no pass/fail. The consumer decides what a meaningful change is. Returning a verdict computed from a small sample would be confidently wrong, which is worse than returning a number.
 
 ---
 
