@@ -12,7 +12,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createRegistryFromEnv, type EmbeddingsPort, type LLMPort } from "@llm-ports/core";
+import { createRegistryFromEnv, type EmbeddingsPort, type LLMPort , sys, usr} from "@llm-ports/core";
 import { createOllamaAdapter } from "@llm-ports/adapter-ollama";
 import {
   OLLAMA_URL,
@@ -84,7 +84,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       const { llm } = makePorts();
       const result = await llm.generateText({
         taskType: "test-text",
-        prompt: "Say 'pong' and nothing else.",
+        messages: [usr("Say 'pong' and nothing else.")],
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
@@ -96,8 +96,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       const { llm } = makePorts();
       const result = await llm.generateText({
         taskType: "test-text",
-        instructions: "Always respond in exactly three words.",
-        prompt: "Describe water.",
+        messages: [sys("Always respond in exactly three words."), usr("Describe water.")],
         maxOutputTokens: 30,
       });
       assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
@@ -108,7 +107,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       const { llm } = makePorts();
       const result = await llm.generateText({
         taskType: "test-text",
-        prompt: "Write 5 short paragraphs about the history of TypeScript.",
+        messages: [usr("Write 5 short paragraphs about the history of TypeScript.")],
         maxOutputTokens: 600,
       });
       assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
@@ -126,8 +125,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       const { llm } = makePorts();
       const result = await llm.generateStructured({
         taskType: "test-structured",
-        instructions: "You classify user messages into intent categories.",
-        prompt: "Can I get a refund on order #12345?",
+        messages: [sys("You classify user messages into intent categories."), usr("Can I get a refund on order #12345?")],
         schema: Intent,
         schemaName: "user-intent",
       });
@@ -145,7 +143,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       const chunks: string[] = [];
       for await (const chunk of llm.streamText({
         taskType: "test-stream",
-        prompt: "Count from 1 to 5, separated by spaces, nothing else.",
+        messages: [usr("Count from 1 to 5, separated by spaces, nothing else.")],
         maxOutputTokens: 30,
       })) {
         chunks.push(chunk);
@@ -191,10 +189,10 @@ describe.skipIf(skipOllama)("live: ollama", () => {
       try {
         const result = await llm.generateText({
           taskType: "test-vision",
-          prompt: [
+          messages: [usr([
             { type: "text", text: "What color is dominant in this image? One word." },
             { type: "image", source: { kind: "base64", mediaType: "image/png", data: TINY_PNG_BASE64 } },
-          ],
+          ])],
           maxOutputTokens: 30,
         });
         assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });

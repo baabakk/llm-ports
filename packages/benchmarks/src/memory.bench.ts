@@ -13,7 +13,7 @@
  *   - Variance over the run < 50 MB target
  */
 
-import { createRegistryFromEnv } from "@llm-ports/core";
+import { createRegistryFromEnv , sys, usr} from "@llm-ports/core";
 import { createAnthropicAdapter } from "@llm-ports/adapter-anthropic";
 
 const TOTAL = 10_000;
@@ -69,7 +69,7 @@ const start = Date.now();
 for (let i = 1; i <= TOTAL; i++) {
   await llm.generateText({
     taskType: "bench",
-    prompt: "x",
+    messages: [usr("x")],
     maxOutputTokens: 5,
   });
   if (i % SAMPLE_EVERY === 0) {

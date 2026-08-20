@@ -19,7 +19,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { createRegistryFromEnv } from "@llm-ports/core";
+import { createRegistryFromEnv , sys, usr} from "@llm-ports/core";
 import { createAnthropicAdapter } from "@llm-ports/adapter-anthropic";
 
 const ITERATIONS = 100;
@@ -111,14 +111,14 @@ function makeLLMPorts() {
     async generateText(): Promise<string> {
       const r = await llm.generateText({
         taskType: "bench-text",
-        prompt: "hi",
+        messages: [usr("hi")],
       });
       return r.text;
     },
     async generateStructured(): Promise<unknown> {
       const r = await llm.generateStructured({
         taskType: "bench-struct",
-        prompt: "classify: hi",
+        messages: [usr("classify: hi")],
         schema: ResponseSchema,
         schemaName: "bench",
       });

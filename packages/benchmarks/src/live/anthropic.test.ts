@@ -9,7 +9,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createRegistryFromEnv, type LLMPort } from "@llm-ports/core";
+import { createRegistryFromEnv, type LLMPort , sys, usr} from "@llm-ports/core";
 import { createAnthropicAdapter } from "@llm-ports/adapter-anthropic";
 import {
   ANTHROPIC_KEY,
@@ -52,7 +52,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const llm = makePort();
       const result = await llm.generateText({
         taskType: "test-text",
-        prompt: "Say 'pong' and nothing else.",
+        messages: [usr("Say 'pong' and nothing else.")],
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -64,8 +64,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const llm = makePort();
       const result = await llm.generateText({
         taskType: "test-text",
-        instructions: "Always respond in exactly three words.",
-        prompt: "Describe water.",
+        messages: [sys("Always respond in exactly three words."), usr("Describe water.")],
         maxOutputTokens: 30,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -80,7 +79,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const llm = makePort();
       const result = await llm.generateText({
         taskType: "test-text",
-        prompt: "Write 5 short paragraphs about the history of TypeScript.",
+        messages: [usr("Write 5 short paragraphs about the history of TypeScript.")],
         maxOutputTokens: 600,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -99,8 +98,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const llm = makePort();
       const result = await llm.generateStructured({
         taskType: "test-structured",
-        instructions: "You classify user messages into intent categories.",
-        prompt: "Can I get a refund on order #12345?",
+        messages: [sys("You classify user messages into intent categories."), usr("Can I get a refund on order #12345?")],
         schema: Intent,
         schemaName: "user-intent",
       });
@@ -120,9 +118,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       // Intentionally vague rubric to maximize chance of first-attempt failure.
       const result = await llm.generateStructured({
         taskType: "test-structured",
-        instructions:
-          "Classify priority. Use exactly P0/P1/P2/P3 (uppercase, no other format).",
-        prompt: "I think this might possibly be sort of important.",
+        messages: [sys("Classify priority. Use exactly P0/P1/P2/P3 (uppercase, no other format)."), usr("I think this might possibly be sort of important.")],
         schema: Schema,
         schemaName: "priority-test",
       });
@@ -138,7 +134,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const chunks: string[] = [];
       for await (const chunk of llm.streamText({
         taskType: "test-stream",
-        prompt: "Count from 1 to 5, separated by spaces, nothing else.",
+        messages: [usr("Count from 1 to 5, separated by spaces, nothing else.")],
         maxOutputTokens: 30,
       })) {
         chunks.push(chunk);
@@ -156,7 +152,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const partials: Array<Partial<{ greeting: string; count: number }>> = [];
       for await (const partial of llm.streamStructured({
         taskType: "test-stream",
-        prompt: "Say hello in JSON: { greeting: 'hello', count: 1 }",
+        messages: [usr("Say hello in JSON: { greeting: 'hello', count: 1 }")],
         schema: Schema,
       })) {
         partials.push(partial);
@@ -228,10 +224,10 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const llm = makePort();
       const result = await llm.generateText({
         taskType: "test-vision",
-        prompt: [
+        messages: [usr([
           { type: "text", text: "What color is dominant in this image? One word." },
           { type: "image", source: { kind: "base64", mediaType: "image/png", data: TINY_PNG_BASE64 } },
-        ],
+        ])],
         maxOutputTokens: 30,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -244,10 +240,10 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const llm = makePort();
       const result = await llm.generateText({
         taskType: "test-vision",
-        prompt: [
+        messages: [usr([
           { type: "text", text: "Describe this image in 10 words or fewer." },
           { type: "image", source: { kind: "url", url: PUBLIC_IMAGE_URL } },
-        ],
+        ])],
         maxOutputTokens: 50,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -265,14 +261,14 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       const longPrompt = "Repeat after me: " + "abc ".repeat(1000) + "\n\nNow say 'done'.";
       const r1 = await llm.generateText({
         taskType: "test-text",
-        prompt: longPrompt,
+        messages: [usr(longPrompt)],
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(r1, ALIAS);
       recordCost("anthropic", r1.cost.totalUSD);
       const r2 = await llm.generateText({
         taskType: "test-text",
-        prompt: longPrompt,
+        messages: [usr(longPrompt)],
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(r2, ALIAS);

@@ -13,7 +13,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
-import { createRegistryFromEnv, type LLMPort } from "@llm-ports/core";
+import { createRegistryFromEnv, type LLMPort , sys, usr} from "@llm-ports/core";
 import { createVercelAdapter } from "@llm-ports/adapter-vercel";
 import {
   ANTHROPIC_KEY,
@@ -57,7 +57,7 @@ describe.skipIf(skipAnthropic)("live: vercel adapter (with Anthropic model)", ()
     const llm = makePort();
     const result = await llm.generateText({
       taskType: "test-text",
-      prompt: "Say 'pong' and nothing else.",
+      messages: [usr("Say 'pong' and nothing else.")],
       maxOutputTokens: 20,
     });
     assertGenerateTextShape(result, ALIAS);
@@ -73,8 +73,7 @@ describe.skipIf(skipAnthropic)("live: vercel adapter (with Anthropic model)", ()
     const llm = makePort();
     const result = await llm.generateStructured({
       taskType: "test-structured",
-      instructions: "Classify user intent.",
-      prompt: "Can I get a refund?",
+      messages: [sys("Classify user intent."), usr("Can I get a refund?")],
       schema: Intent,
       schemaName: "user-intent",
     });
@@ -87,7 +86,7 @@ describe.skipIf(skipAnthropic)("live: vercel adapter (with Anthropic model)", ()
     const chunks: string[] = [];
     for await (const chunk of llm.streamText({
       taskType: "test-stream",
-      prompt: "Count from 1 to 5, separated by spaces, nothing else.",
+      messages: [usr("Count from 1 to 5, separated by spaces, nothing else.")],
       maxOutputTokens: 30,
     })) {
       chunks.push(chunk);
@@ -130,7 +129,7 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
     const llm = makePort();
     const result = await llm.generateText({
       taskType: "test-text-openai",
-      prompt: "Say 'pong' and nothing else.",
+      messages: [usr("Say 'pong' and nothing else.")],
       maxOutputTokens: REASONING_HEADROOM_TOKENS,
     });
     assertGenerateTextShape(result, ALIAS);
@@ -146,8 +145,7 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
     const llm = makePort();
     const result = await llm.generateStructured({
       taskType: "test-structured-openai",
-      instructions: "Classify user intent. Always include a 'reasoning' string.",
-      prompt: "Can I get a refund?",
+      messages: [sys("Classify user intent. Always include a 'reasoning' string."), usr("Can I get a refund?")],
       schema: Intent,
       schemaName: "user-intent",
       maxOutputTokens: REASONING_HEADROOM_TOKENS,
@@ -161,7 +159,7 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
     const chunks: string[] = [];
     for await (const chunk of llm.streamText({
       taskType: "test-stream-openai",
-      prompt: "Count from 1 to 5, separated by spaces, nothing else.",
+      messages: [usr("Count from 1 to 5, separated by spaces, nothing else.")],
       maxOutputTokens: REASONING_HEADROOM_TOKENS,
     })) {
       chunks.push(chunk);

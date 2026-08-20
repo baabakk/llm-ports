@@ -11,7 +11,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createRegistryFromEnv, type LLMPort, type EmbeddingsPort } from "@llm-ports/core";
+import { createRegistryFromEnv, type LLMPort, type EmbeddingsPort , sys, usr} from "@llm-ports/core";
 import { createOpenAIAdapter } from "@llm-ports/adapter-openai";
 import {
   CEREBRAS_KEY,
@@ -70,7 +70,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       // before the 10x multiplier kicks in on subsequent calls.
       const result = await llm.generateText({
         taskType: "test-text",
-        prompt: "Say 'pong' and nothing else.",
+        messages: [usr("Say 'pong' and nothing else.")],
         maxOutputTokens: 200,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -85,8 +85,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       // visible after reasoning. 200 is plenty for "exactly three words".
       const result = await llm.generateText({
         taskType: "test-text",
-        instructions: "Always respond in exactly three words.",
-        prompt: "Describe water.",
+        messages: [sys("Always respond in exactly three words."), usr("Describe water.")],
         maxOutputTokens: 200,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -100,7 +99,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       const { llm } = makePorts();
       const result = await llm.generateText({
         taskType: "test-text",
-        prompt: "Write 5 short paragraphs about the history of TypeScript.",
+        messages: [usr("Write 5 short paragraphs about the history of TypeScript.")],
         maxOutputTokens: 600,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -119,8 +118,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       const { llm } = makePorts();
       const result = await llm.generateStructured({
         taskType: "test-structured",
-        instructions: "You classify user messages into intent categories.",
-        prompt: "Can I get a refund on order #12345?",
+        messages: [sys("You classify user messages into intent categories."), usr("Can I get a refund on order #12345?")],
         schema: Intent,
         schemaName: "user-intent",
       });
@@ -143,8 +141,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       const { llm } = makePorts();
       const result = await llm.generateStructured({
         taskType: "test-structured",
-        instructions: "Use exactly P0/P1/P2/P3 (uppercase). For 'urgent', use a JSON boolean true/false.",
-        prompt: "I think this might possibly be sort of important.",
+        messages: [sys("Use exactly P0/P1/P2/P3 (uppercase). For 'urgent', use a JSON boolean true/false."), usr("I think this might possibly be sort of important.")],
         schema: Schema,
         schemaName: "priority-test",
         maxOutputTokens: 500,
@@ -160,7 +157,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       const chunks: string[] = [];
       for await (const chunk of llm.streamText({
         taskType: "test-stream",
-        prompt: "Count from 1 to 5, separated by spaces, nothing else.",
+        messages: [usr("Count from 1 to 5, separated by spaces, nothing else.")],
         maxOutputTokens: 30,
       })) {
         chunks.push(chunk);
@@ -178,7 +175,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       const partials: Array<Partial<{ greeting: string; count: number }>> = [];
       for await (const partial of llm.streamStructured({
         taskType: "test-stream",
-        prompt: "Say hello in JSON: { greeting: 'hello', count: 1 }",
+        messages: [usr("Say hello in JSON: { greeting: 'hello', count: 1 }")],
         schema: Schema,
       })) {
         partials.push(partial);
@@ -242,10 +239,10 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       const { llm } = makePorts();
       const result = await llm.generateText({
         taskType: "test-vision",
-        prompt: [
+        messages: [usr([
           { type: "text", text: "What color is dominant in this image? One word." },
           { type: "image", source: { kind: "base64", mediaType: "image/png", data: TINY_PNG_BASE64 } },
-        ],
+        ])],
         // Reasoning model: 10x multiplier means max=300 → 3000-token total
         // budget; well within OpenAI's per-call cap, leaves >100 visible tokens
         maxOutputTokens: 300,
@@ -269,10 +266,10 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       void PUBLIC_IMAGE_URL;
       const result = await llm.generateText({
         taskType: "test-vision",
-        prompt: [
+        messages: [usr([
           { type: "text", text: "Name the dominant color in 1 word." },
           { type: "image", source: { kind: "base64", mediaType: "image/png", data: TINY_PNG_BASE64 } },
-        ],
+        ])],
         maxOutputTokens: 300,
       });
       assertGenerateTextShape(result, ALIAS);
@@ -330,7 +327,7 @@ describe.skipIf(skipGroq)("live: groq (via openai adapter + baseURL)", () => {
     const llm = registry.getPort();
     const result = await llm.generateText({
       taskType: "test-groq",
-      prompt: "Say 'pong' and nothing else.",
+      messages: [usr("Say 'pong' and nothing else.")],
       maxOutputTokens: 20,
     });
     assertGenerateTextShape(result, "live-groq");
@@ -362,7 +359,7 @@ describe.skipIf(skipCerebras)("live: cerebras (via openai adapter + baseURL)", (
     const llm = registry.getPort();
     const result = await llm.generateText({
       taskType: "test-cerebras",
-      prompt: "Say 'pong' and nothing else.",
+      messages: [usr("Say 'pong' and nothing else.")],
       maxOutputTokens: 20,
     });
     assertGenerateTextShape(result, "live-cerebras");
