@@ -61,7 +61,7 @@ import {
   toOpenAIMessages,
   type OpenAIMessage,
 } from "./content.js";
-import type { LLMMessage } from "@llm-ports/core";
+import type { ChatStreamEvent, LLMMessage, StreamChatOptions } from "@llm-ports/core";
 import {
   getEffectiveCapabilities,
   isJsonModeRejection,
@@ -752,6 +752,140 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           streamStart,
           callback: streamCompleteCallback,
         });
+      }
+    },
+
+    /**
+     * Alpha.32+. One streamed turn with tool calls surfaced, never
+     * executed. See `LLMPort.streamChat`.
+     *
+     * ## Tool schemas are converted here, per call
+     *
+     * `toOpenAITools(options.tools)` runs inside this method, which the
+     * Registry invokes once per provider attempt. So a fallback provider
+     * always converts the caller's tool definitions itself rather than
+     * inheriting a dialect prepared for the provider that just failed.
+     *
+     * That ordering is the whole guarantee. Hoisting conversion above the
+     * attempt boundary is the defect that makes a fallback model reject
+     * the primary model's tool definitions, and `tool-schema-per-attempt`
+     * in the test suite fails if this line ever moves.
+     */
+    async *streamChat(options: StreamChatOptions): AsyncIterable<ChatStreamEvent> {
+      throwIfAborted(options.signal);
+      const { messages: chatMessages, instructions } = resolveMessagesFromCallOptions(options);
+      const streamStart = Date.now();
+      const streamCompleteCallback = readStreamCompleteCallback(options);
+      const tools = toOpenAITools(options.tools);
+
+      const stream = await executeChatStream(ctx.client, ctx, alias, pricing, {
+        modelId,
+        messages: chatMessages,
+        ...(instructions !== undefined ? { instructions } : {}),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxOutputTokens !== undefined
+          ? { maxOutputTokens: options.maxOutputTokens }
+          : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        // `toolChoice` maps onto OpenAI's own `tool_choice` vocabulary,
+        // whose three values happen to match ours exactly. It goes
+        // through providerExtras rather than a new typed field so
+        // compat providers that reject the parameter can be handled by
+        // the caller without a core change.
+        ...(options.toolChoice && tools.length > 0
+          ? {
+              providerExtras: {
+                ...(options.providerExtras ?? {}),
+                tool_choice: options.toolChoice,
+              },
+            }
+          : options.providerExtras
+            ? { providerExtras: options.providerExtras }
+            : {}),
+        ...(tools.length > 0 ? { tools } : {}),
+        stream: true,
+        streamUsage: ctx.streamUsage,
+      });
+
+      // Index-keyed accumulation. A tool call is not emittable until the
+      // provider stops appending to it, so calls are held here and
+      // flushed when a finish_reason arrives or the stream ends.
+      const pending = new Map<number, { id: string; name: string; args: string }>();
+      let finalUsageChunk: OpenAIStreamChunk | undefined;
+      let stopReason: string | undefined;
+
+      for await (const chunk of stream) {
+        // Alpha.25+: the final usage-only chunk (choices=[] + usage) that
+        // `stream_options: { include_usage: true }` produces.
+        if (chunk.usage && (!chunk.choices || chunk.choices.length === 0)) {
+          finalUsageChunk = chunk;
+          continue;
+        }
+
+        const choice = chunk.choices[0];
+        const delta = choice?.delta;
+
+        const text = delta?.content;
+        if (typeof text === "string" && text.length > 0) {
+          // Never emit an empty delta: a zero-length span is noise every
+          // consumer would otherwise have to filter.
+          yield { type: "text-delta", text };
+        }
+
+        if (delta?.tool_calls) {
+          for (const fragment of delta.tool_calls) {
+            const existing = pending.get(fragment.index);
+            if (existing) {
+              if (fragment.id) existing.id = fragment.id;
+              if (fragment.function?.name) existing.name = fragment.function.name;
+              if (fragment.function?.arguments) {
+                existing.args += fragment.function.arguments;
+              }
+            } else {
+              pending.set(fragment.index, {
+                id: fragment.id ?? `call_${fragment.index}`,
+                name: fragment.function?.name ?? "",
+                args: fragment.function?.arguments ?? "",
+              });
+            }
+          }
+        }
+
+        if (choice?.finish_reason) {
+          stopReason = choice.finish_reason;
+          yield* flushPendingToolCalls(pending);
+          yield { type: "step-finish", stopReason: choice.finish_reason };
+        }
+      }
+
+      // A provider that ended without a finish_reason still must not
+      // swallow assembled calls.
+      yield* flushPendingToolCalls(pending);
+      if (stopReason === undefined) {
+        yield { type: "step-finish", stopReason: "stop" };
+      }
+
+      if (finalUsageChunk?.usage) {
+        const usage = parseUsage({ usage: finalUsageChunk.usage });
+        const cost = computeChatCost(usage, pricing);
+        if (streamCompleteCallback) {
+          emitStreamComplete({
+            usage: finalUsageChunk.usage,
+            modelId,
+            providerAlias: alias,
+            pricing,
+            streamStart,
+            callback: streamCompleteCallback,
+          });
+        }
+        yield {
+          type: "finish",
+          usage,
+          cost,
+          modelId,
+          providerAlias: alias,
+        };
       }
     },
 
@@ -1727,7 +1861,28 @@ async function executeChatRequest(
  * chunk when streamUsage was requested.
  */
 interface OpenAIStreamChunk {
-  choices: Array<{ delta?: { content?: string } }>;
+  choices: Array<{
+    delta?: {
+      content?: string;
+      /**
+       * Alpha.32+: streamed tool calls, consumed by `streamChat`.
+       *
+       * OpenAI emits these as fragments keyed by `index`. The first
+       * fragment for an index carries `id` and `function.name`; later
+       * fragments append a few characters at a time to
+       * `function.arguments`. Reassembly is therefore index-keyed
+       * accumulation, and a call is only complete once the stream moves
+       * on or finishes. That is why `streamChat` buffers rather than
+       * forwarding fragments.
+       */
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -1841,6 +1996,45 @@ function parseUsage(response: {
  * future consumer of the callback wants error isolation, that's their
  * responsibility.
  */
+/**
+ * Emit every fully-assembled tool call, then clear the buffer.
+ *
+ * Arguments arrive as a character stream, so JSON.parse can only be
+ * attempted once the provider stops appending. A call whose arguments do
+ * not parse is still emitted, with `args` undefined and `rawArguments`
+ * carrying the original text: one malformed call must not kill a live
+ * conversation, and a caller who can salvage the raw string should be
+ * given the chance.
+ *
+ * Calls with no name are dropped. A nameless tool call is not actionable
+ * by any caller, and forwarding it would only push the same decision one
+ * layer out.
+ */
+function* flushPendingToolCalls(
+  pending: Map<number, { id: string; name: string; args: string }>,
+): Generator<ChatStreamEvent> {
+  if (pending.size === 0) return;
+  const calls = [...pending.entries()].sort((a, b) => a[0] - b[0]);
+  pending.clear();
+  for (const [, call] of calls) {
+    if (!call.name) continue;
+    let parsed: unknown;
+    let ok = true;
+    try {
+      parsed = call.args.trim() === "" ? {} : JSON.parse(call.args);
+    } catch {
+      ok = false;
+    }
+    yield {
+      type: "tool-call",
+      toolCallId: call.id,
+      toolName: call.name,
+      ...(ok ? { args: parsed } : {}),
+      rawArguments: call.args,
+    };
+  }
+}
+
 function emitStreamComplete(args: {
   usage: NonNullable<OpenAIStreamChunk["usage"]>;
   modelId: string;

@@ -25,6 +25,8 @@ export type {
   RunAgentOptions,
   StreamStructuredOptions,
   StreamTextOptions,
+  StreamChatOptions,
+  ChatStreamEvent,
   TaskType,
   TokenUsage,
   ToolDefinition,

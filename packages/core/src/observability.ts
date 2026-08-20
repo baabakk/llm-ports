@@ -77,7 +77,7 @@ export interface CostEvent {
   /** Adapter alias used (the Registry-side name, e.g. `gptoss-cerebras`). */
   providerAlias: string;
   /** Operation kind. */
-  operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "runAgent" | "embed" | "rerank";
+  operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "runAgent" | "embed" | "rerank";
   /** Optional task-type tag from the call site. */
   taskType?: string;
   /** Optional scope hint passed by the caller for downstream attribution. */

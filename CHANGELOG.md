@@ -19,6 +19,62 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.32 — 2026-08-19
+
+Streaming with tool calls, and the first inbound integration.
+
+### `streamChat` — one streamed turn, tool calls surfaced not executed
+
+`streamText` streams tokens but cannot carry tools at all. `runAgent` takes tools but owns the loop and resolves once, so the caller sees nothing until it finishes. Realtime speech needs both halves simultaneously: tokens as they arrive so synthesis can start, and tool calls mid-stream so the caller can run them.
+
+`streamChat` is that middle. It is **optional on `LLMPort`**; detect it with `typeof port.streamChat === "function"`.
+
+```ts
+for await (const event of port.streamChat({ taskType: "voice", messages, tools })) {
+  if (event.type === "text-delta") speak(event.text);
+  if (event.type === "tool-call") await runMyTool(event.toolName, event.args);
+}
+```
+
+Events are a discriminated union: `text-delta`, `tool-call`, `step-finish`, `finish` (carrying usage and cost, which is what keeps cost accounting intact when a response arrives in pieces), and `error`.
+
+**It is not called `streamAgent` on purpose.** That name would promise a loop this method must not run, and it leaves `streamAgent` free for a genuinely loop-executing streaming variant later.
+
+Tool calls are buffered until fully assembled rather than forwarded as fragments. Providers stream arguments a few characters at a time in provider-specific shapes; passing that through would make every consumer reimplement reassembly. Buffering is additive to undo later, fragments are not.
+
+Registry participation is full: routing, fallback chains, budget gating, and instrumentation. Adapters lacking the method are filtered out of the chain before it is walked rather than attempted and failed, and when nothing in a chain supports it the error names every alias and says what is missing.
+
+Implemented on `@llm-ports/adapter-openai`, which also covers OpenAI-compatible endpoints through `baseURL`.
+
+### `@llm-ports/integration-livekit` — a new package, and a new category
+
+Routes a LiveKit Agents voice agent through an `LLMPort`. LiveKit already abstracts providers, so that is explicitly **not** what this adds. What its LLM layer does not carry is governance: no fallback chain, no cost ceiling, no per-provider budget, no task routing. Under a port all four are configuration.
+
+**On the name.** Every `adapter-*` package points outward, from the port to a provider. This points inward, from a framework into the port. Reusing "adapter" would invert its meaning, so inbound packages take the `integration-` prefix. Expect siblings.
+
+### The latency gate, measured rather than asserted
+
+The plan gated this design on measuring time-to-first-token, because an unmeasured realtime claim is a slogan. Results in [`packages/core/bench/STREAM-CHAT-RESULTS.md`](packages/core/bench/STREAM-CHAT-RESULTS.md):
+
+- Routing through the Registry: **0.036 ms** at p50.
+- Each fallback hop: **0.33 ms** at p50.
+
+Against a roughly 680 ms conversational budget those are 0.005 and 0.05 percent. The gate passes with room to spare.
+
+It also moved a decision. The plan proposed `totalDeadlineMs` as the necessary realtime primitive; the measurement shows the risk it guards against does not come from this library. A dead provider in production costs whatever its failure takes, which is governed by `perAttemptTimeoutMs`, an existing setting. `totalDeadlineMs` stays on the roadmap as a convenience and is no longer gating anything.
+
+### Found while building this: streamed fallback has never worked
+
+`walkStreamChain` opens a provider stream inside a `try` and treats a throw as the signal to walk on. Every adapter implements streaming as an async generator, and calling one returns a generator object **without running any of its body**, so the call that contacts the provider does not happen until the consumer iterates, long after the walker returned.
+
+`streamText` and `streamStructured` therefore do not fall back at all, on any released version. `streamChat` avoids it by priming: pulling the first event inside the walker's try, where a failure can still be acted on.
+
+The fix for the other two methods is small and deliberately **not** in this release, because changing the failure semantics of two shipped methods is a behaviour change that deserves its own notes rather than a ride-along in a feature release. Tracked as `TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING` at High.
+
+### Verification
+
+37 new tests: 12 in core covering Registry behaviour, 10 in `adapter-openai` covering fragment reassembly and per-attempt schema conversion, 15 in the integration covering the mapping in both directions. Core 609 of 609. Full workspace green.
+
 ## v0.1.0-alpha.31.2 — 2026-08-19
 
 Pays the evaluation scope announced for alpha.31 and displaced by the hotfix that shipped under that number. `@llm-ports/eval` only; no other package changes.

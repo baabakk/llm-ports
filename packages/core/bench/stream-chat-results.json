@@ -1,0 +1,38 @@
+{
+  "label": "Windows dev box (under load)",
+  "node": "v24.11.1",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-1270P",
+  "cores": 16,
+  "unit": "microseconds",
+  "rows": [
+    {
+      "name": "direct adapter (no Registry)",
+      "iterations": 20000,
+      "p50": 0.6,
+      "p95": 1.2,
+      "p99": 3
+    },
+    {
+      "name": "through Registry, first provider healthy",
+      "iterations": 20000,
+      "p50": 37,
+      "p95": 206.7,
+      "p99": 349.4
+    },
+    {
+      "name": "through Registry, 1 dead provider then healthy",
+      "iterations": 20000,
+      "p50": 362.9,
+      "p95": 887,
+      "p99": 1240.9
+    },
+    {
+      "name": "through Registry, 2 dead providers then healthy",
+      "iterations": 13730,
+      "p50": 460.8,
+      "p95": 1345,
+      "p99": 2677.2
+    }
+  ],
+  "registryOverheadP50": 36.4
+}

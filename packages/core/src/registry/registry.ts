@@ -24,6 +24,8 @@ import type {
   RunAgentOptions,
   StreamStructuredOptions,
   StreamTextOptions,
+  StreamChatOptions,
+  ChatStreamEvent,
 } from "../ports/llm-port.js";
 import {
   attachStreamCompleteCallback,
@@ -835,6 +837,34 @@ export class Registry {
    * Throws `NoProvidersAvailableError` if NO providers in the chain are
    * viable. Returns at least one `ModelSelection` otherwise.
    */
+  /**
+   * Alpha.32+: does the adapter behind this alias implement the optional
+   * `LLMPort.streamChat`?
+   *
+   * Probes the adapter's port surface rather than maintaining a registry
+   * of which adapters support what. A hand-maintained list is a second
+   * source of truth that drifts the moment an adapter adds the method,
+   * and the probe cannot drift because it asks the object itself.
+   *
+   * Returns false for anything unresolvable (unknown alias, unregistered
+   * adapter, adapter that does not build a port) rather than throwing.
+   * The caller is deciding which providers to attempt, and "cannot serve
+   * this" is the right answer for all of those cases; a chain with no
+   * survivors reports the reasons together.
+   */
+  aliasSupportsStreamChat(alias: string): boolean {
+    try {
+      const entry = this.config.providers[alias];
+      if (!entry) return false;
+      const adapter = this.adapters[entry.adapter];
+      if (!adapter?.createLLMPort) return false;
+      const port = adapter.createLLMPort(entry.modelId, alias);
+      return typeof port.streamChat === "function";
+    } catch {
+      return false;
+    }
+  }
+
   async selectViableChain(
     taskType: string,
     priority: 0 | 1 | 2 | 3 = 2,
@@ -1135,6 +1165,7 @@ async function walkChain<R>(
     | "generateText"
     | "generateStructured"
     | "streamText"
+    | "streamChat"
     | "streamStructured"
     | "runAgent" = "generateText",
   refs?: Record<string, ArtifactRef>,
@@ -1286,7 +1317,7 @@ async function walkChain<R>(
  * backwards-compat adapter reads during the alpha.26 window.
  */
 function normalizeMessagesOnOptions(
-  method: "generateText" | "generateStructured" | "streamText" | "streamStructured",
+  method: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat",
   opts: {
     messages?: LLMMessage[];
   },
@@ -1294,6 +1325,50 @@ function normalizeMessagesOnOptions(
   if (opts.messages === undefined) throw new MessagesRequiredError(method);
   if (opts.messages.length === 0) throw new EmptyMessagesError(method);
   return opts.messages;
+}
+
+/**
+ * A stream whose first event has already been pulled.
+ *
+ * `done` distinguishes an empty stream from one holding a first value,
+ * so `replayPrimed` does not have to treat `undefined` as meaningful.
+ */
+interface PrimedStream<T> {
+  first: T | undefined;
+  done: boolean;
+  iterator: AsyncIterator<T>;
+}
+
+/**
+ * Pull the first event from a stream so open-time failures surface to
+ * the caller rather than to whoever iterates later.
+ *
+ * An adapter written as `async *streamChat` does not execute a single
+ * line until the consumer calls `next()`. Opening such a stream and
+ * handing it back unprimed means the Registry's chain walker sees a
+ * successful "open" for a provider that is in fact down, concludes the
+ * attempt succeeded, and never falls back. Priming moves the first real
+ * provider interaction inside the walker's try block, which is the only
+ * place that can act on it.
+ *
+ * The cost is one buffered event, which `replayPrimed` gives back.
+ */
+async function primeStream<T>(stream: AsyncIterable<T>): Promise<PrimedStream<T>> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const result = await iterator.next();
+  return result.done
+    ? { first: undefined, done: true, iterator }
+    : { first: result.value, done: false, iterator };
+}
+
+/** Re-emit a primed stream's buffered first event, then the remainder. */
+async function* replayPrimed<T>(primed: PrimedStream<T>): AsyncIterable<T> {
+  if (!primed.done) yield primed.first as T;
+  for (;;) {
+    const result = await primed.iterator.next();
+    if (result.done) return;
+    yield result.value;
+  }
 }
 
 class RegistryPort implements LLMPort {
@@ -1308,7 +1383,7 @@ class RegistryPort implements LLMPort {
    */
   private emitResultEvents(
     result: { cost: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
-    operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "runAgent" | "embed" | "rerank",
+    operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "runAgent" | "embed" | "rerank",
     taskType: string | undefined,
     budgetScope?: BudgetScopeRef,
     refs?: Record<string, ArtifactRef>,
@@ -1483,7 +1558,7 @@ class RegistryPort implements LLMPort {
    * on failure paths (consistent with the alpha.24 non-streaming contract).
    */
   private buildStreamCompleteCallback(
-    operation: "streamText" | "streamStructured",
+    operation: "streamText" | "streamStructured" | "streamChat",
     taskType: string | undefined,
     budgetScope: BudgetScopeRef | undefined,
     refs: Record<string, ArtifactRef> | undefined,
@@ -1529,7 +1604,7 @@ class RegistryPort implements LLMPort {
    * helper rethrows without opening an attempt for the caller.
    */
   private async walkStreamChain<S>(
-    method: "streamText" | "streamStructured",
+    method: "streamText" | "streamStructured" | "streamChat",
     normalizedOptions: {
       taskType?: string;
       priority?: 0 | 1 | 2 | 3;
@@ -1538,7 +1613,25 @@ class RegistryPort implements LLMPort {
       refs?: Record<string, ArtifactRef>;
     },
     opCtx: OperationContext | undefined,
-    openStream: (sel: ModelSelection) => S,
+    /**
+     * Opens the provider's stream. May be async: `streamChat` returns a
+     * promise here so it can PRIME the stream (pull its first event)
+     * inside the walker's try, which is what makes open-time failures
+     * visible to the chain walk at all.
+     *
+     * Without priming, an adapter written as an async generator never
+     * runs its body until the consumer iterates, so nothing throws here
+     * and the walker concludes the attempt succeeded. See
+     * TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING.
+     */
+    openStream: (sel: ModelSelection) => S | Promise<S>,
+    /**
+     * Alpha.32+: when supplied, walk only these aliases instead of the
+     * task's full chain. `streamChat` uses it to skip adapters that do
+     * not implement the optional method, so an unsupported provider is
+     * never attempted rather than being attempted and failing.
+     */
+    restrictChain?: readonly string[],
   ): Promise<{
     stream: S;
     sel: ModelSelection;
@@ -1569,7 +1662,7 @@ class RegistryPort implements LLMPort {
       }
       const handle = openAttempt(sel, false);
       try {
-        const stream = openStream(sel);
+        const stream = await openStream(sel);
         const key = this.registry.scopedKey(sel.alias, budgetScope);
         await this.registry.budget.recordRequest(key);
         this.registry.markProviderAuthenticated(sel.alias);
@@ -1580,11 +1673,19 @@ class RegistryPort implements LLMPort {
       }
     }
 
-    const chain = await this.registry.selectViableChain(
+    const viable = await this.registry.selectViableChain(
       taskType ?? "general",
       priority,
       budgetScope,
     );
+    // Alpha.32+: honour a caller-supplied restriction. Filtering here
+    // rather than inside `selectViableChain` keeps budget and priority
+    // selection identical across every stream method; the restriction is
+    // purely about which adapters can serve this particular call.
+    const chain =
+      restrictChain === undefined
+        ? viable
+        : viable.filter((sel) => restrictChain.includes(sel.alias));
     const reasons: Record<string, string> = {};
     let lastErr: unknown;
     let prevSel: ModelSelection | undefined;
@@ -1616,7 +1717,7 @@ class RegistryPort implements LLMPort {
       const isFallback = prevSel !== undefined;
       const handle = openAttempt(sel, isFallback);
       try {
-        const stream = openStream(sel);
+        const stream = await openStream(sel);
         const key = this.registry.scopedKey(sel.alias, budgetScope);
         await this.registry.budget.recordRequest(key);
         this.registry.markProviderAuthenticated(sel.alias);
@@ -1723,6 +1824,131 @@ class RegistryPort implements LLMPort {
         else failOperation(opHandle, err);
       }
       throw err;
+    }
+    if (opHandle) completeOperation(opHandle);
+  }
+
+  /**
+   * Alpha.32+. Streamed turn with tool calls surfaced, not executed.
+   *
+   * Rides the same chain walker, budget gating, and instrumentation as
+   * `streamText`, so a consumer gains fallback chains, cost ceilings, and
+   * task routing simply by routing through here instead of constructing a
+   * provider client directly. That is the entire point of the method.
+   *
+   * Two behaviours differ from `streamText`, both because `streamChat` is
+   * optional on the port:
+   *
+   * 1. Adapters that cannot stream tool calls are filtered out of the
+   *    chain before it is walked, rather than failing mid-call. A chain
+   *    where only the third provider supports the method walks to that
+   *    one instead of dying on the first.
+   * 2. When no provider in the chain supports it, the error names every
+   *    alias and says what is missing, rather than surfacing a bare
+   *    "not a function" from somewhere inside an adapter.
+   */
+  async *streamChat(options: StreamChatOptions): AsyncIterable<ChatStreamEvent> {
+    const messages = normalizeMessagesOnOptions("streamChat", options);
+    const normalizedOptions = { ...options, messages };
+    const taskType = normalizedOptions.taskType ?? "general";
+    const fullChain = normalizedOptions.forceProviderAlias
+      ? [normalizedOptions.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+
+    const providerChain = fullChain.filter((alias) =>
+      this.registry.aliasSupportsStreamChat(alias),
+    );
+    if (providerChain.length === 0) {
+      throw new NoProvidersAvailableError(
+        taskType,
+        fullChain,
+        Object.fromEntries(
+          fullChain.map((alias) => [
+            alias,
+            "adapter does not implement the optional LLMPort.streamChat method (alpha.32+)",
+          ]),
+        ),
+      );
+    }
+
+    const opHandle = startOperation(
+      this.registry.instrumentation,
+      { taskType, method: "streamChat", providerChain },
+      getObservabilityContext(this),
+    );
+    const opCtx = opHandle?.opCtx;
+    maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
+
+    const inner = this.buildStreamCompleteCallback(
+      "streamChat",
+      normalizedOptions.taskType,
+      normalizedOptions.budgetScope,
+      normalizedOptions.refs,
+    );
+    let streamMeta: StreamCompleteMetadata | undefined;
+    const wrappedCallback: StreamCompleteCallback = (meta) => {
+      streamMeta = meta;
+      inner(meta);
+    };
+    const optionsWithCallback = attachStreamCompleteCallback(
+      { ...normalizedOptions },
+      wrappedCallback,
+    );
+
+    let raw: AsyncIterable<ChatStreamEvent>;
+    let attemptHandle: ManualAttemptHandle | undefined;
+    try {
+      const walked = await this.walkStreamChain<PrimedStream<ChatStreamEvent>>(
+        "streamChat",
+        normalizedOptions,
+        opCtx,
+        // Prime the stream inside the walker's try. An adapter written as
+        // an async generator does not run its body until first
+        // iteration, so opening one and returning it unprimed would make
+        // every provider look healthy and defeat the chain walk. Pulling
+        // the first event here surfaces open-time failures where the
+        // walker can act on them.
+        async (sel) =>
+          primeStream(scopedPortForAdapter(sel.port!, opCtx).streamChat!(optionsWithCallback)),
+        providerChain,
+      );
+      raw = replayPrimed(walked.stream);
+      attemptHandle = walked.attemptHandle;
+    } catch (err) {
+      if (opHandle) {
+        if (isAbortError(err)) cancelOperation(opHandle);
+        else failOperation(opHandle, err);
+      }
+      throw err;
+    }
+
+    try {
+      for await (const event of raw) {
+        yield event;
+      }
+    } catch (err) {
+      if (attemptHandle) failAttempt(attemptHandle, err);
+      if (opHandle) {
+        if (isAbortError(err)) cancelOperation(opHandle);
+        else failOperation(opHandle, err);
+      }
+      // The terminal `error` event is emitted here rather than by the
+      // adapter, so a consumer iterating the stream sees one consistent
+      // shape whether the failure came from the provider or the chain.
+      yield { type: "error", error: err instanceof Error ? err : new Error(String(err)) };
+      return;
+    }
+
+    if (attemptHandle) {
+      completeAttempt(attemptHandle, {
+        // The stream is already drained by the time this runs, so there
+        // is no residual value to carry; usage and cost are what matter
+        // for the attempt record.
+        value: undefined,
+        ...(streamMeta?.usage ? { usage: streamMeta.usage } : {}),
+        ...(streamMeta?.cost ? { cost: streamMeta.cost } : {}),
+        ...(streamMeta?.modelId ? { modelId: streamMeta.modelId } : {}),
+      });
     }
     if (opHandle) completeOperation(opHandle);
   }

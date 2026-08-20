@@ -508,6 +508,113 @@ export interface StreamStructuredOptions<T> {
   refs?: Record<string, ArtifactRef>;
 }
 
+// ─── streamChat (alpha.32+) ──────────────────────────────────────────
+
+/**
+ * One event from a `streamChat` stream.
+ *
+ * A discriminated union rather than a bare string, because the caller
+ * must be able to tell speech from control flow. A consumer that only
+ * wants text can ignore everything except `text-delta`.
+ */
+export type ChatStreamEvent =
+  /**
+   * A span of assistant text. The only event a text-only consumer needs.
+   * Adapters MUST NOT emit empty deltas; a zero-length span is noise
+   * that every consumer would have to filter.
+   */
+  | { type: "text-delta"; text: string }
+  /**
+   * A complete tool call the model wants run. Emitted once the call is
+   * fully assembled, never per-fragment: providers stream tool arguments
+   * incrementally and in provider-specific shapes, and passing that
+   * fragmentation through would make every consumer reimplement the
+   * reassembly. Buffering is additive to undo later; emitting fragments
+   * is not.
+   *
+   * **This library does not execute the call.** The caller owns the loop.
+   */
+  | {
+      type: "tool-call";
+      /** Provider-issued id. Echo it back when returning the result. */
+      toolCallId: string;
+      toolName: string;
+      /**
+       * Parsed arguments. `undefined` when the provider emitted
+       * arguments this adapter could not parse as JSON, which is
+       * reported rather than thrown so one malformed call does not kill
+       * a live conversation. `rawArguments` always carries the original.
+       */
+      args?: unknown;
+      /** The argument string exactly as the provider sent it. */
+      rawArguments: string;
+    }
+  /**
+   * One model turn ended. `stopReason` is the provider's own finish
+   * reason, normalized where the meaning is unambiguous and passed
+   * through otherwise.
+   */
+  | { type: "step-finish"; stopReason: string }
+  /**
+   * Terminal, on success. Carries what a streamed call would otherwise
+   * lose: this is what keeps cost accounting intact when the response
+   * arrives in pieces.
+   */
+  | {
+      type: "finish";
+      usage: TokenUsage;
+      cost: CostUsage;
+      modelId: string;
+      providerAlias: string;
+    }
+  /**
+   * Terminal, on failure, when the provider chain is exhausted. Adapters
+   * do not emit this; the Registry does, so a caller iterating the
+   * stream sees one consistent terminal event either way.
+   */
+  | { type: "error"; error: Error };
+
+/**
+ * Options for `streamChat`. Mirrors `StreamTextOptions` and adds tools.
+ */
+export interface StreamChatOptions {
+  taskType: TaskType;
+  priority?: LLMPriority;
+  messages: LLMMessage[];
+  /**
+   * Tools the model may call. Reuses `ToolDefinition` rather than
+   * declaring a lighter shape, so a tool means the same thing here as in
+   * `runAgent`. That matters for more than tidiness: schema conversion
+   * must happen per attempt, by the adapter serving that attempt, or a
+   * fallback provider can be handed a schema dialect it rejects.
+   *
+   * `execute` is present on the type but **never called** by this
+   * method. Callers who only ever use `streamChat` may supply a
+   * throwing stub; callers who share definitions with `runAgent` get to
+   * keep one set.
+   */
+  tools?: Record<string, ToolDefinition>;
+  /**
+   * Whether the model must call a tool, may choose, or must not.
+   * Adapters map this onto their provider's own vocabulary and ignore it
+   * where the provider has no equivalent.
+   */
+  toolChoice?: "auto" | "required" | "none";
+  maxOutputTokens?: number;
+  temperature?: number;
+  /** Cancellation. Required for barge-in in a realtime pipeline. */
+  signal?: AbortSignal;
+  /** Per-call override for the per-attempt timeout. See `GenerateTextOptions`. */
+  perAttemptTimeoutMs?: number;
+  /** Route directly to one alias for this call. */
+  forceProviderAlias?: string;
+  reasoningEffort?: "low" | "medium" | "high";
+  providerExtras?: Record<string, unknown>;
+  cacheControl?: CacheControl;
+  budgetScope?: BudgetScopeRef;
+  refs?: Record<string, ArtifactRef>;
+}
+
 export interface RunAgentOptions {
   taskType: TaskType;
   priority?: LLMPriority;
@@ -645,6 +752,36 @@ export interface LLMPort {
 
   /** Multi-turn tool-use loop. The agent primitive. */
   runAgent(options: RunAgentOptions): Promise<AgentResult>;
+
+  /**
+   * Alpha.32+. One streamed model turn with tool calls **surfaced, not
+   * executed**. Use for realtime voice, and for any framework that owns
+   * its own agent loop.
+   *
+   * ## Why this sits between the two methods above
+   *
+   * `streamText` streams tokens but cannot carry tools at all.
+   * `runAgent` accepts tools but runs the loop itself and resolves once,
+   * so the caller sees nothing until the whole thing finishes.
+   *
+   * Realtime speech needs both halves simultaneously: tokens as they
+   * arrive so synthesis can start, and tool calls mid-stream so the
+   * caller can execute them. `streamChat` is that middle. It never
+   * invokes a tool's `execute`; it emits a `tool-call` event and the
+   * caller decides what to do.
+   *
+   * That is why it is not named `streamAgent`. That name would promise a
+   * loop this method must not run, and it leaves `streamAgent` free for
+   * a genuinely loop-executing streaming variant later.
+   *
+   * ## Optional by design
+   *
+   * Not every provider can stream tool calls. Adapters that cannot
+   * omit the method entirely, and the Registry reports the gap by alias
+   * rather than failing obscurely mid-call. Detect support with
+   * `typeof port.streamChat === "function"`.
+   */
+  streamChat?(options: StreamChatOptions): AsyncIterable<ChatStreamEvent>;
 
   /**
    * Runtime model discovery (alpha.9+). Returns the models the provider
