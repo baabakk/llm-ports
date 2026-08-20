@@ -67,6 +67,7 @@ export default defineConfig({
           items: [
             { text: "Ports and Adapters", link: "/concepts/ports-and-adapters" },
             { text: "Task Routing", link: "/concepts/task-routing" },
+            { text: "Registry State and Sharing", link: "/concepts/registry-state" },
             { text: "Cost vs Request Gating", link: "/concepts/cost-vs-request-gating" },
             { text: "Content Blocks", link: "/concepts/content-blocks" },
             { text: "Cache Control", link: "/concepts/cache" },
