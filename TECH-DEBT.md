@@ -8,6 +8,24 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-08-19T17:30 PDT
+
+## llm-ports
+
+### TD-LLMPORTS-FINGERPRINT-CACHE-FLAKY-TEST: a flaky test in the workspace gate, and a fixed temp path behind it
+
+- **Severity:** Medium
+- **Status:** Open. Found 2026-08-19 during the alpha.31.2 release verification.
+- **Files:** `packages/adapter-openai/src/fingerprint.ts` (`FileFingerprintCache.persist`, around line 180), `packages/adapter-openai/tests/quirks/fingerprint.test.ts`
+- **Problem:** `FileFingerprintCache > delete removes entries` fails intermittently. Measured at one failure in four consecutive isolated runs on Windows; it passes in isolation most of the time and failed inside a full `pnpm -r test`. Two contributing defects, one in the test and one in the implementation.
+
+  **In the implementation.** `persist()` writes through a temp file whose path is a fixed derivation, `${this.path}.tmp`, then renames it over the target. Two cache instances pointing at the same path therefore share one temp path and will clobber each other mid-write, and on Windows a rename over an existing target is not the atomic operation the comment claims it is; it can transiently fail under a filesystem or scanner lock. The comment says "Atomic write via temp + rename," which is true on POSIX and overstated on Windows.
+
+  **In the test.** `afterEach` unlinks the cache path but never the `.tmp` sibling, so temp files accumulate in the system temp directory across runs. Test paths are derived from `Date.now()` plus `Math.random()`, which makes collision unlikely but not impossible, and nothing asserts isolation.
+- **Impact:** Larger than the one test. The workspace suite is the release gate, and several release commits in this repository cite "full workspace green" as the verification. That claim is weaker than it reads while any test in the suite is non-deterministic, because a green run no longer distinguishes "nothing is broken" from "the flake did not fire this time." The failure is also a false alarm that costs whoever hits it an investigation.
+- **Resolution path:** Give the temp file a unique suffix per write (process id plus a counter, or a random component) so concurrent instances cannot collide. On Windows, retry the rename briefly on `EPERM` and `EBUSY` rather than failing the write, or fall back to a write-then-replace that tolerates the locked case. Clean up the `.tmp` sibling in the test's `afterEach`. Then run the test in a loop, at least fifty iterations, and confirm it is genuinely deterministic rather than merely passing once.
+- **Not fixed here** because it sits in a package outside the alpha.31.2 scope, and a Windows-specific filesystem flake deserves a focused diagnosis rather than a guess folded into a release commit.
+
 # 2026-08-19T03:41 PDT
 
 ## llm-ports
