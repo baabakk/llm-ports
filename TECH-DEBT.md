@@ -33,7 +33,11 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 - **Resolution path:** Partially addressed 2026-08-21: the four displaced themes are restored to the queue in `docs/v0-1-status.md`, marked owed and named against the release that displaced them, and the queue's status line now records that its earlier "everything owed is discharged" claim was false.
 
   Remaining, in order:
-  1. **Enumerate the unshipped remainder of alpha.28's sixteen-item slate.** Nobody has listed which of the sixteen shipped. Until that exists, no statement about what is owed to those four consumers can be trusted, including this entry's.
+  1. ~~Enumerate the unshipped remainder of alpha.28's sixteen-item slate.~~ **Done 2026-08-21.** Full scoring in `plans/alpha.28-reliability-observability-polish.md`, verified against source. **4 of 16 shipped, 2 partial, 10 not shipped.** Per consumer: ADW 0 of 5, SalesCoach 1 of 5, Dramma 1 of 4, BEPA 2 of 3.
+
+     Two findings from the inventory that were not visible before it existed. First, the consumer's report was exactly right: all five of its findings are unshipped. Second, and nobody decided this, **the maintainer's own consumer got the best outcome and the most distant consumer got none.** That is what displacement without a written record produces: the items nearest to hand survive and the rest fall off silently.
+
+     Also surfaced: the six open design questions in the planning discussion were never resolved, and two of the announced threads terminate at the same missing piece, a `@llm-ports/budget-redis` package that does not exist and was itself only ever named in a deferral.
   2. Decide per displaced theme whether it is still wanted, then either re-queue it with a target or withdraw it explicitly in a release note. Silence is what caused this.
   3. Build the queue from the published roadmap rather than from working context, and reconcile it against shipped artifacts, not against recollection.
 - **Note on the quoted status line.** The consumer's report quotes this project's own status doc: "The alpha.28-to-31 arc has so far produced no observable value in its motivating consumer." That was written 2026-08-19 and was accurate then. It is now stale: telemetry went live on the consumer's production host 2026-08-20, and spans reach storage. The arc did eventually deliver. That does not soften anything above, because the cost was four displaced themes and the delivery was a day after the sentence was written, not before.
