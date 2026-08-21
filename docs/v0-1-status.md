@@ -136,7 +136,18 @@ When a release ships contents other than what was queued here, the displacement 
 | Shared authentication state across Registry instances (`RegistryOptions.auth`) | **Shipped in `alpha.31.1`** | Injectable `AuthBackend` plus an `InMemoryAuth` default, matching the `budget` / `cost` shape. Default behavior is unchanged. Synchronous by design, so it closes the multi-instance-one-process case and not cross-process sharing; see the scope limit in the alpha.31.1 changelog entry. |
 | `@llm-ports/telemetry-otel` `Tracer` type compatibility | **Shipped in `alpha.31.1`** | `startSpan` widened to arity-3, `AttributeValue` array variants made mutable. Real `@opentelemetry/api` tracers now unify without a cast. |
 | Alpha.30 additive-compatibility correction | **Shipped in `alpha.31.1`** | The alpha.30 notes claimed identical behavior for consumers who did not opt in, which was false for multi-registry consumers. Corrected in the alpha.31.1 entry rather than edited in place. |
-**Status, 2026-08-19.** Every owed row above is now discharged upstream. What remains owed is downstream, in the consumer, and is recorded at the foot of this section.
+**Status, 2026-08-21. Corrected after an external audit.** The statement below that every owed row was discharged was **wrong**, because this queue was built from recent working context rather than from the roadmap this project had already published. Three themed releases announced in the alpha.27 migration guide were displaced by the observability arc and never re-queued. They are restored below.
+
+**What was announced, in a shipped artifact.** `docs/migration/alpha-26-to-alpha-27.md`, released 2026-07-17, named four themed releases with target dates. What shipped under each:
+
+| Announced | Shipped instead |
+|---|---|
+| alpha.28 "Reliability + observability polish", 16 items synthesized from four consumers | Observability **contract foundation only**; the plan driving it committed to §5.1 alone, leaving most of the sixteen-item slate unshipped |
+| alpha.29 "Capability factory ergonomics" | Runtime observability instrumentation |
+| alpha.30 "Persistent backends + caching" | Streaming instrumentation, adapter-side emission, OpenTelemetry bridge |
+| alpha.31 "Local runtime + orchestration" | A single-issue `operation_id` hotfix |
+
+So the observability arc consumed **four consecutive release slots** that had been publicly themed for other work. Each displacement was individually defensible and none was recorded, which is how four of them happened without anyone noticing until a consumer counted.
 
 **Finish-first rule.** Rows marked *owed* are commitments already made: announced scope, or a resolution path a closed entry claimed. They rank above strategic work regardless of how much smaller or less interesting they are. The alpha.28-to-31 arc has so far produced no observable value in its motivating consumer, because the last mile was never walked while newer work kept being added in front of it. This section is ordered to stop that repeating.
 
@@ -148,6 +159,11 @@ When a release ships contents other than what was queued here, the displacement 
 
 | Item | State | Notes |
 |---|---|---|
+| Persistent budget and cost backends | **Owed, displaced from alpha.30** | Announced as alpha.30's theme, "Persistent backends + caching". `BudgetBackend` and `CostBackend` are injectable, but only in-memory implementations ship, so counters reset on process restart and nothing shared exists. Named by a consumer as still missing at alpha.32. |
+| Response caching | **Owed, displaced from alpha.30** | The other half of alpha.30's announced theme. Provider prompt-cache accounting shipped (`CacheStats.provider_cache`), which is not the same thing and should not be mistaken for it: no response cache exists at any layer. |
+| Capability factory ergonomics | **Owed, displaced from alpha.29** | Announced as alpha.29's theme. Superseded in part by later work, so this needs re-scoping against what the factories now do rather than shipping the original slate unexamined. |
+| Local runtime and orchestration | **Owed, displaced from alpha.31** | Announced as alpha.31's theme. Never scoped beyond the planning discussion, so the first task is establishing whether it is still wanted. |
+| The unshipped remainder of alpha.28's slate | **Owed, needs an inventory** | Alpha.28 was announced as sixteen items synthesized from four consumers and shipped a contract foundation. Which of the sixteen remain unshipped has never been enumerated; a consumer reports five of its own findings among them. That inventory is the prerequisite for honest re-queuing. |
 | Verify and harden `@llm-ports/adapter-vercel` | **Next, no new API** | The adoption wedge. Projects already built on the Vercel AI SDK will not replace their provider layer, but can in principle keep it and gain governance above it, turning "migrate to us" into "keep everything, add the missing layer." Whether that adapter can carry a real consumer's full provider set is currently an assumption, and it is the assumption the wedge rests on. Cheapest high-value work available. |
 | Tool-schema-across-failover guarantee | **Next, existing code** | Schemas must be converted per attempt by the adapter serving it, never hoisted above the attempt boundary. Believed true by construction; needs a test that fails on the hoisted behavior before the claim can be made publicly. A defect of exactly this shape is reported in another project, where a fallback model rejects the primary's tool definitions, which makes this a differentiator rather than an internal detail. |
 | `streamChat`: streaming with tool calls surfaced, plus `@llm-ports/integration-livekit` | **Shipped in `alpha.32`** | See [`plans/alpha.32-streaming-tool-calls-and-livekit.md`](../plans/alpha.32-streaming-tool-calls-and-livekit.md). Today a caller can stream text without tools or use tools without streaming; realtime voice needs both at once. Named `streamChat`, not `streamAgent`, because it surfaces tool calls without executing them: the calling framework owns the loop. Introduces the `integration-*` category for inbound adapters, which points the opposite way from every existing `adapter-*`. |

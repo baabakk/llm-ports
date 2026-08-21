@@ -8,6 +8,36 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-08-21T09:00 PDT
+
+## llm-ports
+
+### TD-LLMPORTS-FOUR-DISPLACED-RELEASE-THEMES: four consecutive announced release themes were replaced by the observability arc, and none of the displacements was recorded
+
+- **Severity:** High
+- **Status:** Open. Raised by an external consumer (ADW) on 2026-08-21 and verified against the published record the same day.
+- **Files:** `docs/migration/alpha-26-to-alpha-27.md` (where the themes were announced), `docs/v0-1-status.md` (where they were absent from the queue), `CHANGELOG.md`
+- **Problem:** `docs/migration/alpha-26-to-alpha-27.md`, a shipped artifact released 2026-07-17, named four themed releases with target dates. The same text appears in the alpha.27 changeset and in several per-package changelogs, so it went out with the packages rather than living only in a discussion thread.
+
+  | Announced | Shipped instead |
+  |---|---|
+  | alpha.28 "Reliability + observability polish", sixteen items synthesized from four consumers | Observability contract foundation only; the driving plan committed to §5.1 alone |
+  | alpha.29 "Capability factory ergonomics" | Runtime observability instrumentation |
+  | alpha.30 "Persistent backends + caching" | Streaming instrumentation, adapter-side emission, OpenTelemetry bridge |
+  | alpha.31 "Local runtime + orchestration" | A single-issue `operation_id` hotfix |
+
+  The observability arc consumed four consecutive release slots that had been publicly themed for other work. Each displacement was individually defensible; none was recorded anywhere a consumer could see.
+- **Impact:** A consumer planning against the published roadmap has been waiting four releases for work that was never re-queued and never withdrawn. The specific report: persistent budget backend and response caching, both under alpha.30's announced theme, are still absent at alpha.32, and five of that consumer's own findings scoped into alpha.28 did not ship either.
+
+  This is the same defect already recorded once at smaller scale, when alpha.31's announced eval scope was displaced by a hotfix (see TD-LLMPORTS-ALPHA31-EVAL-BACKENDS-DEFERRED). The fix applied then was a "near-term alpha queue" in `docs/v0-1-status.md`, intended to make exactly this visible. **That queue did not catch this, because it was built from recent working context rather than from the published roadmap**, so it inherited the omission it was meant to prevent. A durable record populated from memory is not a durable record.
+- **Resolution path:** Partially addressed 2026-08-21: the four displaced themes are restored to the queue in `docs/v0-1-status.md`, marked owed and named against the release that displaced them, and the queue's status line now records that its earlier "everything owed is discharged" claim was false.
+
+  Remaining, in order:
+  1. **Enumerate the unshipped remainder of alpha.28's sixteen-item slate.** Nobody has listed which of the sixteen shipped. Until that exists, no statement about what is owed to those four consumers can be trusted, including this entry's.
+  2. Decide per displaced theme whether it is still wanted, then either re-queue it with a target or withdraw it explicitly in a release note. Silence is what caused this.
+  3. Build the queue from the published roadmap rather than from working context, and reconcile it against shipped artifacts, not against recollection.
+- **Note on the quoted status line.** The consumer's report quotes this project's own status doc: "The alpha.28-to-31 arc has so far produced no observable value in its motivating consumer." That was written 2026-08-19 and was accurate then. It is now stale: telemetry went live on the consumer's production host 2026-08-20, and spans reach storage. The arc did eventually deliver. That does not soften anything above, because the cost was four displaced themes and the delivery was a day after the sentence was written, not before.
+
 # 2026-08-19T22:30 PDT
 
 ## llm-ports
