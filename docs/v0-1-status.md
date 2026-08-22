@@ -140,6 +140,8 @@ Four themed releases were announced in `docs/migration/alpha-26-to-alpha-27.md` 
 
 ## Planned release sequence
 
+> Per-release intent lives in [`plans/`](../plans/); the announced-versus-shipped record lives in [`plans/RELEASE-JOURNAL.md`](../plans/RELEASE-JOURNAL.md). **A release is not finished until its journal row is filled**, which is the check that would have caught the four displacements below within one release instead of four.
+
 Ordered by three rules, in priority order: correctness before features; items asked for by two or more consumers before single-consumer items; and dependency clusters kept together so a design question is answered once rather than repeatedly.
 
 Deliberately **not** one large release. Bundling 26 items would produce something nobody can review, which is the same failure in reverse.
