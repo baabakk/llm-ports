@@ -125,6 +125,70 @@ These are observations, not regressions. The plumbing handles both cases predict
 
 ---
 
+## Reconciliation: what was announced against what shipped
+
+Four themed releases were announced in `docs/migration/alpha-26-to-alpha-27.md` on 2026-07-17, each with a planning discussion enumerating its items. Scored against source on 2026-08-21:
+
+| Release | Theme | Items announced | Shipped |
+|---|---|---|---|
+| alpha.28 | Reliability + observability polish | 16 | 4, plus 2 partial |
+| alpha.29 | Capability factory ergonomics | 11 | **0** |
+| alpha.30 | Persistent backends + caching | 2 (+1 bonus) | **0** |
+| alpha.31 | Local runtime + orchestration | 3 | **0** |
+
+**32 items announced. 4 shipped, 2 partial, 26 not shipped.** Per-item scoring for alpha.28 is in [`plans/alpha.28-reliability-observability-polish.md`](../plans/alpha.28-reliability-observability-polish.md); the other three slates live in planning discussions #65, #66, and #67 and are summarized in the sequence below.
+
+## Planned release sequence
+
+Ordered by three rules, in priority order: correctness before features; items asked for by two or more consumers before single-consumer items; and dependency clusters kept together so a design question is answered once rather than repeatedly.
+
+Deliberately **not** one large release. Bundling 26 items would produce something nobody can review, which is the same failure in reverse.
+
+### alpha.33 — "Failover that actually fires"
+
+| Item | Origin | Size |
+|---|---|---|
+| Prime streamed chains so `streamText` / `streamStructured` fall back | `TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING` | done |
+| `AttemptTimeoutError extends ProviderUnavailableError` | alpha.28 item 1, ADW A + SalesCoach B | ~50 LoC |
+
+Correctness first. The streamed methods have never fallen back on any released version, which is shipped code contradicting its own documentation rather than a missing feature. Item 1 is the same concern arriving from the other direction and was the announced highest-leverage item of alpha.28. Building the streamed fix first settles that release's open design question 1 with evidence rather than argument.
+
+### alpha.34 — "The rest of alpha.28"
+
+Items 2 (`onComplete`, two consumers), 11 (`pricingPolicy`), 5 (opaque-400 detection), 9 (`recentRetries`), 13 (`tolerantKeylessAliases`), 15 (`ValidationError` contract test), and the unshipped `maxAttempts` half of item 7. Roughly 300 lines in total; most items are 20 to 80.
+
+This closes the release that four consumers contributed to. **ADW moves from 0 of 5 to 5 of 5.**
+
+### alpha.35 — "Persistent state"
+
+`@llm-ports/budget-redis` (alpha.30 item 2, ~250 LoC), per-scope budget ceilings (alpha.28 item 4, ADW B, ~150 LoC), and `createRedisSessionStore` (alpha.30 bonus item).
+
+These three are one dependency cluster, not three items that happen to be related. Alpha.28's own design question 2 deferred the scope-budget accumulator to "alpha.30 alongside `@llm-ports/budget-redis`", so building them separately means answering the same question twice and probably answering it differently.
+
+### alpha.36 — "Content cache"
+
+The content-result cache primitive (alpha.30 item 1, ADW E, ~300 LoC): a `ContentCacheBackend` with in-memory, file, and Redis implementations, wired across the four non-agent methods.
+
+Its own planning note called it "substantial enough to be its own release note", and that judgment still holds.
+
+### alpha.37 — "Capability factory ergonomics", re-scoped
+
+Alpha.29's eleven items, none of which shipped. **This needs re-scoping before it is committed**, not just re-queuing: it was written against the factories as they stood in July, and several items may be obsolete, changed, or already solved differently. Re-scoping is the first task of that release, not a prerequisite to planning it.
+
+### Withdraw explicitly rather than carry
+
+Each of these was announced publicly and none has a consumer still asking. Withdrawing them in a release note costs a paragraph; carrying them silently is what produced this section.
+
+- **Alpha.31's local runtime theme** in full: `adapter-transformers-node`, `adapter-tesseractjs`, and the `port.pipeline([...])` primitive. The v0.3 roadmap already places browser-native local inference much further out, so the announcement and the roadmap contradict each other today.
+- **`@llm-ports/express`** (alpha.28 item 14): a separate package for one convenience helper.
+- **`pricing: 'free'` sentinel** (alpha.28 item 12).
+
+### Where the strategic work sits
+
+The adoption research direction is not cancelled; it is sequenced behind the debt and now has a stated position rather than an implied one.
+
+`streamChat` and `@llm-ports/integration-livekit` already shipped in alpha.32, so that direction is delivered rather than waiting. Verifying `adapter-vercel` and the tool-schema-per-attempt guarantee are small enough to ride alongside any release above. The capability-based router (`TD-LLMP-20`) is the interesting case: it is simultaneously unshipped consumer debt and the strategic item the adoption research independently found the market asking for, which makes it the natural anchor once alpha.35 and alpha.36 land.
+
 ## Near-term alpha queue
 
 The work queue inside the current `0.1.0-alpha.*` series. This section, not the README badge, is the durable record of alpha-series intent. The README's "coming next" line is a pointer to the top of this list and gets rewritten every release; this list does not.

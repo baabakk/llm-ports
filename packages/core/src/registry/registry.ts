@@ -1793,13 +1793,21 @@ class RegistryPort implements LLMPort {
     let winningSel: ModelSelection;
     let attemptHandle: ManualAttemptHandle | undefined;
     try {
-      const walked = await this.walkStreamChain(
+      const walked = await this.walkStreamChain<PrimedStream<string>>(
         "streamText",
         normalizedOptions,
         opCtx,
-        (sel) => scopedPortForAdapter(sel.port!, opCtx).streamText(optionsWithCallback),
+        // Prime inside the walker's try. Adapters implement streaming as
+        // async generators, and calling one returns a generator object
+        // WITHOUT running any of its body, so the request that contacts the
+        // provider does not happen until the consumer iterates. Returning
+        // an unprimed stream therefore made the walker see a healthy open
+        // for a dead provider and never fall back. See
+        // TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING.
+        async (sel) =>
+          primeStream(scopedPortForAdapter(sel.port!, opCtx).streamText(optionsWithCallback)),
       );
-      raw = walked.stream;
+      raw = replayPrimed(walked.stream);
       winningSel = walked.sel;
       attemptHandle = walked.attemptHandle;
     } catch (err) {
@@ -1996,14 +2004,17 @@ class RegistryPort implements LLMPort {
     let winningSel: ModelSelection;
     let attemptHandle: ManualAttemptHandle | undefined;
     try {
-      const walked = await this.walkStreamChain<AsyncIterable<Partial<T>>>(
+      const walked = await this.walkStreamChain<PrimedStream<Partial<T>>>(
         "streamStructured",
         normalizedOptions,
         opCtx,
-        (sel) =>
-          scopedPortForAdapter(sel.port!, opCtx).streamStructured<T>(optionsWithCallback),
+        // Primed for the same reason as streamText above.
+        async (sel) =>
+          primeStream(
+            scopedPortForAdapter(sel.port!, opCtx).streamStructured<T>(optionsWithCallback),
+          ),
       );
-      raw = walked.stream;
+      raw = replayPrimed(walked.stream);
       winningSel = walked.sel;
       attemptHandle = walked.attemptHandle;
     } catch (err) {
