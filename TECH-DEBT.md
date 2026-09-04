@@ -8,6 +8,37 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-09-04T00:00 PDT
+
+## llm-ports
+
+### TD-LLM-PORTS-NO-DOCUMENT-BLOCK: the content model cannot carry a PDF, so a consumer bypasses the port entirely
+
+- **Severity:** High
+- **Status:** Open. Raised by the HomeSignal / real-estate-planner consumer, verified here against current head 2026-09-04.
+- **Files:** `packages/core/src/content/blocks.ts`, `packages/core/src/content/normalize.ts`, `packages/adapter-openai/src/content.ts`, `packages/adapter-anthropic/src/content.ts`, `packages/adapter-google/src/content.ts`
+- **Problem:** `ContentBlock` is `TextBlock | ImageBlock | AudioBlock | ToolUseBlock | ToolResultBlock`. `ImageSource.mediaType` admits four raster formats. There is no document or file block, and grepping core for `application/pdf` returns nothing. **A PDF cannot be expressed on the port in any form.**
+
+  Confirmed at head rather than at the reporter's installed version, which matters: the consumer runs `alpha.1` while the registry is at `alpha.32`, so the obvious response would be "upgrade". **Thirty-one releases did not close this**, and upgrading will not. The repository gained a Google adapter in that window, so multimodal work did happen; documents were simply never part of it.
+- **Impact, and it is the shape the portfolio rule exists to catch.** The consumer's document pipeline sends base64 PDFs through OpenAI's Responses API as `input_file` blocks. With no port equivalent, two call sites import the vendor SDK directly.
+
+  The downstream consequence is worse than an architectural blemish: their settings store says the provider is Cerebras while every analysis touching a document bills OpenAI. **A settings panel presents a provider choice that does not govern half the pipeline.** The user-visible lie is the real cost.
+
+  The standing rule across these projects is that a call site reaching for a vendor SDK signals a missing port capability rather than licence to bypass. This is that signal, arriving with a worked example.
+- **Design decision, and I think the precedent settles it.** The reporter left open whether to add a block or widen `ImageSource` to accept `application/pdf`, and deferred to the maintainer.
+
+  **Add a separate `DocumentBlock`.** Three reasons, in ascending order of weight. A PDF is not an image, so widening `ImageBlock` would make its own name false. Providers treat them as distinct input kinds (`input_file`, a `document` content block, and `inlineData` respectively), so the union would have to be re-split inside every adapter anyway. And decisively, **this codebase already answered the same question the same way**: `AudioBlock` exists as its own member rather than as a widened `ImageSource`. Doing otherwise here would make the content model inconsistent with itself.
+
+- **Resolution path.**
+  1. Add `DocumentBlock` to the union with a base64 source carrying `mediaType`, `data`, and an optional `filename`.
+  2. Map it in the three adapters that support it.
+  3. Adapters whose provider or selected model cannot accept documents raise `ContentBlockUnsupportedError`, which core already exports and which `adapter-openai` already uses for unsupported audio. That gives callers a modelled failure rather than a silent one, and follows an existing pattern rather than inventing one.
+  4. Cover it in the cross-adapter contract suite, so a new adapter cannot quietly omit it.
+- **Sequencing, stated rather than assumed.** This is **new scope, not owed scope.** It appears in none of the four announced themes now being repaid (see `TD-LLMPORTS-FOUR-DISPLACED-RELEASE-THEMES`).
+
+  The whole lesson of that entry is that new work displacing announced work is how four release themes were lost, and every one of those displacements looked like the higher-value choice at the time. This one looks like the higher-value choice too. **It queues after the owed work** unless the owner decides otherwise, and the honest argument for jumping it is that a consumer is shipping a user-visible falsehood today. That is a real argument, and it is the owner's call rather than mine.
+- **Cross-repo.** Consumer-side record lives in the real-estate-planner repository as the entry of the same name, alongside `TD-DOC-CALLS-BYPASS-LLM-PORT` which records the bypass it causes.
+
 # 2026-08-21T09:00 PDT
 
 ## llm-ports
