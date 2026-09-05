@@ -8,6 +8,76 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-09-05T01:24 PDT
+
+## llm-ports
+
+The four entries below came from reading a consumer's integration rather than from a bug report: the RLM gateway (`E:/Codes/rlm/gateway`), an OpenAI-compatible HTTP server that fronts 392 models from seven providers through one Registry. It is the most demanding adoption so far, and the first to exercise the configuration surface at scale. Each entry names the workaround the consumer shipped, because the workaround is the evidence.
+
+### TD-LLMPORTS-PRICING-REQUIRED-WITHOUT-COST-GATE: a model with no price is unroutable even when nobody asked for cost enforcement
+
+- **Severity:** Medium
+- **Status:** Open. Found 2026-09-05 reading the RLM gateway, verified at `alpha.32` head.
+- **Files:** `packages/core/src/registry/registry.ts` (three selection sites: the `no pricing entry` guards near lines 755, 814 and 906)
+- **Problem:** Provider selection refuses an alias whose model has no entry in the pricing table. The guard sits **after** the gating branch and is unconditional, so it applies identically whether the alias is gated on a dollar cap or configured `unlimited`. A consumer who has explicitly said they do not want cost enforcement still cannot route to a model until they supply a price for it.
+
+  Pricing is genuinely required to enforce a cost cap. It is not required to make a call. The two are conflated at one line.
+- **Impact:** The consumer must invent prices. RLM ships `DEFAULT_PRICING = { inputPer1M: 1, outputPer1M: 1 }` and applies it to every model with no published rate, in a commit whose subject is literally `fix(gateway): give every env-configured model a pricing entry`. Cerebras and Parasail publish no per-million rate, so those routes run on the fabricated number.
+
+  Today that is inert, because gating is `unlimited` and the OpenTelemetry sink does not emit cost (see `TD-LLMPORTS-OTEL-SINK-DROPS-COST`). The damage is latent and precisely inverted from the intent: the comment above the constant explains that the placeholder exists so a cost gate can be switched on later without a code change, and switching that gate on is exactly the moment every placeholder-priced model starts being budgeted against fiction. The workaround installed to keep the feature reachable is what makes the feature wrong when reached.
+- **Resolution path:** Make the pricing requirement conditional on the alias actually being cost-gated. An alias with `unlimited` gating, or with request-count gating only, should be selectable with no pricing entry, reporting `cost: undefined` on the result rather than refusing the provider.
+
+  Where a price is genuinely absent, `undefined` is the honest value and it propagates correctly, since `CostUsage` is already optional on several contract events. Fabricating a number is the one option that cannot be distinguished downstream from a real measurement. If a caller wants to be told, that is a warning at registry construction, not a hard refusal at selection time.
+
+### TD-LLMPORTS-NO-PROGRAMMATIC-REGISTRY-CONFIG: the Registry can only be configured through environment-variable strings, so model ids that env-var names cannot express are unreachable
+
+- **Severity:** Medium
+- **Status:** Open. Found 2026-09-05 reading the RLM gateway, verified at `alpha.32` head.
+- **Files:** `packages/core/src/registry/registry.ts` (constructor, which calls `parseRegistryConfig({ envPrefix, env })` and accepts no alternative), `packages/core/src/registry/config.ts` (alias derivation, line 68), `packages/core/src/registry/tasks.ts` (task normalization, line 97)
+- **Problem:** `RegistryOptions` exposes `env` and `envPrefix` and nothing else for provider and route configuration. The constructor parses that env map, and there is no way to hand it a config object instead. `RegistryConfig` and `parseRegistryConfig` are both exported from the package index, so the shape is public and the parser is public; the one thing a caller would want to do with them, pass the result in, is the thing the constructor does not accept.
+
+  The consequence is not merely stylistic. A provider alias is derived from the environment variable's own name, lowercased with underscores turned into hyphens. Real model identifiers routinely contain `/`, `.` and capital letters, as in `Qwen/Qwen3.7-Max`. No environment variable name can encode those characters, so no such model can be named directly.
+- **Impact:** A consumer configuring more than a handful of models has to build a translation layer. RLM maintains a generated 392-entry `catalog.json`, assigns each model an opaque env-safe route id (`m0001`, `m0002`, and onward), synthesizes roughly 784 environment variables at startup, and carries a `resolveCatalogRoute` lookup on the request path to map the client-facing `provider:model` id back onto the opaque route. Their own comment states the reason plainly: the derivation "cannot express" real model ids, and the alternative would be hundreds of hand-written env lines.
+
+  Everything downstream then reports the opaque id. The `GET /v1/models` route has to filter `/^m\d{4}$/` back out of the advertised list, because the internal route ids would otherwise leak to API clients as if they were model names.
+- **Resolution path:** Accept a pre-built config on `RegistryOptions`, for example `config?: RegistryConfig`, taking precedence over `env` when both are present. The parse path stays exactly as it is and remains the default; this adds the object path that the already-exported `RegistryConfig` type implies exists. Purely additive, no behavior change for existing consumers.
+
+  Environment configuration is the right default for the twelve-route case and should stay. It should not be the only door.
+
+### TD-LLMPORTS-CONFIG-VALIDATION-ALL-OR-NOTHING: one unregistered adapter throws away every other correctly configured provider
+
+- **Severity:** Medium
+- **Status:** Open. Found 2026-09-05 reading the RLM gateway, verified at `alpha.32` head.
+- **Files:** `packages/core/src/registry/registry.ts` (`validateConfig`, called unconditionally from the constructor)
+- **Problem:** `validateConfig` walks the configured providers and throws `ConfigError` on the first one whose adapter is not registered, then walks the task routes and throws on the first chain link referencing an unconfigured alias. Both throws happen inside the constructor, so the failure is total: the Registry does not come into existence.
+
+  A deployment configured for nine vendors and holding eight API keys therefore gets zero providers, not eight. The one absent key takes down the eight present ones.
+- **Impact:** Every multi-vendor consumer has to pre-filter the configuration by hand before handing it over. RLM's `buildSyntheticEnv` is roughly fifty lines doing exactly this: a first pass dropping provider aliases whose adapter has no key, a second pass stripping those aliases out of every task route chain and discarding routes left empty. Its docstring records the discovery as a finding verified across three separate versions, which is a fair measure of what it cost to learn.
+
+  The filtering is not incidental complexity a consumer chose. It is the shape the library's failure mode forces, and it will be rebuilt in every consumer whose configured provider set is larger than what one deployment always holds keys for.
+- **Resolution path:** Distinguish a configuration that is malformed from one that is merely incomplete. An alias whose adapter is absent is a known and ordinary state, not a programming error: drop it, drop it from the chains that reference it, and report what was dropped through the existing deprecation-warning handler. Throw only when the result would be an empty registry, which is the genuinely unusable outcome and the one worth failing loudly on.
+
+  A strict mode for consumers who want the current behavior is cheap to add and should be opt-in, because the common case is a deployment holding a subset of keys, not a typo.
+
+### TD-LLMPORTS-OTEL-SINK-DROPS-COST: the observability contract carries dollar cost and the OpenTelemetry sink never emits it
+
+- **Severity:** Low
+- **Status:** Open. Found 2026-09-05 reading the RLM gateway, verified at `alpha.32` head.
+- **Files:** `packages/telemetry-otel/src/sink.ts` (attribute mapping), `packages/observability-contract/src/lifecycle.ts` (`cost` on attempt-completed, `aggregate_cost` on operation-completed)
+- **Problem:** The lifecycle contract carries `cost: CostUsage` on the attempt-completed event and `aggregate_cost: CostUsage` on the operation-completed event. The sink maps input, output and total tokens, operation duration, cache read tokens, request and response model, response id, and the full set of agent step and tool attributes. It maps no cost field at all.
+
+  The data is present on the event the sink is already handling. It is dropped at the mapping step.
+- **Impact:** A consumer who wires the supported bridge gets tokens but not dollars, and has to reconstruct spend downstream by joining span rows against a pricing table the library already applied. That reconstruction is guaranteed to drift from what the library actually charged against its own budget gates, since the two use different inputs.
+
+  Cost is the single attribute most likely to be the reason someone turns this telemetry on, which is what makes the omission worth more than its size.
+- **Resolution path:** Emit `gen_ai.usage.cost.input_usd`, `gen_ai.usage.cost.output_usd` and `gen_ai.usage.cost.total_usd` on the span alongside the existing token attributes, plus `cacheSavingsUSD` where present, and the aggregate on the operation-level span.
+
+  These keys are outside the OpenTelemetry GenAI semantic conventions, which define no cost attribute, so they are a deliberate extension and should be documented as one. Gate them behind nothing: cost is metadata, not content, and the capture policy governs content.
+
+  Where cost is `undefined` because no pricing entry exists, omit the attribute rather than writing a zero. A zero is indistinguishable from a free call, which is the same silent-corruption shape already documented for streamed token counts.
+
+---
+
 # 2026-09-04T00:00 PDT
 
 ## llm-ports
@@ -80,7 +150,7 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 ### TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING: `streamText` and `streamStructured` cannot fall back, because an async generator throws too late for the chain walker to see it
 
 - **Severity:** High
-- **Status:** Open. Found 2026-08-19 while building `streamChat`, which hit it immediately and works around it locally.
+- **Status:** Resolved 2026-08-21 in commit 22709ef, the first half of alpha.33. Both call sites now prime: `registry.ts` pulls the first event through `primeStream` inside the walker's `try` for `streamText` and `streamStructured` and replays it through `replayPrimed`, matching what `streamChat` already did. Verified at head 2026-09-05. Found 2026-08-19 while building `streamChat`, which hit it immediately and worked around it locally.
 - **Files:** `packages/core/src/registry/registry.ts` (`walkStreamChain`, and the `streamText` / `streamStructured` call sites), `packages/adapter-*/src/adapter.ts` (every `async *streamText`)
 - **Problem:** `walkStreamChain` opens a provider's stream inside a `try` and treats a throw as the signal to walk to the next provider. That works only if opening the stream can throw.
 
