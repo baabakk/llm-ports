@@ -158,6 +158,7 @@ export {
   PromptRequiredError,
   ProviderMalformed400Error,
   ProviderUnavailableError,
+  AttemptTimeoutError,
   RateLimitError,
   ServiceUnavailableError,
   SessionBudgetExceededError,

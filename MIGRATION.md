@@ -6,6 +6,7 @@
 
 | Release | Date | Headline | Migration impact | Details |
 |---|---|---|---|---|
+| alpha.33 | 2026-09-06 | `DocumentBlock` (PDF and text documents through the port), streamed fallback fixed, `AttemptTimeoutError` | **TS-BREAKING**: `ContentBlock` gains a `document` member, so exhaustive switches need a new case. Plus three behaviour changes, all making failover fire where it previously did not. | [docs/migration/alpha-32-to-alpha-33.md](docs/migration/alpha-32-to-alpha-33.md) |
 | alpha.29 | 2026-08-11 | Runtime observability instrumentation, prompt fingerprint compute, `@llm-ports/eval` new package, SalesCoach task-type case-mismatch fix | None — additive only. Bump peer deps. Opting into the new observability surface is optional. | [docs/migration/alpha-28-to-alpha-29.md](docs/migration/alpha-28-to-alpha-29.md) |
 | alpha.28 | 2026-07-22 | Observability contract foundation (`@llm-ports/observability-contract`), scoped-port wrapper, 3 new typed error classes (`CreditExhaustionError`, `ProviderMalformed400Error`, `AdapterInternalError`), 2 new subprocess adapters (`adapter-codex`, `adapter-aider`) | None — additive only. Bump peer deps. | [docs/migration/alpha-27-to-alpha-28.md](docs/migration/alpha-27-to-alpha-28.md) |
 | alpha.20.1 | 2026-06-15 | Migration safeguards (this file + per-release pages + codemod + postinstall banner) | None — additive only | (no code change) |
@@ -76,4 +77,8 @@ If a release breaks you and the migration page doesn't cover it, [open an issue]
 
 ## Roadmap
 
-The remaining alpha is `alpha.21` (OTel-aligned observability hooks, 2026-06-20 target). After that, `beta.0` ships 2026-06-30 with the locked surface. Beta minors are additive only; we will not introduce TypeScript-level breaking changes during beta.
+**This section was stale for three months.** It named `alpha.21` as the last alpha and a beta date in June, while the project shipped through `alpha.33`. It is corrected here and the durable version now lives in the repository rather than in this paragraph.
+
+Beta is gated on a list, not a date: every change that moves an existing shape or behaviour ships first, then the surface freezes. That list, the release sequence that clears it, and which packages freeze are in [`plans/ROAD-TO-BETA.md`](https://github.com/baabakk/llm-ports/blob/main/plans/ROAD-TO-BETA.md). Beta minors will be additive only.
+
+Until then, pin exact versions rather than tracking the `@alpha` dist-tag.

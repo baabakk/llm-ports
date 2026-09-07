@@ -66,9 +66,15 @@ function basePort(): LLMPort {
 function deadOnIteration(): LLMPort {
   return {
     ...basePort(),
+    // Yield-free on purpose. These reproduce the defect this suite exists
+    // for: an `async *` body runs nothing until first iteration, so the
+    // throw lands after the walker would previously have returned. A
+    // generator that yielded first would not reproduce it.
+    // eslint-disable-next-line require-yield
     streamText: async function* () {
       throw new ProviderUnavailableError("dead", new Error("provider down"));
     },
+    // eslint-disable-next-line require-yield
     streamStructured: async function* () {
       throw new ProviderUnavailableError("dead", new Error("provider down"));
     },

@@ -60,6 +60,7 @@ import {
 } from "../validation.js";
 import {
   aggressiveShouldFallback,
+  AttemptTimeoutError,
   AuthenticationError,
   ContentBlockUnsupportedError,
   ConfigError,
@@ -1466,6 +1467,7 @@ class RegistryPort implements LLMPort {
                 scopedPortForAdapter(sel.port!, opCtx).generateText(
                   signal ? { ...normalizedOptions, signal } : normalizedOptions,
                 ),
+              sel.alias,
             ),
           (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
           normalizedOptions.forceProviderAlias,
@@ -1525,6 +1527,7 @@ class RegistryPort implements LLMPort {
                 scopedPortForAdapter(sel.port!, opCtx).generateStructured(
                   signal ? { ...normalizedOptions, signal } : normalizedOptions,
                 ),
+              sel.alias,
             ),
           (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
           normalizedOptions.forceProviderAlias,
@@ -2070,6 +2073,7 @@ class RegistryPort implements LLMPort {
                 scopedPortForAdapter(sel.port!, opCtx).runAgent(
                   signal ? { ...options, signal } : options,
                 ),
+              sel.alias,
             ),
           (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
           options.forceProviderAlias,
@@ -2352,14 +2356,24 @@ async function withPerAttemptTimeout<R>(
   timeoutMs: number | undefined,
   userSignal: AbortSignal | undefined,
   fn: (signal: AbortSignal | undefined) => Promise<R>,
+  alias: string,
 ): Promise<R> {
   if (timeoutMs === undefined && !userSignal) {
     return fn(undefined);
   }
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Which trigger fired. The timeout and the caller's signal abort the SAME
+  // controller, so by the time an error surfaces they are indistinguishable
+  // from the error alone. This flag is the only thing that can tell them
+  // apart, and getting it wrong turns a deliberate cancellation into a
+  // pointless walk down the entire remaining chain.
+  let timedOut = false;
   if (timeoutMs !== undefined) {
-    timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
   }
   let userListener: (() => void) | undefined;
   if (userSignal) {
@@ -2373,6 +2387,27 @@ async function withPerAttemptTimeout<R>(
   }
   try {
     return await fn(controller.signal);
+  } catch (err) {
+    // Reclassify only a deadline we imposed. The caller's own cancellation
+    // wins any race: if their signal aborted at all, this is a cancellation
+    // and must propagate untouched, because walking the chain after someone
+    // asked to stop is both wasted spend and a surprise.
+    if (timedOut && timeoutMs !== undefined && !userSignal?.aborted) {
+      // Deliberately NOT gated on the error looking like an abort. SDKs
+      // disagree about that shape (`AbortError`, the signal's `reason`, or
+      // a vendor class), and gating on a shape we cannot enumerate is how a
+      // feature ships looking complete and fires for only some providers.
+      // The timer having fired is the authoritative signal. An unrelated
+      // error arriving in the same moment is one that already took the full
+      // deadline to arrive, and it walks either way, so the cost of a
+      // mislabel is a name in a log rather than a behaviour change.
+      throw new AttemptTimeoutError(
+        alias,
+        timeoutMs,
+        err instanceof Error ? err : new Error(String(err)),
+      );
+    }
+    throw err;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     if (userListener && userSignal) userSignal.removeEventListener("abort", userListener);

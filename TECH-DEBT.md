@@ -12,6 +12,35 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ## llm-ports
 
+### TD-LLMPORTS-MISSING-MIGRATION-PAGES-31-32: three releases shipped without the migration page the checklist requires
+
+- **Severity:** Low
+- **Status:** Open. Noticed 2026-09-06 while adding the alpha.33 page and finding no neighbours.
+- **Files:** `docs/migration/` (jumps from `alpha-29-to-alpha-30.md` to `alpha-32-to-alpha-33.md`), `docs/.vitepress/config.ts`, `MIGRATION.md`
+- **Problem:** The release-completion checklist in `plans/alpha.29-runtime-instrumentation.md` requires a migration page for every release, "even for fully-additive releases". Alpha.31, alpha.31.1, alpha.31.2 and alpha.32 have none, and `MIGRATION.md`'s table skips from alpha.29 to alpha.33.
+
+  Alpha.32 is the one that matters: it shipped `streamChat` and a whole new package, `@llm-ports/integration-livekit`, and a reader upgrading across it has no page telling them what arrived.
+- **Impact:** Small in itself and diagnostic out of proportion to its size. The checklist exists because alpha.29 shipped with these same gaps and they were only found post-publish; the fix was to write the checklist down. Four releases later the checklist is being skipped, which says the same thing the release journal says about announced themes: **a rule that lives in a document and is not mechanically checked gets followed until someone is in a hurry.**
+- **Resolution path:** Backfill two pages, one covering alpha.31 through alpha.31.2 and one for alpha.32, each short, plus the matching `MIGRATION.md` rows and sidebar entries. Then add the page's existence to whatever check the release script runs, so the next omission fails rather than being noticed by accident a month later.
+
+### TD-LLMPORTS-CORE-IS-A-DEP-NOT-A-PEER-DEP: two copies of core silently disable the entire fallback taxonomy
+
+- **Severity:** High
+- **Status:** Open. Found 2026-09-06 while writing the alpha.33 adapter tests, which reproduced it by accident.
+- **Files:** `packages/adapter-{openai,google,anthropic,ollama,vercel}/package.json` (`dependencies`, not `peerDependencies`)
+- **Problem:** Every adapter declares `@llm-ports/core` as a regular dependency. Nothing forces a consumer's installed tree to contain exactly one copy, so ordinary version skew, upgrading `core` without upgrading an adapter, or the reverse, can produce two.
+
+  The entire error taxonomy is dispatched with `instanceof`. An adapter throws `ProviderUnavailableError` constructed from **its** copy of core; the Registry's fallback classifier tests `err instanceof ProviderUnavailableError` against **its** copy. With two copies those are different class objects and every such check returns false.
+- **Impact:** **Fallback silently stops working, and nothing reports it.** A consumer with a configured three-provider chain gets no failover, no error, and no log line, because the classifier concludes every error is abort-worthy. The observable symptom is a provider looking unreliable, which points the investigation at the provider rather than at the install tree. This is the same silent-failure shape as the streamed-fallback defect fixed in this release, and it is broader: it disables the whole taxonomy, not one method.
+
+  Severity is High on impact rather than on likelihood. A consumer installing a matched set is fine, and pnpm's resolution usually collapses the copies. The hazard is that when it does bite, nothing in the failure points at the cause.
+- **How it was found:** the alpha.33 adapter mapping tests asserted `toThrow(ContentBlockUnsupportedError)` and failed, while the thrown error's message was exactly correct. The test file imports core from `src` and the adapters resolve it to `dist`, which is the same two-copies condition reproduced locally. The tests now assert on `error.name` and carry a comment pointing here.
+- **Resolution path:** Move `@llm-ports/core` from `dependencies` to `peerDependencies` in all five adapters, with a version range rather than a pin, and add it to `devDependencies` so the workspace still builds. That makes the single-instance requirement explicit, and a package manager will warn on a mismatch instead of silently nesting a second copy.
+
+  Consider also making the taxonomy robust rather than only well-packaged: a `Symbol.for("llm-ports.error")` brand checked alongside `instanceof`, or a `code` field on each class, would survive duplicate copies entirely. That is the belt-and-braces answer and it is worth doing for the classifier specifically, since that is where a false negative is invisible.
+
+  This is a packaging change to published manifests, so it belongs **before the beta freeze**. Add it to the gate list in `plans/ROAD-TO-BETA.md`.
+
 ### TD-LLMPORTS-TWO-THINGS-CALLED-DEFAULT-FALLBACK: the exported `defaultShouldFallback` is not what the Registry does by default
 
 - **Severity:** Medium

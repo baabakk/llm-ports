@@ -309,6 +309,11 @@ describe("streamChat — fallback and failure", () => {
   it("walks the chain when the first provider fails to open its stream", async () => {
     const failing = adapterFor("alpha", {
       ...portWithout(),
+      // No `yield` is the point: this models a provider whose stream body
+      // throws before producing anything, which is the condition the chain
+      // walker has to survive. Restructuring to satisfy the rule would
+      // delete the scenario.
+      // eslint-disable-next-line require-yield
       streamChat: async function* () {
         throw new ProviderUnavailableError("a", new Error("down"));
       },

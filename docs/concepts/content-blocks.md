@@ -6,16 +6,21 @@ LLM messages aren't strings anymore. Modern models accept text, images, audio, t
 import type { ContentBlock, MessageContent, LLMMessage } from "@llm-ports/core";
 ```
 
-## The five block types
+## The six block types
 
 ```ts
 type ContentBlock =
   | TextBlock          // { type: "text", text: string }
   | ImageBlock         // { type: "image", source: { kind: "base64"|"url", ... } }
   | AudioBlock         // { type: "audio", source: { kind: "base64", mediaType, data } }
+  | DocumentBlock      // { type: "document", source: { kind: "base64"|"url", ... }, filename? }
   | ToolUseBlock       // { type: "tool_use", id, name, input }
   | ToolResultBlock;   // { type: "tool_result", toolUseId, content, isError? }
 ```
+
+`DocumentBlock` arrived in `0.1.0-alpha.33`. **Adding a member to this union is a
+TypeScript-strict break** for anyone switching exhaustively over it, which is why
+such additions land before the beta freeze rather than after.
 
 ## MessageContent: string OR blocks
 
@@ -74,16 +79,37 @@ const message3: LLMMessage = {
 
 Not all adapters support all block types. The adapter throws `ContentBlockUnsupportedError` if you send a block it can't handle.
 
-| Block | Anthropic | OpenAI | Ollama | Vercel |
-|-------|-----------|--------|--------|--------|
-| `text` | ✓ | ✓ | ✓ | ✓ |
-| `image` (base64) | ✓ | ✓ (data URI) | ✓ | partial (via SDK) |
-| `image` (URL) | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | partial |
-| `audio` | ✗ (Anthropic chat doesn't accept audio) | ✓ (wav, mp3 only; ogg ✗) | ✗ | ✗ |
-| `tool_use` (assistant) | ✓ | ✓ (as `tool_calls`) | ✓ | partial (single-turn in v0.1) |
-| `tool_result` (user→tool message) | ✓ | ✓ (separate `role: tool` message) | ✓ | partial |
+| Block | Anthropic | OpenAI | Google | Ollama | Vercel |
+|-------|-----------|--------|--------|--------|--------|
+| `text` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `image` (base64) | ✓ | ✓ (data URI) | ✓ | ✓ | partial (via SDK) |
+| `image` (URL) | ✓ | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | partial |
+| `audio` | ✗ | ✓ (wav, mp3 only; ogg ✗) | ✓ (base64) | ✗ | ✓ (base64) |
+| `document` (base64) | ✗ (not expressible in the supported SDK range) | ✓ | ✓ | ✗ | ✓ |
+| `document` (URL) | ✗ | ✗ (no URL form on OpenAI's file part) | ✓ (needs `mediaType`) | ✗ | ✓ (needs `mediaType`) |
+| `tool_use` (assistant) | ✓ | ✓ (as `tool_calls`) | ✓ | ✓ | partial (single-turn in v0.1) |
+| `tool_result` (user→tool message) | ✓ | ✓ (separate `role: tool` message) | ✓ | ✓ | partial |
 
 See [the adapter feature matrix →](/adapters/) for the full breakdown.
+
+### Uneven support is routing, not failure
+
+The gaps above matter less than they look, because a refusal is a routing signal
+rather than an error the caller has to handle.
+
+`ContentBlockUnsupportedError` is walk-worthy under the **default** fallback
+policy since alpha.33. A chain of `anthropic,openai` therefore answers a PDF on
+OpenAI with no configuration: Anthropic refuses, the Registry advances, OpenAI
+serves it. Put one supporting provider anywhere in the chain and the call works.
+
+This is deliberate and it is unlike the other classes the default policy walks
+on. Those are transient failures worth retrying elsewhere in hope. A content
+block an adapter cannot express is a **static capability mismatch**: that
+provider will never serve that call however long it is given, so walking is the
+only route to an answer, and declining to walk guarantees the failure it appears
+to be avoiding.
+
+Set `runtimeFallback: "none"` if you would rather have the hard error.
 
 ## Tool blocks: where the magic happens
 

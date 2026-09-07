@@ -57,7 +57,7 @@ Scored against source, not against changelogs. "Announced" means stated in a shi
 | alpha.31.1 | 2026-08-19 | Not announced in advance; cut in response to a consumer report | Injectable `AuthBackend`; OTel `Tracer` type compatibility | n/a |
 | alpha.31.2 | 2026-08-19 | The eval scope originally announced for alpha.31 | Postgres eval backend, evaluation-workflow tooling. ClickHouse withdrawn on verified grounds | n/a. Paid a displacement from alpha.31 |
 | alpha.32 | 2026-08-19 | Not announced in advance | `streamChat`, `@llm-ports/integration-livekit` | n/a |
-| alpha.33 | in progress | "Failover that actually fires" ([plan](./alpha.33-failover-that-fires.md)) | — | — |
+| alpha.33 | 2026-09-06 | "Failover that fires, and documents that route", 3 items ([plan](./alpha.33-failover-that-fires.md)) | All 3. Streamed fallback priming, `AttemptTimeoutError`, `DocumentBlock`. **3 of 3** | Nothing displaced. Repays alpha.28 item 1, the announced highest-leverage item of that release. Item 3 was owner-added mid-release to unblock a consumer, recorded in the plan changelog rather than applied silently |
 
 **Totals for the four announced themes: 32 items announced, 4 shipped, 2 partial, 26 not shipped.**
 

@@ -19,6 +19,7 @@
  *   ├── SessionBudgetExceededError                // CostSession budget exhausted
  *   ├── ServiceUnavailableError                   // 503 root (transient)
  *   │   ├── ProviderUnavailableError              // SDK error or unreachable; route to fallback
+ *   │   │   └── AttemptTimeoutError              // this attempt blew its deadline; route to fallback
  *   │   └── EmptyResponseError                    // model returned empty visible text
  *   ├── NoProvidersAvailableError                 // entire chain exhausted
  *   ├── ValidationError                           // structured-output Zod failure
@@ -276,6 +277,43 @@ export class ProviderUnavailableError extends ServiceUnavailableError {
     cause: Error,
   ) {
     super(alias, cause.message, cause);
+  }
+}
+
+/**
+ * Thrown when a single provider attempt exceeded its per-attempt deadline.
+ *
+ * **The subclassing is the entire point.** Every consumer whose fallback
+ * predicate already accepts `ProviderUnavailableError`, whether through the
+ * default preset, the aggressive preset, or a hand-written classifier, gets
+ * deadline-triggered failover with no code change. Consumers who need to
+ * tell a timeout apart from an outage can still test the subclass.
+ *
+ * `cause` carries whatever the provider SDK actually raised on abort, which
+ * differs per SDK: some throw a `DOMException` named `AbortError`, others
+ * reject with the signal's `reason`, others with their own error class.
+ * That variation is exactly why the classification is made from the timer
+ * that fired rather than from the shape of the error.
+ *
+ * A cancellation raised by the caller's own `AbortSignal` is **never**
+ * reported as this error. See `withPerAttemptTimeout`.
+ *
+ * Added in `0.1.0-alpha.33`. Originally announced as alpha.28's
+ * highest-leverage item.
+ */
+export class AttemptTimeoutError extends ProviderUnavailableError {
+  public override readonly name: string = "AttemptTimeoutError";
+  constructor(
+    alias: string,
+    /** The deadline this attempt exceeded, in milliseconds. */
+    public readonly timeoutMs: number,
+    cause?: Error,
+  ) {
+    super(alias, cause ?? new Error(`attempt exceeded its ${timeoutMs}ms deadline`));
+    // ProviderUnavailableError derives its message from the cause, and an
+    // abort's own message ("The operation was aborted.") says nothing about
+    // why. Restate it so a log line carries the deadline that was missed.
+    this.message = `Provider "${alias}" service unavailable: attempt exceeded its ${timeoutMs}ms deadline`;
   }
 }
 

@@ -1,6 +1,6 @@
 # alpha.33: "Failover that fires, and documents that route"
 
-**Status:** In progress. Item 1 shipped; items 2 and 3 outstanding.
+**Status:** Complete. All three items shipped and verified. Awaiting publish.
 **Scope changed 2026-09-06** by the owner, to add item 3 (`DocumentBlock`). Recorded in the changelog at the foot of this document rather than edited in silently.
 **Date opened:** 2026-08-21.
 **Journal row:** [`RELEASE-JOURNAL.md`](./RELEASE-JOURNAL.md). This release is not finished until that row is filled.
@@ -39,7 +39,7 @@ The suite also covers what a careless fix would break: the primed first chunk mu
 
 ---
 
-## Item 2: `AttemptTimeoutError`. **Outstanding.**
+## Item 2: `AttemptTimeoutError`. **Shipped.**
 
 **Origin.** Alpha.28 item 1, from ADW finding A and SalesCoach finding B. The migration guide that announced alpha.28 called it that release's "highest-leverage item". It was never built.
 
@@ -53,7 +53,7 @@ The subclassing is the whole trick: every consumer whose `shouldFallback` alread
 
 ---
 
-## Item 3: `DocumentBlock`. **Outstanding.**
+## Item 3: `DocumentBlock`. **Shipped.**
 
 **Origin.** `TD-LLM-PORTS-NO-DOCUMENT-BLOCK`, raised by the HomeSignal consumer 2026-09-04 and verified at head the same day. Added to this release by the owner 2026-09-06.
 
@@ -102,6 +102,32 @@ Every throw is `ContentBlockUnsupportedError`, which already exists at `packages
 
 ---
 
+## Verification
+
+Run 2026-09-06 against the finished branch, reported as the commands returned rather than as an impression.
+
+- `pnpm -r typecheck`: clean across all 15 packages.
+- `pnpm -r test`: **1684 passing, zero failures**, up from 1659 before this release. Core alone went 620 to 642.
+- New suites: `attempt-timeout.test.ts` (12 cases), `document-block.test.ts` (3), `document-adapters.test.ts` (10).
+
+**Two of the three items had a test fail before it passed, and both failures were the point.**
+
+`document-block.test.ts` failed on its first run and disproved a claim this plan had already published, that unsupported blocks routed with no code change. They did not; see the item 3 section. Had the test been written to confirm the belief rather than to check it, the release would have shipped a feature that fails closed on the default policy and a plan document asserting the opposite.
+
+`document-adapters.test.ts` failed on `instanceof` while the thrown errors were exactly right, which turned out to be a real hazard rather than a test artifact: `@llm-ports/core` is a regular dependency of every adapter, not a peer dependency, so a consumer holding two copies gets `false` from every `instanceof` in the fallback classifier and loses failover silently. Filed as `TD-LLMPORTS-CORE-IS-A-DEP-NOT-A-PEER-DEP`, severity High, and added to the beta gate.
+
+Both are the same lesson the streamed-fallback defect taught in item 1: **a suite that cannot fail on the bug is not evidence.**
+
+## Documentation shipped with the code
+
+Migration page `docs/migration/alpha-32-to-alpha-33.md`, `MIGRATION.md` row, README release banners, the `content-blocks` concept doc (six block types, a corrected five-adapter support matrix including Google, and a new section on why uneven support is routing rather than failure), and the VitePress sidebar entry.
+
+`MIGRATION.md`'s roadmap paragraph was also corrected: it had named alpha.21 as the last alpha and a beta date in June while the project shipped through alpha.33. It now points at `ROAD-TO-BETA.md` rather than restating a date that goes stale.
+
+While adding the migration page it became clear that alpha.31 through alpha.32 shipped without theirs, which the release checklist requires. Filed as `TD-LLMPORTS-MISSING-MIGRATION-PAGES-31-32` rather than backfilled here, since backfilling two pages inside this release is exactly the scope creep the sequence exists to prevent.
+
+---
+
 ## Out of scope, deliberately
 
 The other nine unshipped alpha.28 items. They are queued for alpha.34 and are features rather than corrections; mixing them here would make a small verifiable release into an unreviewable one, which is the failure mode this whole sequence exists to avoid.
@@ -113,4 +139,5 @@ Also out of scope within item 3: uploading a document to a provider's Files API 
 ## Changelog
 
 - **2026-08-21.** Opened with two items. Item 1 shipped the same day, commit 22709ef.
+- **2026-09-06.** Items 2 and 3 shipped; release complete pending publish. The gate list in `ROAD-TO-BETA.md` grew from nine to eleven during the work, both additions found by tests written for this release.
 - **2026-09-06.** Owner added item 3, `DocumentBlock`, to unblock a consumer that is bypassing the port with a vendor SDK today. Scope change is the owner's to make; recorded here rather than applied silently. The theme still holds: an unsupported document walks the chain by the same mechanism a timeout now does, so all three items are about the chain doing the right thing when one provider cannot serve a call.

@@ -2,7 +2,7 @@
 
 **Opened 2026-09-06.** The gate for entering beta, and the release sequence that clears it.
 
-**The gate is this document's list, not a date.** Every announced date in this project's history has been missed, and the four displaced themes were each individually defensible at the time. Beta ships when the list below is empty. Adding a calendar to it would repeat the exact failure the release journal exists to record.
+**The gate is this document's list, not a date.** Every announced date in this project's history has been missed, and the four displaced themes were each individually defensible at the time. Beta ships when the list below is empty. It grew from nine to eleven on 2026-09-06, both additions found by tests written for alpha.33, which is the list working as intended rather than scope creep. Adding a calendar to it would repeat the exact failure the release journal exists to record.
 
 ---
 
@@ -18,7 +18,7 @@ Concretely, after beta.1:
 - Additive work continues freely as minor bumps, which consumers can take safely because the contract behind them holds.
 - The `@alpha` dist-tag advice inverts: pinning exact versions stops being necessary, because a routine install can no longer jump a consumer across a breaking change.
 
-This definition is what makes beta reachable soon. Of the thirty-one outstanding items, **nine change something that already exists**. Everything else is additive and is *better* shipped after the freeze, since a minor bump under a stable contract is safe to take and today every alpha is a coin flip.
+This definition is what makes beta reachable soon. Of the outstanding items, **eleven change something that already exists**. Everything else is additive and is *better* shipped after the freeze, since a minor bump under a stable contract is safe to take and today every alpha is a coin flip.
 
 ## Which packages freeze
 
@@ -36,7 +36,7 @@ Staying alpha is not a demotion. It is a statement that those surfaces may still
 
 ---
 
-## The gate: nine items that must land before the freeze
+## The gate: eleven items that must land before the freeze
 
 Each changes a shape or a behaviour that exists today. None can land after beta without a major-version step.
 
@@ -51,6 +51,8 @@ Each changes a shape or a behaviour that exists today. None can land after beta 
 | 7 | `config?: RegistryConfig` on `RegistryOptions` | The constructor contract; belongs with items 3 to 6 | `TD-LLMPORTS-NO-PROGRAMMATIC-REGISTRY-CONFIG` (RLM) | alpha.34 |
 | 8 | `NonContiguousSystemError` demoted to warning-and-collapse | A hard throw stops being thrown, on two adapters | alpha.29 item 20 (SalesCoach H) | alpha.35 |
 | 9 | `BudgetScopeRef` total ceiling, plus the Redis backend that sets the interface shape | Fixes the `BudgetBackend` interface before consumers implement against it | alpha.28 item 4 (ADW B) and alpha.30 item 22 (BEPA 9) | alpha.36 |
+| 10 | `@llm-ports/core` moved to a peer dependency of every adapter | Published manifests change, and two copies of core silently disable the whole `instanceof` error taxonomy | `TD-LLMPORTS-CORE-IS-A-DEP-NOT-A-PEER-DEP` | alpha.34 |
+| 11 | Rename one of the two things called "default" fallback | Public-surface rename; the exported `defaultShouldFallback` is not what `runtimeFallback: undefined` selects | `TD-LLMPORTS-TWO-THINGS-CALLED-DEFAULT-FALLBACK` | alpha.34 |
 
 **Nothing else is gating.** Every remaining owed item is additive: the `onComplete` hook, `recentRetries`, opaque-400 detection, JSON truncation repair, per-call `maxAttempts`, cost attributes on OpenTelemetry spans, the response cache, and ten of alpha.29's eleven capability-factory options.
 
