@@ -1,6 +1,6 @@
 # alpha.33: "Failover that fires, and documents that route"
 
-**Status:** Complete. All three items shipped and verified. Awaiting publish.
+**Status:** **Published 2026-09-06 as `0.1.0-alpha.33`.** All three items shipped and verified. Journal row filled.
 **Scope changed 2026-09-06** by the owner, to add item 3 (`DocumentBlock`). Recorded in the changelog at the foot of this document rather than edited in silently.
 **Date opened:** 2026-08-21.
 **Journal row:** [`RELEASE-JOURNAL.md`](./RELEASE-JOURNAL.md). This release is not finished until that row is filled.
@@ -139,5 +139,5 @@ Also out of scope within item 3: uploading a document to a provider's Files API 
 ## Changelog
 
 - **2026-08-21.** Opened with two items. Item 1 shipped the same day, commit 22709ef.
-- **2026-09-06.** Items 2 and 3 shipped; release complete pending publish. The gate list in `ROAD-TO-BETA.md` grew from nine to eleven during the work, both additions found by tests written for this release.
+- **2026-09-06.** Published as `0.1.0-alpha.33`: 12 packages, `alpha` dist-tag moved, git tags pushed, zero publish failures. Items 2 and 3 shipped. The gate list in `ROAD-TO-BETA.md` grew from nine to eleven during the work, both additions found by tests written for this release.
 - **2026-09-06.** Owner added item 3, `DocumentBlock`, to unblock a consumer that is bypassing the port with a vendor SDK today. Scope change is the owner's to make; recorded here rather than applied silently. The theme still holds: an unsupported document walks the chain by the same mechanism a timeout now does, so all three items are about the chain doing the right thing when one provider cannot serve a call.
