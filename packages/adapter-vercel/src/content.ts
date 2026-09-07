@@ -89,6 +89,33 @@ function toVercelPart(block: ContentBlock): VercelPart[] {
         "audio (url; Vercel routes audio as file-data; pass base64 + mediaType instead)",
       );
     }
+    case "document": {
+      // Vercel's file part is generic over mimeType, which is the same shape
+      // audio already uses, so documents need no special handling beyond
+      // passing the media type through.
+      if (block.source.kind === "base64") {
+        return [
+          {
+            type: "file",
+            data: block.source.data,
+            mimeType: block.source.mediaType,
+          },
+        ];
+      }
+      if (block.source.mediaType === undefined) {
+        throw new ContentBlockUnsupportedError(
+          ADAPTER_NAME,
+          "document (url without mediaType; Vercel needs an explicit mimeType)",
+        );
+      }
+      return [
+        {
+          type: "file",
+          data: block.source.url,
+          mimeType: block.source.mediaType,
+        },
+      ];
+    }
     case "tool_use":
     case "tool_result":
       // These don't live as inline content parts in Vercel's model — they

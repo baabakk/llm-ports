@@ -76,6 +76,15 @@ function toAnthropicBlock(block: ContentBlock): AnthropicContentBlock {
       };
     case "audio":
       throw new ContentBlockUnsupportedError(ADAPTER_NAME, "audio");
+    case "document":
+      // Anthropic's API has a document block, but the pinned SDK version does
+      // not express it. Rejecting is correct until the SDK floor moves: the
+      // Registry treats this error as walk-worthy, so a chain routes to a
+      // provider that can take the document instead of failing the call.
+      throw new ContentBlockUnsupportedError(
+        ADAPTER_NAME,
+        "document (not expressible in the supported @anthropic-ai/sdk range)",
+      );
     case "tool_use":
       return { type: "tool_use", id: block.id, name: block.name, input: block.input };
     case "tool_result":

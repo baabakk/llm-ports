@@ -42,7 +42,15 @@ export interface OpenAIAudioPart {
   type: "input_audio";
   input_audio: { data: string; format: "wav" | "mp3" };
 }
-export type OpenAIContentPart = OpenAITextPart | OpenAIImagePart | OpenAIAudioPart;
+export interface OpenAIFilePart {
+  type: "file";
+  file: { file_data?: string; file_id?: string; filename?: string };
+}
+export type OpenAIContentPart =
+  | OpenAITextPart
+  | OpenAIImagePart
+  | OpenAIAudioPart
+  | OpenAIFilePart;
 
 export interface OpenAIToolCall {
   id: string;
@@ -117,12 +125,45 @@ function toOpenAIContentPart(block: ContentBlock): OpenAIContentPart {
       const format = mapAudioFormat(block.source.mediaType);
       return { type: "input_audio", input_audio: { data: block.source.data, format } };
     }
+    case "document": {
+      // OpenAI's file content part carries bytes or an uploaded file id. It
+      // has no URL variant, so a URL-sourced document cannot be expressed
+      // here; the Registry walks to a provider that can take it.
+      if (block.source.kind === "url") {
+        throw new ContentBlockUnsupportedError(
+          ADAPTER_NAME,
+          "document (url; OpenAI requires base64 or an uploaded file id)",
+        );
+      }
+      // OpenAI expects a data URI in file_data, and wants a filename to go
+      // with it. Synthesize one from the media type when the caller omitted
+      // it, rather than sending bytes with no name.
+      return {
+        type: "file",
+        file: {
+          file_data: `data:${block.source.mediaType};base64,${block.source.data}`,
+          filename: block.filename ?? defaultDocumentFilename(block.source.mediaType),
+        },
+      };
+    }
     case "tool_use":
     case "tool_result":
       throw new Error(
         `tool_use and tool_result blocks must be promoted to top-level messages; use toOpenAIMessages.`,
       );
   }
+}
+
+const DOCUMENT_EXTENSIONS: Record<string, string> = {
+  "application/pdf": "pdf",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/csv": "csv",
+};
+
+/** Filename for a document the caller did not name. OpenAI wants one. */
+function defaultDocumentFilename(mediaType: string): string {
+  return `document.${DOCUMENT_EXTENSIONS[mediaType] ?? "bin"}`;
 }
 
 function mapAudioFormat(mediaType: string): "wav" | "mp3" {

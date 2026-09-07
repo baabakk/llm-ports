@@ -61,6 +61,7 @@ import {
 import {
   aggressiveShouldFallback,
   AuthenticationError,
+  ContentBlockUnsupportedError,
   ConfigError,
   EmptyMessagesError,
   MessagesRequiredError,
@@ -2441,6 +2442,15 @@ function resolveRuntimeFallback(
     if (err instanceof AuthenticationError) {
       return ctx !== undefined && !ctx.hasEverAuthenticated;
     }
+    // Alpha.33: a content block the adapter cannot express walks, even under
+    // the narrow default preset. This class is categorically unlike the
+    // others here. It is not a transient failure or a provider-health
+    // signal to be retried in hope; it is a static capability mismatch, so
+    // the selected provider will never serve this call however long it is
+    // given. Walking is therefore not a gamble, it is the only route to an
+    // answer, and refusing to walk guarantees the failure it is avoiding.
+    // Consumers wanting a hard stop still have `runtimeFallback: "none"`.
+    if (err instanceof ContentBlockUnsupportedError) return true;
     return false;
   };
 }

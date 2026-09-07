@@ -96,10 +96,17 @@ export function toOllamaMessages(messages: LLMMessage[]): OllamaMessage[] {
     const userBlocks = blocks.filter((b) => b.type !== "tool_result");
     if (userBlocks.length > 0) {
       const images = collectImages(userBlocks);
-      // Audio explicitly rejected
+      // Audio and documents explicitly rejected. The rejection has to be
+      // explicit: this adapter builds its message from `textOnly`, so an
+      // unhandled block kind is silently dropped rather than refused, and a
+      // caller would get a confident answer about a document the model never
+      // saw. Throwing lets the Registry route to a provider that can read it.
       for (const block of userBlocks) {
         if (block.type === "audio") {
           throw new ContentBlockUnsupportedError(ADAPTER_NAME, "audio");
+        }
+        if (block.type === "document") {
+          throw new ContentBlockUnsupportedError(ADAPTER_NAME, "document");
         }
       }
       const userMessage: OllamaMessage = {

@@ -8,6 +8,31 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-09-06T17:10 PDT
+
+## llm-ports
+
+### TD-LLMPORTS-TWO-THINGS-CALLED-DEFAULT-FALLBACK: the exported `defaultShouldFallback` is not what the Registry does by default
+
+- **Severity:** Medium
+- **Status:** Open. Found 2026-09-06 while building alpha.33 item 3, by a test that failed on its first run.
+- **Files:** `packages/core/src/errors.ts` (`defaultShouldFallback`, lines 839 to 885), `packages/core/src/registry/registry.ts` (`resolveRuntimeFallback`, the unnamed preset at the end)
+- **Problem:** Two different classifiers are both called "default" and they behave differently.
+
+  `defaultShouldFallback` is exported from the package index. It is the broad alpha.28 walk-table: rate limits, service-unavailable, credit exhaustion, malformed 400s, context-window overflow, content-policy violations, oversized images, unsupported content blocks.
+
+  The Registry, when `runtimeFallback` is unset, does **not** use it. It builds a separate inline closure that walks on `ProviderUnavailableError` and a never-authenticated `AuthenticationError`, and nothing else. Reaching the exported table requires opting in with `{ shouldFallback: defaultShouldFallback }`, which reads like a no-op and is not.
+
+  A source comment in `resolveRuntimeFallback` states this correctly. Nothing in the exported symbol's own name, JSDoc, or the docs site does.
+- **Impact:** The name is an invitation to a wrong belief that costs a real design decision. A reader who greps for a class in `defaultShouldFallback`, finds it, and concludes the Registry walks on it by default is wrong, and nothing in that path corrects them. It happened during alpha.33: the plan document asserted that unsupported content blocks already routed with no code change, on exactly that reading, and the assertion was published before a test disproved it. The test failing is the only reason it did not ship.
+
+  The general shape is worse than the instance. Any consumer sizing their fallback coverage by reading the function named "default" will over-estimate what they have, and the failure is silent: they get fewer walks than they think, which looks like a provider being unreliable rather than like a policy being narrower than advertised.
+- **Resolution path:** Naming, not behaviour. The two policies are both legitimate and the narrow one is a defensible default. Options, cheapest first: rename the exported function to `canonicalShouldFallback` or `broadShouldFallback` with a deprecated alias for one cycle; or name the inline preset explicitly as `conservativeShouldFallback`, export it, and have `resolveRuntimeFallback` return it by name so both are visible side by side. Prefer the second: it makes the actual default a thing with a name that can be documented and tested, rather than an anonymous closure.
+
+  Either way, document the difference in `docs/concepts/` with the two walk-tables next to each other, and state which one `runtimeFallback: undefined` selects. A rename is a public-surface change, so it belongs before the beta freeze.
+
+---
+
 # 2026-09-05T01:24 PDT
 
 ## llm-ports

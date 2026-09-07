@@ -16,6 +16,7 @@ export type ContentBlock =
   | TextBlock
   | ImageBlock
   | AudioBlock
+  | DocumentBlock
   | ToolUseBlock
   | ToolResultBlock;
 
@@ -72,6 +73,64 @@ export type AudioSource =
   | {
       kind: "url";
       url: string;
+    };
+
+/**
+ * Document input (PDF and plain-text formats).
+ *
+ * A separate member rather than a widened `ImageSource`, following the
+ * precedent `AudioBlock` set: a PDF is not an image, providers treat
+ * documents as a distinct input kind, and a merged union would be
+ * re-split inside every adapter anyway.
+ *
+ * Adapter support is uneven and that is handled by routing rather than
+ * by failure. An adapter that cannot carry a document throws
+ * `ContentBlockUnsupportedError`, which `defaultShouldFallback` treats as
+ * walk-worthy, so a chain advances to a provider that can serve the call
+ * without any consumer configuration.
+ *
+ * Added in `0.1.0-alpha.33`.
+ */
+export interface DocumentBlock {
+  type: "document";
+  source: DocumentSource;
+  /**
+   * Filename hint. OpenAI surfaces it to the model alongside the bytes and
+   * benefits from a real name; other providers ignore it. When omitted,
+   * adapters that require a filename synthesize one from the media type.
+   */
+  filename?: string;
+}
+
+/**
+ * Document formats the content model can express.
+ *
+ * Deliberately a closed union rather than an open `string`: an adapter has
+ * to map each one to a provider-specific shape, so a media type nothing can
+ * carry is a runtime failure disguised as a type that compiles.
+ */
+export type DocumentMediaType =
+  | "application/pdf"
+  | "text/plain"
+  | "text/markdown"
+  | "text/csv";
+
+export type DocumentSource =
+  | {
+      kind: "base64";
+      mediaType: DocumentMediaType;
+      /** Base64 payload only, with no `data:` prefix. Adapters add their own. */
+      data: string;
+    }
+  | {
+      kind: "url";
+      url: string;
+      /**
+       * Optional for providers that sniff the type, required by those that
+       * do not. Adapters needing it and not given it throw rather than guess,
+       * because a wrong media type fails deep inside the provider.
+       */
+      mediaType?: DocumentMediaType;
     };
 
 /** Tool/function call request emitted by the model. */

@@ -101,6 +101,36 @@ function toGeminiParts(block: ContentBlock): GeminiPart[] {
       }
       throw new ContentBlockUnsupportedError(ADAPTER_NAME, "audio (url; Gemini accepts base64 or fileData with fileUri)");
     }
+    case "document": {
+      // Gemini takes documents through the same two shapes as images, so both
+      // source kinds map directly. Unlike the image branch there is no sane
+      // default media type to guess for a URL: a PDF and a CSV are not
+      // interchangeable, and a wrong mimeType fails deep inside the provider.
+      if (block.source.kind === "base64") {
+        return [
+          {
+            inlineData: {
+              mimeType: block.source.mediaType,
+              data: block.source.data,
+            },
+          },
+        ];
+      }
+      if (block.source.mediaType === undefined) {
+        throw new ContentBlockUnsupportedError(
+          ADAPTER_NAME,
+          "document (url without mediaType; Gemini needs an explicit mimeType for fileData)",
+        );
+      }
+      return [
+        {
+          fileData: {
+            mimeType: block.source.mediaType,
+            fileUri: block.source.url,
+          },
+        },
+      ];
+    }
     case "tool_use": {
       // Gemini's tool-call shape has args as a plain object; we pass the input
       // through if it's already an object, else wrap.
