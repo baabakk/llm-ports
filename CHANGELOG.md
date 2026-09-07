@@ -19,6 +19,52 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.33 (2026-09-06)
+
+**Failover that fires, and documents that route.** Three items, one theme: the chain doing the right thing when a provider cannot serve a call.
+
+**Title marker: `TS-BREAKING: ContentBlock`.** See [the migration page](docs/migration/alpha-32-to-alpha-33.md).
+
+### Fixed
+
+- **`streamText` and `streamStructured` can now fall back.** They never could, on any released version. `walkStreamChain` opens a provider's stream inside a `try` and treats a throw as the signal to advance, but an async generator runs none of its body until first iteration, so the walker saw a healthy open for a dead provider, recorded the attempt, marked the alias authenticated, and returned. The real failure surfaced during consumer iteration with no chain left to walk. Both methods now prime inside the walker and replay the first event.
+
+  Eight tests cover it, **four of which fail against the pre-fix code**, confirmed by stashing the fix rather than by reasoning about it. The existing streaming tests all passed either way, which is why this survived to alpha.32: they stub providers as arrays or as generators that yield before failing, and neither shape reproduces the defect.
+
+### New
+
+- **`AttemptTimeoutError`**, so a blown `perAttemptTimeoutMs` triggers failover instead of ending the call. Extends `ProviderUnavailableError`, which is the whole mechanism: every consumer whose fallback predicate already accepts the parent gets deadline-triggered failover with no code change. Carries `timeoutMs` and the SDK's original error as `cause`. Announced as alpha.28's highest-leverage item and unbuilt until now.
+
+  A cancellation raised by the caller's own `AbortSignal` is never reclassified, and does not walk the chain.
+
+- **`DocumentBlock`**, so a PDF can travel through the port. Carries `application/pdf`, `text/plain`, `text/markdown` or `text/csv`, from base64 or a URL, with an optional `filename`. A separate union member rather than a widened `ImageSource`, following the precedent `AudioBlock` set.
+
+  Support: OpenAI (base64), Google (base64 and URL), Vercel (base64 and URL). Anthropic and Ollama refuse, Anthropic because the supported SDK range cannot express a document, Ollama explicitly rather than dropping it silently through its text-only message builder.
+
+### Changed
+
+- **Unsupported content blocks now trigger failover under the default policy.** Previously a `ContentBlockUnsupportedError` surfaced unless the consumer had opted into a broader classifier. This class is categorically unlike the transient failures the default preset already walked on: it is a static capability mismatch, so that provider will never serve the call however long it is given, and walking is the only route to an answer. This is what lets uneven document support degrade into routing rather than failure.
+
+  Set `runtimeFallback: "none"` for the previous behaviour.
+
+### Migration notes
+
+`ContentBlock` gains a member, so an exhaustive `switch` over it now fails to compile until a `document` case or a `default` is added. Additive for anyone constructing content.
+
+If you relied on a per-attempt timeout ending the call, it now walks the chain.
+
+**Check for duplicate copies of `@llm-ports/core`** (`pnpm why @llm-ports/core`). Core is a regular dependency of every adapter, so version skew can produce two copies, and the error taxonomy is dispatched with `instanceof`. Two copies silently disable failover with no error and no log line. Tracked as `TD-LLMPORTS-CORE-IS-A-DEP-NOT-A-PEER-DEP`; the fix lands in alpha.34.
+
+### Known limitations
+
+- `adapter-anthropic` cannot carry documents until its SDK floor moves.
+- OpenAI's file content part has no URL form, so URL-sourced documents route elsewhere.
+- Alpha.31 and alpha.32 shipped without migration pages, which the release checklist requires. Filed as `TD-LLMPORTS-MISSING-MIGRATION-PAGES-31-32` rather than backfilled inside this release.
+
+### Verification
+
+`pnpm -r typecheck` clean across 15 packages. `pnpm -r test` 1684 passing, zero failures, up from 1659. `pnpm lint` 0 errors.
+
 ## v0.1.0-alpha.32 — 2026-08-19
 
 Streaming with tool calls, and the first inbound integration.

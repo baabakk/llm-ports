@@ -1,6 +1,6 @@
 {
   "name": "@llm-ports/integration-livekit",
-  "version": "0.1.0-alpha.32",
+  "version": "0.1.0-alpha.33",
   "description": "Route a LiveKit Agents voice agent through an @llm-ports LLMPort. LiveKit already abstracts providers; this adds what its LLM layer lacks: fallback chains, USD cost ceilings, per-provider budgets, and task routing. One constructor swap; the agent's tools, STT, TTS, and turn detection are untouched.",
   "license": "MIT",
   "author": "Babak Abbaschian",

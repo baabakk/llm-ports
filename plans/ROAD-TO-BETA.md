@@ -84,7 +84,11 @@ Closes ADW from **0 of 5 to 5 of 5**.
 
 ### beta.1: the freeze
 
-Surface frozen for the six packages named above. Requires, in addition to the nine items:
+Surface frozen for the six packages named above.
+
+**Blocker found 2026-09-06:** leaving pre-release mode is `changeset pre exit` then `changeset version`, and that operation currently yields **`1.0.0`**, not a 0.x beta, because a changeset from alpha.19 declares a `major` bump and pre mode has been accumulating it ever since. Every release since has quietly hand-edited versions instead. Resolve `TD-LLMPORTS-CHANGESET-VERSION-PRODUCES-1-0-0` and verify the exit on a scratch branch before cutting beta.
+
+Requires, in addition to the eleven items:
 
 1. **Every withdrawal made explicit**, in a release note, where the item was announced. Currently owed: `@llm-ports/express` (one asker, no second), the local-runtime items 31 and 32, and confirmation that Dramma's items 28, 29 and 30 are still wanted. Item 23, session state, is already recorded as permanently out of scope.
 2. **A migration page** covering the strict-mode breaks, chiefly the `ContentBlock` widening.

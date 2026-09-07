@@ -23,6 +23,25 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 - **Impact:** Small in itself and diagnostic out of proportion to its size. The checklist exists because alpha.29 shipped with these same gaps and they were only found post-publish; the fix was to write the checklist down. Four releases later the checklist is being skipped, which says the same thing the release journal says about announced themes: **a rule that lives in a document and is not mechanically checked gets followed until someone is in a hurry.**
 - **Resolution path:** Backfill two pages, one covering alpha.31 through alpha.31.2 and one for alpha.32, each short, plus the matching `MIGRATION.md` rows and sidebar entries. Then add the page's existence to whatever check the release script runs, so the next omission fails rather than being noticed by accident a month later.
 
+### TD-LLMPORTS-CHANGESET-VERSION-PRODUCES-1-0-0: the documented release command jumps the project to a 1.0 line
+
+- **Severity:** High
+- **Status:** Open. Found 2026-09-06 while cutting alpha.33, by running the documented command and reading its output before publishing.
+- **Files:** `.changeset/alpha-19-cache-control-shape-and-cache-savings-rename.md` (declares `major`), `.changeset/pre.json`, and the release instructions in the project's internal contributor notes
+- **Problem:** The documented release flow is `pnpm changeset version` followed by `pnpm release:alpha`. Running `pnpm changeset version` today produces **`1.0.0-alpha.33`**, not `0.1.0-alpha.33`.
+
+  The cause is that changesets in pre-release mode computes the version from the base plus the **highest bump type across every changeset accumulated since entering pre mode**, and pre mode does not delete them on version. One changeset from alpha.19 declares `major`, so the aggregate is major and `0.1.0` becomes `1.0.0`.
+- **Impact, in two parts.**
+
+  The immediate one is that **every release since alpha.19 has hand-edited `package.json` versions instead**, which is visible in the release commits: `9897eb7` for alpha.32 changed 23 `package.json` files and touched neither `.changeset/pre.json` nor any changeset. That divergence between the documented flow and the practised one was never written down anywhere, so the documented command is a live trap. A publish is irreversible on npm and a version number can never be reused, so following the instructions once ships a 1.0 line that cannot be withdrawn.
+
+  The larger one is that **this blocks the beta cutover.** Leaving pre mode is `changeset pre exit` followed by `changeset version`, and that is exactly the operation which applies the accumulated major. The plan in `plans/ROAD-TO-BETA.md` assumes the freeze produces a beta on the 0.x line; as things stand it would produce 1.0.0.
+- **Resolution path:** Decide what the alpha.19 changeset should have said and rewrite it. Its actual content, the `cacheDiscountUSD` to `cacheSavingsUSD` rename, was breaking within a 0.x line, where semver expresses breaking changes as a minor bump. `major` was the wrong classification for a pre-1.0 package and it has been sitting unconsumed ever since. Change it to `minor`, then confirm `pnpm changeset version` yields `0.1.0-alpha.34` on a scratch branch before trusting it.
+
+  Then either adopt the command as the real flow or document the manual bump as the real flow, and delete whichever instruction is false. Two release procedures, one written and one practised, is how this went unnoticed for fourteen releases.
+
+  Do this **before the beta cutover**, and verify the exit path on a scratch branch rather than on `main`.
+
 ### TD-LLMPORTS-CORE-IS-A-DEP-NOT-A-PEER-DEP: two copies of core silently disable the entire fallback taxonomy
 
 - **Severity:** High
