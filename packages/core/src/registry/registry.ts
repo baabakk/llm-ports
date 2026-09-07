@@ -312,6 +312,31 @@ export interface RegistryOptions {
    * Added in 0.1.0-alpha.26.
    */
   deprecationWarningHandler?: (message: string) => void;
+  /**
+   * Refuse to construct when any configured provider references an
+   * unregistered adapter, or any task chain references an unconfigured
+   * alias. Default `false` since `0.1.0-alpha.34`.
+   *
+   * The default changed in alpha.34. Before it, a single unregistered
+   * adapter threw from the constructor and the whole Registry failed to
+   * exist, so nine configured vendors and eight API keys produced zero
+   * usable providers rather than eight. Two consumers independently wrote
+   * roughly fifty lines each to pre-filter their configuration around it,
+   * thirteen months apart, which is the clearest possible signal that
+   * refusing everything was the wrong default rather than merely a strict
+   * one.
+   *
+   * With the default, an alias whose adapter is absent is dropped, removed
+   * from every chain that referenced it, and reported once through the
+   * warning handler. A chain left with no links is dropped too. The
+   * constructor still throws when the result would be an empty registry,
+   * which is the genuinely unusable outcome.
+   *
+   * Set `true` to restore the pre-alpha.34 behaviour, which is the right
+   * choice when your deployment should always hold every key and a missing
+   * one means a misconfiguration you want to hear about loudly.
+   */
+  strictConfig?: boolean;
 }
 
 // ─── Credential-probe result (alpha.30+) ─────────────────────────────
@@ -459,26 +484,83 @@ export class Registry {
         this.taskDefaults[normalizeTaskType(key)] = config;
       }
     }
-    this.validateConfig();
+    this.reconcileConfig(opts.strictConfig ?? false);
   }
 
-  /** Sanity-check that every provider's adapter exists and every task chain references real providers. */
-  private validateConfig(): void {
+  /**
+   * Reconcile the parsed config against the registered adapters.
+   *
+   * Distinguishes a configuration that is **malformed** from one that is
+   * merely **incomplete**. An alias whose adapter was never registered is an
+   * ordinary and expected state, usually one absent API key in a deployment
+   * that names several vendors. Dropping it costs that one provider;
+   * throwing costs every other correctly configured provider too.
+   *
+   * Under `strictConfig` the pre-alpha.34 behaviour is restored and the
+   * first problem throws.
+   */
+  private reconcileConfig(strict: boolean): void {
+    const available = Object.keys(this.adapters).join(", ") || "(none)";
+    const dropped = new Set<string>();
+
     for (const [alias, entry] of Object.entries(this.config.providers)) {
-      if (!this.adapters[entry.adapter]) {
+      if (this.adapters[entry.adapter]) continue;
+      if (strict) {
         throw new ConfigError(
-          `Provider "${alias}" references adapter "${entry.adapter}" which is not registered. Available adapters: ${Object.keys(this.adapters).join(", ") || "(none)"}`,
+          `Provider "${alias}" references adapter "${entry.adapter}" which is not registered. Available adapters: ${available}`,
         );
       }
+      dropped.add(alias);
+      delete this.config.providers[alias];
+      warnOnce(
+        this.warningState,
+        `config:provider:${alias}`,
+        `[llm-ports] Provider "${alias}" skipped: adapter "${entry.adapter}" is not registered. Available adapters: ${available}. Set strictConfig: true to fail instead.`,
+      );
     }
+
     for (const [task, chain] of Object.entries(this.config.taskRoutes)) {
+      const kept: string[] = [];
       for (const alias of chain) {
-        if (!this.config.providers[alias]) {
+        if (this.config.providers[alias]) {
+          kept.push(alias);
+          continue;
+        }
+        if (strict) {
           throw new ConfigError(
             `Task "${task}" references provider "${alias}" which is not configured.`,
           );
         }
+        // Only worth reporting when the alias was never configured at all.
+        // A link this method just dropped has already been warned about
+        // under its own key, and repeating it per chain is noise.
+        if (!dropped.has(alias)) {
+          warnOnce(
+            this.warningState,
+            `config:task:${task}:${alias}`,
+            `[llm-ports] Task "${task}" references provider "${alias}" which is not configured; that link was removed from the chain.`,
+          );
+        }
       }
+      if (kept.length > 0) {
+        this.config.taskRoutes[task] = kept;
+        continue;
+      }
+      delete this.config.taskRoutes[task];
+      warnOnce(
+        this.warningState,
+        `config:task-empty:${task}`,
+        `[llm-ports] Task "${task}" has no usable providers left and was removed. Calls to it will report no configured route.`,
+      );
+    }
+
+    // An empty registry cannot serve anything, so it is the one outcome
+    // still worth refusing to construct. Failing here rather than at the
+    // first call keeps the error next to the misconfiguration.
+    if (Object.keys(this.config.providers).length === 0) {
+      throw new ConfigError(
+        `No usable providers: every configured alias references an adapter that is not registered. Available adapters: ${available}`,
+      );
     }
   }
 

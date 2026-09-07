@@ -90,7 +90,27 @@ describe("Registry", () => {
     ).toThrow(ConfigError);
   });
 
-  it("throws ConfigError if a task chain references an unconfigured provider", () => {
+  it("drops an unconfigured link from a task chain instead of refusing to construct", () => {
+    // Behaviour changed in alpha.34. This assertion previously expected a
+    // ConfigError. Refusing to construct meant one bad link took down every
+    // other correctly configured provider, which two consumers each worked
+    // around with ~50 lines of pre-filtering. The strict form is kept below.
+    const warnings: string[] = [];
+    const registry = createRegistryFromEnv({
+      env: {
+        LLM_PROVIDER_FAST: "anthropic|claude-haiku-4-5|unlimited",
+        LLM_TASK_ROUTE_TRIAGE: "fast,unknown",
+      },
+      adapters: { anthropic: fakeAnthropic },
+      deprecationWarningHandler: (m) => warnings.push(m),
+    });
+
+    // The good link survives and the task is still routable.
+    expect(registry.listTasks().map((t) => t.task)).toContain("triage");
+    expect(warnings.join(" | ")).toContain("unknown");
+  });
+
+  it("still throws under strictConfig, which is the old behaviour by request", () => {
     expect(() =>
       createRegistryFromEnv({
         env: {
@@ -98,6 +118,41 @@ describe("Registry", () => {
           LLM_TASK_ROUTE_TRIAGE: "fast,unknown",
         },
         adapters: { anthropic: fakeAnthropic },
+        strictConfig: true,
+      }),
+    ).toThrow(ConfigError);
+  });
+
+  it("keeps the other eight providers when one adapter is unregistered", () => {
+    // The case the change exists for: a deployment that names several
+    // vendors and holds a subset of the keys.
+    const warnings: string[] = [];
+    const registry = createRegistryFromEnv({
+      env: {
+        LLM_PROVIDER_FAST: "anthropic|claude-haiku-4-5|unlimited",
+        LLM_PROVIDER_MISSING: "openai|gpt-4o|unlimited",
+        LLM_TASK_ROUTE_TRIAGE: "missing,fast",
+      },
+      adapters: { anthropic: fakeAnthropic },
+      deprecationWarningHandler: (m) => warnings.push(m),
+    });
+
+    expect(registry.listTasks().map((t) => t.task)).toContain("triage");
+    expect(warnings.join(" | ")).toContain("openai");
+  });
+
+  it("still refuses to construct when nothing is usable", () => {
+    // Dropping everything leaves a Registry that cannot serve a single call,
+    // so the error belongs next to the misconfiguration rather than at the
+    // first request.
+    expect(() =>
+      createRegistryFromEnv({
+        env: {
+          LLM_PROVIDER_MISSING: "openai|gpt-4o|unlimited",
+          LLM_TASK_ROUTE_TRIAGE: "missing",
+        },
+        adapters: { anthropic: fakeAnthropic },
+        deprecationWarningHandler: () => {},
       }),
     ).toThrow(ConfigError);
   });
