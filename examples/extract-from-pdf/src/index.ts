@@ -17,15 +17,28 @@
  *   - Cost gating + cost tracking: every call records cost.totalUSD
  *     for downstream observability.
  *
- * What this example does NOT do (in scope for v0.2):
+ * What this example does NOT do:
  *
- *   - PDF parsing. Real document pipelines OCR the PDF first (via
- *     Tesseract, Adobe Extract API, AWS Textract, etc.) and feed the
- *     text into this extraction step. This example uses three
- *     pre-OCR'd text snippets to focus on the LLM extraction layer.
- *   - Vision-based extraction. The OpenAI / Anthropic adapters can
- *     accept image ContentBlocks; passing a rendered PDF page as PNG
- *     skips OCR entirely. See the README for the upgrade path.
+ *   - Send the PDF itself. This example uses three pre-OCR'd text
+ *     snippets to keep the focus on the extraction layer.
+ *
+ *     Note that as of `0.1.0-alpha.33` you no longer have to OCR
+ *     first. `DocumentBlock` carries a PDF through the port directly:
+ *
+ *       content: [
+ *         { type: "text", text: "Extract the fields." },
+ *         { type: "document",
+ *           source: { kind: "base64", mediaType: "application/pdf", data },
+ *           filename: "invoice.pdf" },
+ *       ]
+ *
+ *     Adapter support is uneven and that is handled by routing: an
+ *     adapter that cannot carry a document throws
+ *     ContentBlockUnsupportedError, which walks the chain, so a chain
+ *     containing OpenAI or Google answers a PDF without any extra
+ *     configuration. Rendering a page to PNG and sending an ImageBlock
+ *     remains an option where a provider reads images better than
+ *     documents.
  *
  * Run:
  *   ANTHROPIC_API_KEY=sk-ant-... pnpm --filter @llm-ports/example-extract-from-pdf start
