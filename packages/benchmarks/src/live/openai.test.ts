@@ -74,7 +74,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 200,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       expect(result.text.toLowerCase()).toMatch(/pong/);
     });
 
@@ -89,7 +89,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 200,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       const wordCount = result.text.trim().split(/\s+/).length;
       expect(wordCount).toBeGreaterThanOrEqual(2);
       expect(wordCount).toBeLessThanOrEqual(8);
@@ -103,7 +103,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 600,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       expect(result.usage.outputTokens).toBeGreaterThan(200);
     });
   });
@@ -123,7 +123,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         schemaName: "user-intent",
       });
       assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       expect(["question", "request", "complaint", "feedback"]).toContain(
         result.data.intent,
       );
@@ -147,7 +147,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 500,
       });
       assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
     });
   });
 
@@ -208,7 +208,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 200,
       });
       assertAgentShape(result, ALIAS);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       expect(calls).toBeGreaterThanOrEqual(1);
     });
 
@@ -230,7 +230,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 100,
       });
       expect(result.stepsTaken).toBeLessThanOrEqual(2);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
     });
   });
 
@@ -248,7 +248,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 300,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       expect(result.text.length).toBeGreaterThan(0);
     });
 
@@ -273,7 +273,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
         maxOutputTokens: 300,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
       expect(result.text.length).toBeGreaterThan(0);
     });
   });
@@ -288,8 +288,8 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       expect(result.vector).toHaveLength(1536); // text-embedding-3-small default
       expect(result.dimensions).toBe(1536);
       expect(result.usage.inputTokens).toBeGreaterThan(0);
-      expect(result.cost.totalUSD).toBeGreaterThan(0);
-      recordCost("openai", result.cost.totalUSD);
+      expect(result.cost?.totalUSD ?? 0).toBeGreaterThan(0);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
     });
 
     it("batch — returns matching vectors", async () => {
@@ -301,7 +301,7 @@ describe.skipIf(skipOpenAI)("live: openai", () => {
       expect(result.vectors).toHaveLength(3);
       expect(result.dimensions).toBe(1536);
       expect(result.usage.inputTokens).toBeGreaterThan(0);
-      recordCost("openai", result.cost.totalUSD);
+      recordCost("openai", result.cost?.totalUSD ?? 0);
     });
   });
 });
@@ -331,7 +331,7 @@ describe.skipIf(skipGroq)("live: groq (via openai adapter + baseURL)", () => {
       maxOutputTokens: 20,
     });
     assertGenerateTextShape(result, "live-groq");
-    recordCost("groq", result.cost.totalUSD);
+    recordCost("groq", result.cost?.totalUSD ?? 0);
     expect(result.text.toLowerCase()).toMatch(/pong/);
   });
 });
@@ -363,7 +363,7 @@ describe.skipIf(skipCerebras)("live: cerebras (via openai adapter + baseURL)", (
       maxOutputTokens: 20,
     });
     assertGenerateTextShape(result, "live-cerebras");
-    recordCost("cerebras", result.cost.totalUSD);
+    recordCost("cerebras", result.cost?.totalUSD ?? 0);
     expect(result.text.toLowerCase()).toMatch(/pong/);
   });
 });

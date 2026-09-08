@@ -300,7 +300,12 @@ export interface AttemptWorkResult<T> {
   /** Token usage the provider reported. Defaults to zeros if omitted. */
   usage?: TokenUsage;
 
-  /** USD cost computed from usage. Defaults to zeros if omitted. */
+  /**
+   * USD cost computed from usage. **Omitted means unknown**, and is emitted
+   * as absent rather than as zeros since alpha.34. Aggregation still works:
+   * unknown attempts contribute nothing to the running total instead of
+   * contributing a false zero.
+   */
   cost?: CostUsage;
 
   /**
@@ -688,14 +693,19 @@ export async function withAttempt<T>(
     const result = await work();
     const latencyMs = Date.now() - attemptStartedAtMs;
     const usage = result.usage ?? ZERO_USAGE;
-    const cost = result.cost ?? ZERO_COST;
+    // No zero substitution. Unknown cost stays unknown all the way to the
+    // sink; only the aggregate coalesces, and it coalesces by skipping.
+    const cost = result.cost;
     const finalModelId = result.modelId ?? params.modelId;
 
     opCtx.attemptsMade = attemptNumber;
     opCtx.providersTried.push(params.providerAlias);
     opCtx.finalProviderAlias = params.providerAlias;
     opCtx.aggregateUsage = mergeUsage(opCtx.aggregateUsage, usage);
-    opCtx.aggregateCost = mergeCost(opCtx.aggregateCost, cost);
+    // Unknown attempts contribute nothing rather than a false zero. The
+    // aggregate therefore means "total of what could be priced", which is
+    // the only honest reading when part of a chain has no rate.
+    if (cost) opCtx.aggregateCost = mergeCost(opCtx.aggregateCost, cost);
 
     const diagnosticFields = computeDiagnosticFields(
       result.responseCharCount,

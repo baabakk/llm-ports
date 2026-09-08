@@ -563,7 +563,21 @@ export type ChatStreamEvent =
   | {
       type: "finish";
       usage: TokenUsage;
-      cost: CostUsage;
+      /**
+   * USD cost, or `undefined` when the model has no pricing entry and the
+   * alias is not cost-gated (alpha.34+).
+   *
+   * `undefined` rather than zeros, deliberately. A zero is indistinguishable
+   * from a genuine zero-cost call, so a `SUM` over mixed rows silently
+   * under-counts and looks plausible while doing it. This library has been
+   * bitten by exactly that shape before, and a consumer fabricating a
+   * placeholder rate hit it independently.
+   *
+   * Absent only where it could never have been present: an unpriced model
+   * under a cost gate is still refused, so no configuration that works today
+   * starts returning `undefined`.
+   */
+  cost?: CostUsage;
       modelId: string;
       providerAlias: string;
     }
@@ -662,7 +676,21 @@ export interface RunAgentOptions {
 export interface GenerateTextResult {
   text: string;
   usage: TokenUsage;
-  cost: CostUsage;
+  /**
+   * USD cost, or `undefined` when the model has no pricing entry and the
+   * alias is not cost-gated (alpha.34+).
+   *
+   * `undefined` rather than zeros, deliberately. A zero is indistinguishable
+   * from a genuine zero-cost call, so a `SUM` over mixed rows silently
+   * under-counts and looks plausible while doing it. This library has been
+   * bitten by exactly that shape before, and a consumer fabricating a
+   * placeholder rate hit it independently.
+   *
+   * Absent only where it could never have been present: an unpriced model
+   * under a cost gate is still refused, so no configuration that works today
+   * starts returning `undefined`.
+   */
+  cost?: CostUsage;
   modelId: string;
   providerAlias: string;
   latencyMs: number;
@@ -671,7 +699,21 @@ export interface GenerateTextResult {
 export interface GenerateStructuredResult<T> {
   data: T;
   usage: TokenUsage;
-  cost: CostUsage;
+  /**
+   * USD cost, or `undefined` when the model has no pricing entry and the
+   * alias is not cost-gated (alpha.34+).
+   *
+   * `undefined` rather than zeros, deliberately. A zero is indistinguishable
+   * from a genuine zero-cost call, so a `SUM` over mixed rows silently
+   * under-counts and looks plausible while doing it. This library has been
+   * bitten by exactly that shape before, and a consumer fabricating a
+   * placeholder rate hit it independently.
+   *
+   * Absent only where it could never have been present: an unpriced model
+   * under a cost gate is still refused, so no configuration that works today
+   * starts returning `undefined`.
+   */
+  cost?: CostUsage;
   modelId: string;
   providerAlias: string;
   latencyMs: number;
@@ -688,7 +730,21 @@ export interface AgentResult {
     output: unknown;
   }>;
   usage: TokenUsage;
-  cost: CostUsage;
+  /**
+   * USD cost, or `undefined` when the model has no pricing entry and the
+   * alias is not cost-gated (alpha.34+).
+   *
+   * `undefined` rather than zeros, deliberately. A zero is indistinguishable
+   * from a genuine zero-cost call, so a `SUM` over mixed rows silently
+   * under-counts and looks plausible while doing it. This library has been
+   * bitten by exactly that shape before, and a consumer fabricating a
+   * placeholder rate hit it independently.
+   *
+   * Absent only where it could never have been present: an unpriced model
+   * under a cost gate is still refused, so no configuration that works today
+   * starts returning `undefined`.
+   */
+  cost?: CostUsage;
   modelId: string;
   providerAlias: string;
   latencyMs: number;

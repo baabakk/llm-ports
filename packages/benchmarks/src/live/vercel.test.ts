@@ -61,7 +61,7 @@ describe.skipIf(skipAnthropic)("live: vercel adapter (with Anthropic model)", ()
       maxOutputTokens: 20,
     });
     assertGenerateTextShape(result, ALIAS);
-    recordCost("vercel-anthropic", result.cost.totalUSD);
+    recordCost("vercel-anthropic", result.cost?.totalUSD ?? 0);
     expect(result.text.toLowerCase()).toMatch(/pong/);
   });
 
@@ -78,7 +78,7 @@ describe.skipIf(skipAnthropic)("live: vercel adapter (with Anthropic model)", ()
       schemaName: "user-intent",
     });
     assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
-    recordCost("vercel-anthropic", result.cost.totalUSD);
+    recordCost("vercel-anthropic", result.cost?.totalUSD ?? 0);
   });
 
   it("streamText.echo", async () => {
@@ -133,7 +133,7 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
       maxOutputTokens: REASONING_HEADROOM_TOKENS,
     });
     assertGenerateTextShape(result, ALIAS);
-    recordCost("vercel-openai", result.cost.totalUSD);
+    recordCost("vercel-openai", result.cost?.totalUSD ?? 0);
     expect(result.text.toLowerCase()).toMatch(/pong/);
   });
 
@@ -151,7 +151,7 @@ describe.skipIf(skipOpenAI)("live: vercel adapter (with OpenAI model)", () => {
       maxOutputTokens: REASONING_HEADROOM_TOKENS,
     });
     assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
-    recordCost("vercel-openai", result.cost.totalUSD);
+    recordCost("vercel-openai", result.cost?.totalUSD ?? 0);
   });
 
   it("streamText.echo", async () => {

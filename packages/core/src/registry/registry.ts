@@ -1236,7 +1236,8 @@ export function createRegistryFromEnv(opts: RegistryOptions): Registry {
  */
 interface AttemptMetrics {
   usage: TokenUsage;
-  cost: CostUsage;
+  /** Absent when the model has no pricing and the alias is not cost-gated. */
+  cost?: CostUsage;
   modelId: string;
   providerResponseId?: string;
   /**
@@ -1493,19 +1494,23 @@ class RegistryPort implements LLMPort {
    * cost surfacing is the alpha.22 follow-up. (alpha.21+)
    */
   private emitResultEvents(
-    result: { cost: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
+    result: { cost?: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
     operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "runAgent" | "embed" | "rerank",
     taskType: string | undefined,
     budgetScope?: BudgetScopeRef,
     refs?: Record<string, ArtifactRef>,
   ): void {
     const hooks = this.registry.observability;
-    if (hooks.onCost) {
+    // No cost hook when there is no cost. Firing it with zeros would make a
+    // spend dashboard show a real-looking row for a call whose price is
+    // simply unknown.
+    if (hooks.onCost && result.cost) {
+      const rc = result.cost;
       emitCost(hooks.onCost, {
-        promptUsd: result.cost.inputUSD,
-        completionUsd: result.cost.outputUSD,
-        totalUsd: result.cost.totalUSD,
-        ...(result.cost.cacheSavingsUSD !== undefined ? { cacheReadUsd: result.cost.cacheSavingsUSD } : {}),
+        promptUsd: rc.inputUSD,
+        completionUsd: rc.outputUSD,
+        totalUsd: rc.totalUSD,
+        ...(rc.cacheSavingsUSD !== undefined ? { cacheReadUsd: rc.cacheSavingsUSD } : {}),
         modelId: result.modelId,
         providerAlias: result.providerAlias,
         operation,
@@ -1578,7 +1583,7 @@ class RegistryPort implements LLMPort {
                 ),
               sel.alias,
             ),
-          (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
+          (_sel, result, key) => recordKnownCost(this.registry, key, result.cost),
           normalizedOptions.forceProviderAlias,
           normalizedOptions.budgetScope,
           "generateText",
@@ -1638,7 +1643,7 @@ class RegistryPort implements LLMPort {
                 ),
               sel.alias,
             ),
-          (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
+          (_sel, result, key) => recordKnownCost(this.registry, key, result.cost),
           normalizedOptions.forceProviderAlias,
           normalizedOptions.budgetScope,
           "generateStructured",
@@ -2184,7 +2189,7 @@ class RegistryPort implements LLMPort {
                 ),
               sel.alias,
             ),
-          (_sel, result, key) => this.registry.cost.recordCost(key, result.cost.totalUSD),
+          (_sel, result, key) => recordKnownCost(this.registry, key, result.cost),
           options.forceProviderAlias,
           options.budgetScope,
           "runAgent",
@@ -2228,7 +2233,7 @@ function toContractMetricsBase(r: {
     cacheWriteTokens?: number;
     reasoningTokens?: number;
   };
-  cost: {
+  cost?: {
     inputUSD: number;
     outputUSD: number;
     totalUSD: number;
@@ -2244,18 +2249,25 @@ function toContractMetricsBase(r: {
   };
   if (r.usage.cacheReadTokens !== undefined) usage.cachedInputTokens = r.usage.cacheReadTokens;
   if (r.usage.reasoningTokens !== undefined) usage.reasoningTokens = r.usage.reasoningTokens;
-  const cost: CostUsage = {
-    inputUSD: r.cost.inputUSD,
-    outputUSD: r.cost.outputUSD,
-    totalUSD: r.cost.totalUSD,
-  };
-  if (r.cost.cacheSavingsUSD !== undefined) cost.savingsUSD = r.cost.cacheSavingsUSD;
+  // Omit cost entirely rather than emitting zeros. A zero reads as a free
+  // call to anything aggregating these rows, and the resulting under-count
+  // looks plausible, which is the failure this whole change exists to avoid.
+  let cost: CostUsage | undefined;
+  if (r.cost) {
+    cost = {
+      inputUSD: r.cost.inputUSD,
+      outputUSD: r.cost.outputUSD,
+      totalUSD: r.cost.totalUSD,
+    };
+    if (r.cost.cacheSavingsUSD !== undefined) cost.savingsUSD = r.cost.cacheSavingsUSD;
+  }
   const cacheStats = providerCacheStatsFromUsage(
     r.usage.cacheReadTokens,
     r.usage.cacheWriteTokens,
     r.usage.inputTokens,
   );
-  const metrics: AttemptMetrics = { usage, cost, modelId: r.modelId };
+  const metrics: AttemptMetrics = { usage, modelId: r.modelId };
+  if (cost) metrics.cost = cost;
   if (cacheStats) metrics.cacheStats = cacheStats;
   return metrics;
 }
@@ -2468,6 +2480,23 @@ function toFingerprintable(options: object): FingerprintableRequest {
  * which is fine on a config this Registry parsed for itself and rude on one
  * the caller still holds a reference to. Copying keeps that boundary.
  */
+/**
+ * Record spend only when spend is known.
+ *
+ * A call against an unpriced model under an unlimited gate has no cost to
+ * record. Recording zero would be worse than recording nothing: the counter
+ * would look like it was tracking, and a later cost gate on the same alias
+ * would gate against a total that quietly omitted every unpriced call.
+ */
+async function recordKnownCost(
+  registry: Registry,
+  key: string,
+  cost: CostUsage | undefined,
+): Promise<void> {
+  if (!cost) return;
+  await registry.cost.recordCost(key, cost.totalUSD);
+}
+
 function cloneRegistryConfig(config: RegistryConfig): RegistryConfig {
   const providers: RegistryConfig["providers"] = {};
   for (const [alias, entry] of Object.entries(config.providers)) {

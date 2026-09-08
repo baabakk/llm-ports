@@ -133,7 +133,12 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         expect(result.text).toBe("hello world");
         expect(result.usage.totalTokens).toBe(17);
         // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
-        expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
+        // These fixtures give the adapter a real pricing table, so cost is
+        // knowable and must actually be reported. Asserting it is defined
+        // is stronger than coalescing, which would pass for an adapter that
+        // silently stopped computing cost at all.
+        expect(result.cost).toBeDefined();
+        expect(result.cost?.totalUSD).toBeGreaterThanOrEqual(0);
         expect(result.modelId).toBe(ctx.expectedModelId);
         expect(result.providerAlias).toBe(ctx.expectedAlias);
         expect(result.latencyMs).toBeGreaterThanOrEqual(0);
@@ -172,7 +177,12 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         expect(result.data).toEqual({ intent: "request", urgency: "high" });
         expect(result.usage.totalTokens).toBe(70);
         // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
-        expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
+        // These fixtures give the adapter a real pricing table, so cost is
+        // knowable and must actually be reported. Asserting it is defined
+        // is stronger than coalescing, which would pass for an adapter that
+        // silently stopped computing cost at all.
+        expect(result.cost).toBeDefined();
+        expect(result.cost?.totalUSD).toBeGreaterThanOrEqual(0);
         // Regression pin for TD-LLMPORTS-VALIDATION-ATTEMPTS (resolved alpha.11):
         // first-try success MUST report exactly 1 attempt (not 0, not 2+).
         expect(result.validationAttempts).toBe(1);
@@ -524,7 +534,12 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         );
         expect(result.usage.totalTokens).toBe(250);
         // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
-        expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
+        // These fixtures give the adapter a real pricing table, so cost is
+        // knowable and must actually be reported. Asserting it is defined
+        // is stronger than coalescing, which would pass for an adapter that
+        // silently stopped computing cost at all.
+        expect(result.cost).toBeDefined();
+        expect(result.cost?.totalUSD).toBeGreaterThanOrEqual(0);
       });
     });
   });

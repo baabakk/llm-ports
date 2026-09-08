@@ -88,7 +88,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
-      recordCost("ollama", result.cost.totalUSD); // typically 0
+      recordCost("ollama", result.cost?.totalUSD ?? 0); // typically 0
       expect(result.text.toLowerCase()).toMatch(/pong/);
     });
 
@@ -100,7 +100,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
         maxOutputTokens: 30,
       });
       assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
-      recordCost("ollama", result.cost.totalUSD);
+      recordCost("ollama", result.cost?.totalUSD ?? 0);
     });
 
     it.skipIf(skipNoDaemon())("long — produces several paragraphs", async () => {
@@ -111,7 +111,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
         maxOutputTokens: 600,
       });
       assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
-      recordCost("ollama", result.cost.totalUSD);
+      recordCost("ollama", result.cost?.totalUSD ?? 0);
     });
   });
 
@@ -130,7 +130,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
         schemaName: "user-intent",
       });
       assertGenerateStructuredShape(result, ALIAS, { allowZeroCost: true, maxAttempts: 2 });
-      recordCost("ollama", result.cost.totalUSD);
+      recordCost("ollama", result.cost?.totalUSD ?? 0);
       expect(["question", "request", "complaint", "feedback"]).toContain(
         result.data.intent,
       );
@@ -173,7 +173,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
         maxOutputTokens: 200,
       });
       assertAgentShape(result, ALIAS, { allowZeroCost: true });
-      recordCost("ollama", result.cost.totalUSD);
+      recordCost("ollama", result.cost?.totalUSD ?? 0);
       // Tool use is model-dependent; smaller Ollama models may not call the
       // tool at all. Hard assertion: clean termination. Tool-invocation count
       // would be brittle with small models, so we don't assert on it.
@@ -196,7 +196,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
           maxOutputTokens: 30,
         });
         assertGenerateTextShape(result, ALIAS, { allowZeroCost: true });
-        recordCost("ollama", result.cost.totalUSD);
+        recordCost("ollama", result.cost?.totalUSD ?? 0);
       } catch (err) {
         // If the user doesn't have llava installed, soft-skip
         if (err instanceof Error && /not found|pull/i.test(err.message)) {
@@ -221,7 +221,7 @@ describe.skipIf(skipOllama)("live: ollama", () => {
         });
         expect(result.vector.length).toBeGreaterThan(0);
         expect(result.dimensions).toBe(result.vector.length);
-        expect(result.cost.totalUSD).toBe(0); // local = free
+        expect(result.cost?.totalUSD ?? 0).toBe(0); // local = free
       } catch (err) {
         if (err instanceof Error && /not found|pull/i.test(err.message)) {
           // eslint-disable-next-line no-console

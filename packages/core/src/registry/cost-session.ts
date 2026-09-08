@@ -185,11 +185,15 @@ export class CostSession {
       }
     };
     const recordResult = (
-      cost: { totalUSD: number },
+      // Absent when the model has no pricing and the alias is not
+      // cost-gated. The request still counts against request-grain limits;
+      // only the spend is unknown, and adding zero for it would make the
+      // session's total look complete when it is not.
+      cost: { totalUSD: number } | undefined,
       usage?: { totalTokens?: number },
       toolCalls?: number,
     ): void => {
-      session.spentUSD += cost.totalUSD;
+      if (cost) session.spentUSD += cost.totalUSD;
       session.requests += 1;
       if (usage?.totalTokens !== undefined) session.tokens += usage.totalTokens;
       if (toolCalls !== undefined) session.toolCalls += toolCalls;

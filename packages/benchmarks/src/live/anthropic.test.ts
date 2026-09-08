@@ -56,7 +56,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       expect(result.text.toLowerCase()).toMatch(/pong/);
     });
 
@@ -68,7 +68,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 30,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       const wordCount = result.text.trim().split(/\s+/).length;
       // Loose: model usually obeys, but may add punctuation; allow 2-5 words.
       expect(wordCount).toBeGreaterThanOrEqual(2);
@@ -83,7 +83,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 600,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       expect(result.usage.outputTokens).toBeGreaterThan(200);
     });
   });
@@ -103,7 +103,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         schemaName: "user-intent",
       });
       assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       expect(["question", "request", "complaint", "feedback"]).toContain(
         result.data.intent,
       );
@@ -123,7 +123,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         schemaName: "priority-test",
       });
       assertGenerateStructuredShape(result, ALIAS, { maxAttempts: 2 });
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       // Note: validationAttempts may be 1 or 2 depending on model's first attempt
     });
   });
@@ -190,7 +190,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 200,
       });
       assertAgentShape(result, ALIAS);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       expect(calls).toBeGreaterThanOrEqual(1);
       expect(result.terminationReason).toBe("completed");
     });
@@ -215,7 +215,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
       // Model may return "completed" because some Claudes get bored — that's OK.
       // The hard rule: stepsTaken <= maxSteps
       expect(result.stepsTaken).toBeLessThanOrEqual(2);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
     });
   });
 
@@ -231,7 +231,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 30,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       // 1x1 transparent PNG; just verify the multimodal path doesn't error.
       expect(result.text.length).toBeGreaterThan(0);
     });
@@ -247,7 +247,7 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 50,
       });
       assertGenerateTextShape(result, ALIAS);
-      recordCost("anthropic", result.cost.totalUSD);
+      recordCost("anthropic", result.cost?.totalUSD ?? 0);
       expect(result.text.length).toBeGreaterThan(0);
     });
   });
@@ -265,14 +265,14 @@ describe.skipIf(skipAnthropic)("live: anthropic", () => {
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(r1, ALIAS);
-      recordCost("anthropic", r1.cost.totalUSD);
+      recordCost("anthropic", r1.cost?.totalUSD ?? 0);
       const r2 = await llm.generateText({
         taskType: "test-text",
         messages: [usr(longPrompt)],
         maxOutputTokens: 20,
       });
       assertGenerateTextShape(r2, ALIAS);
-      recordCost("anthropic", r2.cost.totalUSD);
+      recordCost("anthropic", r2.cost?.totalUSD ?? 0);
       // Cache may or may not hit depending on Anthropic's policy; just verify
       // the framework doesn't crash on cache-related fields.
       // (If Anthropic doesn't cache automatically without cache_control, this

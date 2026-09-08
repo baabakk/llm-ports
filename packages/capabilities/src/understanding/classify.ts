@@ -139,12 +139,22 @@ export function createClassifier<TSchema extends z.ZodTypeAny>(
           outputTokens: result.usage.outputTokens,
           totalTokens: result.usage.totalTokens,
         },
-        cost: {
-          inputUSD: result.cost.inputUSD,
-          outputUSD: result.cost.outputUSD,
-          totalUSD: result.cost.totalUSD,
-          ...(result.cost.cacheSavingsUSD !== undefined ? { cacheSavingsUSD: result.cost.cacheSavingsUSD } : {}),
-        },
+        // Spread so the key is absent when cost is unknown, rather than
+        // present with zeros. An `undefined` value would also serialize
+        // away in JSON but would still read as "has a cost field" to a
+        // TypeScript consumer, so omit the key itself.
+        ...(result.cost
+          ? {
+              cost: {
+                inputUSD: result.cost.inputUSD,
+                outputUSD: result.cost.outputUSD,
+                totalUSD: result.cost.totalUSD,
+                ...(result.cost.cacheSavingsUSD !== undefined
+                  ? { cacheSavingsUSD: result.cost.cacheSavingsUSD }
+                  : {}),
+              },
+            }
+          : {}),
         latencyMs: result.latencyMs,
         output: result.data,
         validationAttempts: result.validationAttempts,

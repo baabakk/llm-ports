@@ -36,7 +36,13 @@ export interface CapabilityEvent<TOutput> {
    * telemetry on this call (so the consumer can attribute savings per-capability).
    * (alpha.19.1+)
    */
-  cost: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number };
+  /**
+   * USD cost, absent when unknown (alpha.34+): the model has no pricing
+   * entry and the alias is not cost-gated, or the adapter does not report
+   * cost. Absent rather than zeroed, so a total over many capability calls
+   * cannot silently under-count.
+   */
+  cost?: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number };
   latencyMs: number;
   /** The validated output the capability returned. */
   output: TOutput;

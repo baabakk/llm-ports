@@ -185,8 +185,20 @@ export interface AttemptCompletedData {
   /** Token usage the provider reported for this attempt. */
   usage: TokenUsage;
 
-  /** USD cost computed from usage + pricing table. */
-  cost: CostUsage;
+  /**
+   * USD cost computed from usage and the pricing table.
+   *
+   * **Absent when cost is not known** (alpha.34+): the model has no pricing
+   * entry and the alias is not cost-gated, or the adapter does not report
+   * cost at all, as the subprocess adapters do not.
+   *
+   * Previously these cases emitted zeros. A zero is indistinguishable from a
+   * genuinely free call, so a `SUM` over mixed rows under-counted silently
+   * and looked plausible doing it. Omission cannot be mistaken for a
+   * measurement; consumers aggregating spend should skip rows without it
+   * rather than coalescing to zero.
+   */
+  cost?: CostUsage;
 
   /** Adapter-observed wall-clock latency, milliseconds. */
   latency_ms: number;

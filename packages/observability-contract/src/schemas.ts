@@ -325,7 +325,7 @@ export const streamChunkDataSchema = z.object({
 
 export const attemptCompletedDataSchema = z.object({
   usage: tokenUsageSchema,
-  cost: costUsageSchema,
+  cost: costUsageSchema.optional(),
   latency_ms: z.number().nonnegative(),
   cache_stats: cacheStatsSchema.optional(),
   provider_response_id: z.string().optional(),

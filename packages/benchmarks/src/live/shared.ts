@@ -45,9 +45,9 @@ export function assertGenerateTextShape(
     result.usage.inputTokens + result.usage.outputTokens,
   );
   if (opts.allowZeroCost) {
-    expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
+    expect(result.cost?.totalUSD ?? 0).toBeGreaterThanOrEqual(0);
   } else {
-    expect(result.cost.totalUSD).toBeGreaterThan(0);
+    expect(result.cost?.totalUSD ?? 0).toBeGreaterThan(0);
   }
   expect(result.modelId).toBeTypeOf("string");
   expect(result.providerAlias).toBe(expectedAlias);
@@ -62,9 +62,9 @@ export function assertGenerateStructuredShape<T>(
   expect(result.data).toBeDefined();
   expect(result.usage.totalTokens).toBeGreaterThan(0);
   if (opts.allowZeroCost) {
-    expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
+    expect(result.cost?.totalUSD ?? 0).toBeGreaterThanOrEqual(0);
   } else {
-    expect(result.cost.totalUSD).toBeGreaterThan(0);
+    expect(result.cost?.totalUSD ?? 0).toBeGreaterThan(0);
   }
   expect(result.providerAlias).toBe(expectedAlias);
   expect(result.validationAttempts).toBeGreaterThanOrEqual(opts.minAttempts ?? 1);
@@ -81,9 +81,9 @@ export function assertAgentShape(
   expect(result.text).toBeTypeOf("string");
   expect(result.usage.totalTokens).toBeGreaterThan(0);
   if (opts.allowZeroCost) {
-    expect(result.cost.totalUSD).toBeGreaterThanOrEqual(0);
+    expect(result.cost?.totalUSD ?? 0).toBeGreaterThanOrEqual(0);
   } else {
-    expect(result.cost.totalUSD).toBeGreaterThan(0);
+    expect(result.cost?.totalUSD ?? 0).toBeGreaterThan(0);
   }
   expect(result.providerAlias).toBe(expectedAlias);
   expect(result.stepsTaken).toBeGreaterThanOrEqual(1);
