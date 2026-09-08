@@ -874,6 +874,46 @@ export function aggressiveShouldFallback(err: unknown, ctx?: ShouldFallbackConte
  * `defaultShouldFallback` when your adapter stack emits the typed classes
  * consistently.
  */
+/**
+ * The policy the Registry actually applies when `runtimeFallback` is unset.
+ *
+ * **Read this next to {@link defaultShouldFallback}, because the naming has
+ * misled people.** That function is the broad, canonical walk-table and it
+ * is opt-in via `{ shouldFallback: defaultShouldFallback }`. This narrower
+ * policy is what an unconfigured Registry uses. Two things were called
+ * "default", only one of them was the default, and the difference is
+ * invisible at a call site.
+ *
+ * Getting it wrong is expensive in a specific way: a consumer sizing their
+ * fallback coverage by reading the function named "default" over-estimates
+ * what they have, and the shortfall is silent. Fewer walks than expected
+ * looks like an unreliable provider, not like a narrower policy.
+ *
+ * Walks on:
+ *   - `ProviderUnavailableError` (and subclasses, including
+ *     `AttemptTimeoutError`), unconditionally.
+ *   - `AuthenticationError`, only when the alias has never authenticated,
+ *     so a dead key is skipped while a credential that worked and then
+ *     stopped aborts loudly instead of quietly degrading.
+ *   - `ContentBlockUnsupportedError`, since a static capability mismatch
+ *     means that provider will never serve the call.
+ *
+ * Named and exported in `0.1.0-alpha.34`. Previously an anonymous closure
+ * inside `resolveRuntimeFallback`, which is why it could not be documented,
+ * referenced, or tested on its own.
+ */
+export function conservativeShouldFallback(
+  err: unknown,
+  ctx?: ShouldFallbackContext,
+): boolean {
+  if (err instanceof ProviderUnavailableError) return true;
+  if (err instanceof AuthenticationError) {
+    return ctx !== undefined && !ctx.hasEverAuthenticated;
+  }
+  if (err instanceof ContentBlockUnsupportedError) return true;
+  return false;
+}
+
 export function defaultShouldFallback(err: unknown, ctx?: ShouldFallbackContext): boolean {
   // Fast pass-through for non-LLMPortError inputs: only walk on 5xx-shaped
   // raw errors (defensive; adapters SHOULD have wrapped these already).

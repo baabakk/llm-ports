@@ -159,6 +159,7 @@ export {
   ProviderMalformed400Error,
   ProviderUnavailableError,
   AttemptTimeoutError,
+  conservativeShouldFallback,
   RateLimitError,
   ServiceUnavailableError,
   SessionBudgetExceededError,

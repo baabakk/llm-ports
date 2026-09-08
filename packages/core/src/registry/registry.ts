@@ -62,12 +62,11 @@ import {
   aggressiveShouldFallback,
   AttemptTimeoutError,
   AuthenticationError,
-  ContentBlockUnsupportedError,
+  conservativeShouldFallback,
   ConfigError,
   EmptyMessagesError,
   MessagesRequiredError,
   NoProvidersAvailableError,
-  ProviderUnavailableError,
   type ShouldFallbackContext,
 } from "../errors.js";
 import { createWarningState, warnOnce, type WarningState } from "../utils/deprecation.js";
@@ -134,6 +133,32 @@ export interface AdapterRegistration {
 
 export interface RegistryOptions {
   envPrefix?: string;
+  /**
+   * Provider and route configuration as an object, bypassing environment
+   * variables entirely. Takes precedence over `env` when both are given.
+   *
+   * Added in `0.1.0-alpha.34`. Purely additive: the environment path is
+   * unchanged and remains the default, and it is the right shape for the
+   * dozen-route case.
+   *
+   * It stopped being sufficient at scale for a reason worth stating,
+   * because it is not obvious from the outside. A provider alias is
+   * derived from the environment variable's own **name**, lowercased with
+   * underscores turned into hyphens. Real model identifiers routinely
+   * contain `/`, `.` and capitals, as in `Qwen/Qwen3.7-Max`, and no
+   * environment variable name can encode those characters. A consumer
+   * fronting several hundred models therefore had to invent opaque route
+   * ids, keep a generated catalogue mapping them back, and synthesize
+   * roughly two env vars per model at startup.
+   *
+   * `RegistryConfig` and `parseRegistryConfig` were already exported; the
+   * only missing piece was a constructor that accepts the parsed result.
+   *
+   * The object is copied on construction, so later mutation of what you
+   * passed does not reach into a live Registry, and the Registry's own
+   * reconciliation does not edit your object.
+   */
+  config?: RegistryConfig;
   env?: Record<string, string | undefined>;
   /** Adapters keyed by their name (must match env config tokens). */
   adapters: Record<string, AdapterRegistration>;
@@ -460,7 +485,9 @@ export class Registry {
   private readonly pricingOverrides: Record<string, ModelPricing>;
 
   constructor(opts: RegistryOptions) {
-    this.config = parseRegistryConfig({ envPrefix: opts.envPrefix, env: opts.env });
+    this.config = opts.config
+      ? cloneRegistryConfig(opts.config)
+      : parseRegistryConfig({ envPrefix: opts.envPrefix, env: opts.env });
     this.adapters = opts.adapters;
     this.budget = opts.budget ?? new InMemoryBudget();
     this.cost = opts.cost ?? new InMemoryCost();
@@ -2434,6 +2461,25 @@ function toFingerprintable(options: object): FingerprintableRequest {
  * When `timeoutMs` is undefined AND there's no user signal, the wrapper is
  * a pass-through (no AbortController created).
  */
+/**
+ * Copy a caller-supplied `RegistryConfig`.
+ *
+ * `reconcileConfig` deletes unusable aliases and rewrites chains in place,
+ * which is fine on a config this Registry parsed for itself and rude on one
+ * the caller still holds a reference to. Copying keeps that boundary.
+ */
+function cloneRegistryConfig(config: RegistryConfig): RegistryConfig {
+  const providers: RegistryConfig["providers"] = {};
+  for (const [alias, entry] of Object.entries(config.providers)) {
+    providers[alias] = { ...entry };
+  }
+  const taskRoutes: RegistryConfig["taskRoutes"] = {};
+  for (const [task, chain] of Object.entries(config.taskRoutes)) {
+    taskRoutes[task] = [...chain];
+  }
+  return { providers, taskRoutes };
+}
+
 async function withPerAttemptTimeout<R>(
   timeoutMs: number | undefined,
   userSignal: AbortSignal | undefined,
@@ -2548,28 +2594,11 @@ function resolveRuntimeFallback(
   if (opt && typeof opt === "object" && "shouldFallback" in opt) {
     return opt.shouldFallback;
   }
-  // Default preset: `ProviderUnavailableError` walks unconditionally, plus
-  // alpha.30+ ctx-aware `AuthenticationError` walk on never-authenticated.
-  // Note: this is the "default" preset (unnamed, opt === undefined). The
-  // `defaultShouldFallback` exported function is the alpha.28+ canonical
-  // walk-table, which is a separate opt-in via
-  // `{ shouldFallback: defaultShouldFallback }`.
-  return (err, ctx) => {
-    if (err instanceof ProviderUnavailableError) return true;
-    if (err instanceof AuthenticationError) {
-      return ctx !== undefined && !ctx.hasEverAuthenticated;
-    }
-    // Alpha.33: a content block the adapter cannot express walks, even under
-    // the narrow default preset. This class is categorically unlike the
-    // others here. It is not a transient failure or a provider-health
-    // signal to be retried in hope; it is a static capability mismatch, so
-    // the selected provider will never serve this call however long it is
-    // given. Walking is therefore not a gamble, it is the only route to an
-    // answer, and refusing to walk guarantees the failure it is avoiding.
-    // Consumers wanting a hard stop still have `runtimeFallback: "none"`.
-    if (err instanceof ContentBlockUnsupportedError) return true;
-    return false;
-  };
+  // The Registry's real default. Named and exported since alpha.34 so it
+  // can be documented and tested rather than living as an anonymous
+  // closure that nobody could point at. See the note on
+  // `conservativeShouldFallback` about the two things called "default".
+  return conservativeShouldFallback;
 }
 
 // ─── Alpha.30+: streaming instrumentation ───────────────────────────
