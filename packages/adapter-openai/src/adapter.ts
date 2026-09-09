@@ -11,8 +11,8 @@ import OpenAI from "openai";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   attemptValidationRepair,
-  computeChatCost,
-  computeEmbeddingCost,
+  computeChatCostOptional,
+  computeEmbeddingCostOptional,
   emitAgentStepCompleted,
   emitAgentStepStarted,
   emitAgentToolCalled,
@@ -321,14 +321,14 @@ function makeClient(opts: OpenAIAdapterOptions): OpenAI {
   });
 }
 
-function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
-  const pricing = ctx.pricingOverrides[modelId] ?? OPENAI_PRICING[modelId];
-  if (!pricing) {
-    throw new Error(
-      `No pricing entry for OpenAI model "${modelId}". Provide pricingOverrides or update src/pricing.ts.`,
-    );
-  }
-  return pricing;
+function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing | undefined {
+  // Returns undefined rather than throwing (alpha.34+). A missing rate is an
+  // ordinary state now that the Registry admits unpriced models when nobody
+  // is enforcing a budget; throwing turned it into an untyped error deep
+  // inside a call, which the fallback predicate cannot classify. The caller
+  // reports `cost` as undefined, which is honest and cannot be mistaken for
+  // a measurement the way a zero can.
+  return ctx.pricingOverrides[modelId] ?? OPENAI_PRICING[modelId];
 }
 
 // ─── Public factory ──────────────────────────────────────────────────
@@ -564,7 +564,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       return {
         text,
         usage,
-        cost: computeChatCost(usage, pricing),
+        cost: computeChatCostOptional(usage, pricing),
         modelId: r.model ?? modelId,
         providerAlias: alias,
         latencyMs: Date.now() - start,
@@ -677,7 +677,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           return {
             data: parsed.data as T,
             usage: lastUsage,
-            cost: computeChatCost(lastUsage, pricing),
+            cost: computeChatCostOptional(lastUsage, pricing),
             modelId: lastModelId,
             providerAlias: alias,
             latencyMs: Date.now() - start,
@@ -868,7 +868,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
 
       if (finalUsageChunk?.usage) {
         const usage = parseUsage({ usage: finalUsageChunk.usage });
-        const cost = computeChatCost(usage, pricing);
+        const cost = computeChatCostOptional(usage, pricing);
         if (streamCompleteCallback) {
           emitStreamComplete({
             usage: finalUsageChunk.usage,
@@ -1016,7 +1016,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             stepIndex: stepsTaken,
             durationMs: Date.now() - llmStepStart,
             usage: stepUsage,
-            cost: computeChatCost(stepUsage, pricing),
+            cost: computeChatCostOptional(stepUsage, pricing),
           });
 
           const aMsg = r.choices[0]?.message;
@@ -1143,7 +1143,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         messages: conversation,
         toolCalls,
         usage: totalUsage,
-        cost: computeChatCost(totalUsage, pricing),
+        cost: computeChatCostOptional(totalUsage, pricing),
         modelId: lastModelId,
         providerAlias: alias,
         latencyMs: Date.now() - start,
@@ -1203,7 +1203,7 @@ function createEmbeddings(
           modelId: response.model ?? modelId,
           providerAlias: alias,
           usage: { inputTokens },
-          cost: computeEmbeddingCost(inputTokens, pricing),
+          cost: computeEmbeddingCostOptional(inputTokens, pricing),
           latencyMs: Date.now() - start,
         };
       } catch (err) {
@@ -1232,7 +1232,7 @@ function createEmbeddings(
           modelId: response.model ?? modelId,
           providerAlias: alias,
           usage: { inputTokens },
-          cost: computeEmbeddingCost(inputTokens, pricing),
+          cost: computeEmbeddingCostOptional(inputTokens, pricing),
           latencyMs: Date.now() - start,
         };
       } catch (err) {
@@ -1416,8 +1416,10 @@ interface ModelCapsCompact {
   reasoningHeadroomMultiplier: number;
 }
 
-function readCaps(modelId: string, pricing: ModelPricing): ModelCapsCompact {
-  const eff = getEffectiveCapabilities(modelId, pricing.capabilities);
+function readCaps(modelId: string, pricing: ModelPricing | undefined): ModelCapsCompact {
+  // An absent price also means absent capability hints, which is the same
+  // state an unlisted model was already in, so the learner's defaults apply.
+  const eff = getEffectiveCapabilities(modelId, pricing?.capabilities);
   return {
     temperatureLocked: eff.temperatureLocked === true,
     // jsonMode default is true; only treat as unsupported if explicitly false
@@ -1725,7 +1727,7 @@ async function executeChatRequest(
   client: OpenAI,
   ctx: AdapterContext,
   alias: string,
-  pricing: ModelPricing,
+  pricing: ModelPricing | undefined,
   req: LogicalChatRequest,
 ): Promise<{ response: unknown; modelId: string }> {
   const attempt = async (): Promise<unknown> => {
@@ -1903,7 +1905,7 @@ async function executeChatStream(
   client: OpenAI,
   ctx: AdapterContext,
   alias: string,
-  pricing: ModelPricing,
+  pricing: ModelPricing | undefined,
   req: LogicalChatRequest,
 ): Promise<AsyncIterable<OpenAIStreamChunk>> {
   const streamReq = { ...req, stream: true };
@@ -2039,18 +2041,18 @@ function emitStreamComplete(args: {
   usage: NonNullable<OpenAIStreamChunk["usage"]>;
   modelId: string;
   providerAlias: string;
-  pricing: ModelPricing;
+  pricing: ModelPricing | undefined;
   streamStart: number;
   callback: (meta: {
     usage: TokenUsage;
-    cost: CostUsage;
+    cost?: CostUsage;
     modelId: string;
     providerAlias: string;
     latencyMs: number;
   }) => void;
 }): void {
   const usage = parseUsage({ usage: args.usage });
-  const cost = computeChatCost(usage, args.pricing);
+  const cost = computeChatCostOptional(usage, args.pricing);
   const latencyMs = Date.now() - args.streamStart;
   args.callback({
     usage,

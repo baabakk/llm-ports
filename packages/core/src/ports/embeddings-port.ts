@@ -37,7 +37,12 @@ export interface EmbeddingResult {
   modelId: string;
   providerAlias: string;
   usage: { inputTokens: number };
-  cost: CostUsage;
+  /**
+   * USD cost, absent when the model has no pricing entry and the alias is
+   * not cost-gated (alpha.34+). Same rule as the chat methods: absent rather
+   * than zeroed, because a zero cannot be told apart from a free call.
+   */
+  cost?: CostUsage;
   latencyMs: number;
 }
 
@@ -47,7 +52,12 @@ export interface BatchEmbeddingResult {
   modelId: string;
   providerAlias: string;
   usage: { inputTokens: number };
-  cost: CostUsage;
+  /**
+   * USD cost, absent when the model has no pricing entry and the alias is
+   * not cost-gated (alpha.34+). Same rule as the chat methods: absent rather
+   * than zeroed, because a zero cannot be told apart from a free call.
+   */
+  cost?: CostUsage;
   latencyMs: number;
 }
 

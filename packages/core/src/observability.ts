@@ -339,7 +339,13 @@ export const STREAM_COMPLETE_CALLBACK_KEY = Symbol.for(
 /** Payload the adapter passes when firing the stream-complete callback. */
 export interface StreamCompleteMetadata {
   usage: TokenUsage;
-  cost: CostUsage;
+  /**
+   * Absent when the model has no known price and the alias is not
+   * cost-gated (alpha.34+). Same rule as every other cost field: absent
+   * rather than zeroed, so a streamed call with an unknown rate cannot be
+   * mistaken for a free one.
+   */
+  cost?: CostUsage;
   modelId: string;
   providerAlias: string;
   latencyMs: number;

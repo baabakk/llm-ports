@@ -72,3 +72,30 @@ export function computeEmbeddingCost(inputTokens: number, pricing: ModelPricing)
 function round6(n: number): number {
   return Math.round(n * 10_000_000_000) / 10_000_000_000;
 }
+
+/**
+ * Compute cost when a price is known, and report nothing when it is not.
+ *
+ * The `undefined` return is the point. Adapters used to throw when their
+ * pricing table lacked a model, which turned a missing rate into an untyped
+ * error deep inside a call, unclassifiable by the fallback predicate and in
+ * breach of this project's rule that no untyped exception escapes an adapter.
+ * Returning zeros instead would be worse: a zero is indistinguishable from a
+ * genuinely free call, so any total over mixed rows under-counts silently.
+ *
+ * Added in `0.1.0-alpha.34`.
+ */
+export function computeChatCostOptional(
+  usage: TokenUsage,
+  pricing: ModelPricing | undefined,
+): CostUsage | undefined {
+  return pricing ? computeChatCost(usage, pricing) : undefined;
+}
+
+/** Embedding sibling of `computeChatCostOptional`. Added in `0.1.0-alpha.34`. */
+export function computeEmbeddingCostOptional(
+  inputTokens: number,
+  pricing: ModelPricing | undefined,
+): CostUsage | undefined {
+  return pricing ? computeEmbeddingCost(inputTokens, pricing) : undefined;
+}

@@ -25,8 +25,8 @@ import { hasMultimodalContent, toVercelParts } from "./content.js";
 import { VERCEL_PRICING } from "./pricing.js";
 import {
   attemptValidationRepair,
-  computeChatCost,
-  computeEmbeddingCost,
+  computeChatCostOptional,
+  computeEmbeddingCostOptional,
   emitRetryEvent,
   EmptyResponseError,
   extractJSON,
@@ -121,14 +121,14 @@ function emitRetry(ctx: AdapterContext, event: RetryEvent): void {
   emitRetryEvent(ctx.onRetry, event);
 }
 
-function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
-  const p = ctx.pricing[modelId];
-  if (!p) {
-    throw new Error(
-      `No pricing entry for Vercel-bound model "${modelId}". Provide one via VercelAdapterOptions.pricing.`,
-    );
-  }
-  return p;
+function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing | undefined {
+  // Returns undefined rather than throwing (alpha.34+). A missing rate is an
+  // ordinary state now that the Registry admits unpriced models when nobody
+  // is enforcing a budget; throwing turned it into an untyped error deep
+  // inside a call, which the fallback predicate cannot classify. The caller
+  // reports `cost` as undefined, which is honest and cannot be mistaken for
+  // a measurement the way a zero can.
+  return ctx.pricing[modelId];
 }
 
 // ─── Public factory ──────────────────────────────────────────────────
@@ -343,7 +343,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         return {
           text: result.text,
           usage,
-          cost: computeChatCost(usage, pricing),
+          cost: computeChatCostOptional(usage, pricing),
           modelId: result.response?.modelId ?? modelId,
           providerAlias: alias,
           latencyMs: Date.now() - start,
@@ -421,7 +421,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             return {
               data: parsed.data as T,
               usage: lastUsage,
-              cost: computeChatCost(lastUsage, pricing),
+              cost: computeChatCostOptional(lastUsage, pricing),
               modelId: lastModelId,
               providerAlias: alias,
               latencyMs: Date.now() - start,
@@ -608,7 +608,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           messages: options.messages, // we don't surface the intermediate vercel-shaped messages
           toolCalls,
           usage: totalUsage,
-          cost: computeChatCost(totalUsage, pricing),
+          cost: computeChatCostOptional(totalUsage, pricing),
           modelId: result.response?.modelId ?? modelId,
           providerAlias: alias,
           latencyMs: Date.now() - start,
@@ -648,7 +648,7 @@ function createEmbeddings(
           modelId,
           providerAlias: alias,
           usage: { inputTokens },
-          cost: computeEmbeddingCost(inputTokens, pricing),
+          cost: computeEmbeddingCostOptional(inputTokens, pricing),
           latencyMs: Date.now() - start,
         };
       } catch (err) {
@@ -669,7 +669,7 @@ function createEmbeddings(
           modelId,
           providerAlias: alias,
           usage: { inputTokens },
-          cost: computeEmbeddingCost(inputTokens, pricing),
+          cost: computeEmbeddingCostOptional(inputTokens, pricing),
           latencyMs: Date.now() - start,
         };
       } catch (err) {

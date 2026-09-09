@@ -13,7 +13,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   attemptValidationRepair,
-  computeChatCost,
+  computeChatCostOptional,
   emitAgentStepCompleted,
   emitAgentStepStarted,
   emitAgentToolCalled,
@@ -144,14 +144,14 @@ function makeClient(opts: AnthropicAdapterOptions): Anthropic {
   });
 }
 
-function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing {
-  const pricing = ctx.pricingOverrides[modelId] ?? ANTHROPIC_PRICING[modelId];
-  if (!pricing) {
-    throw new Error(
-      `No pricing entry for Anthropic model "${modelId}". Provide pricingOverrides or update src/pricing.ts.`,
-    );
-  }
-  return pricing;
+function pricingFor(ctx: AdapterContext, modelId: string): ModelPricing | undefined {
+  // Returns undefined rather than throwing (alpha.34+). A missing rate is an
+  // ordinary state now that the Registry admits unpriced models when nobody
+  // is enforcing a budget; throwing turned it into an untyped error deep
+  // inside a call, which the fallback predicate cannot classify. The caller
+  // reports `cost` as undefined, which is honest and cannot be mistaken for
+  // a measurement the way a zero can.
+  return ctx.pricingOverrides[modelId] ?? ANTHROPIC_PRICING[modelId];
 }
 
 // ─── Public factory: create the adapter container ────────────────────
@@ -397,7 +397,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         return {
           text,
           usage,
-          cost: computeChatCost(usage, pricing),
+          cost: computeChatCostOptional(usage, pricing),
           modelId: response.model ?? modelId,
           providerAlias: alias,
           latencyMs: Date.now() - start,
@@ -483,7 +483,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             return {
               data: parsed.data as T,
               usage: lastUsage,
-              cost: computeChatCost(lastUsage, pricing),
+              cost: computeChatCostOptional(lastUsage, pricing),
               modelId: lastModelId,
               providerAlias: alias,
               latencyMs: Date.now() - start,
@@ -665,7 +665,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             stepIndex: stepsTaken,
             durationMs: Date.now() - llmStepStart,
             usage: stepUsage,
-            cost: computeChatCost(stepUsage, pricing),
+            cost: computeChatCostOptional(stepUsage, pricing),
           });
           const blocks = response.content as never as Array<
             | { type: "text"; text: string }
@@ -766,7 +766,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         messages: conversation,
         toolCalls,
         usage: totalUsage,
-        cost: computeChatCost(totalUsage, pricing),
+        cost: computeChatCostOptional(totalUsage, pricing),
         modelId: lastModelId,
         providerAlias: alias,
         latencyMs: Date.now() - start,

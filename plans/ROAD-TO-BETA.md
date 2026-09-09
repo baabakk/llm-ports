@@ -72,9 +72,15 @@ Items 3 through 7. **The strongest release in the sequence**, and the one to run
 
 It also closes a duplicate nobody had noticed: `tolerantKeylessAliases` (SalesCoach, announced 2026-07-17) and the RLM validation finding (2026-09-05) **are the same item**, raised independently by two consumers, each of whom then wrote roughly fifty lines of the same workaround.
 
-### alpha.35: "Contract corrections"
+### alpha.35: "Contract corrections, and the missing chat method"
 
 Item 8, plus alpha.28 item 15, the contract test asserting every adapter surfaces `ValidationError` with `ZodIssue[]`. A test that pins cross-adapter behaviour belongs immediately before a freeze, not after it.
+
+Plus two items added 2026-09-09 after a consumer question exposed them. **Neither is freeze-gating**, since both are additive; they are here on value, not on deadline.
+
+**`generateChat`: tools surfaced and not executed, without streaming.** Tools appear on `StreamChatOptions` and `RunAgentOptions` and nowhere else, so `stream: false` with `tools` has no implementation path at all. That is the default shape for most agent frameworks and for the OpenAI SDK's own tool loop, which makes it the most common request an OpenAI-compatible server receives, and it blocks the whole pattern of putting an OpenAI-shaped surface in front of this library. Cheap, because `streamChat` already built the tool-call reassembly that a whole-response call needs less of. Its `stopReason` also closes a consumer's hardcoded `finish_reason`. See `TD-LLMPORTS-NO-NONSTREAMING-CHAT-WITH-TOOLS`.
+
+**Structured output from a JSON Schema.** `generateStructured` takes Zod only, and adapters convert it to JSON Schema anyway, so a consumer holding a wire-delivered schema converts backwards for us to convert forwards again. Add it as a separate optional field rather than widening `schema`, which keeps it additive and leaves `T` inference undisturbed. See `TD-LLMPORTS-STRUCTURED-OUTPUT-IS-ZOD-ONLY`.
 
 ### alpha.36: "Budget that persists"
 

@@ -115,7 +115,12 @@ export type {
 } from "./budget/types.js";
 
 export { InMemoryBudget, InMemoryCost } from "./budget/memory.js";
-export { computeChatCost, computeEmbeddingCost } from "./budget/cost.js";
+export {
+  computeChatCost,
+  computeChatCostOptional,
+  computeEmbeddingCost,
+  computeEmbeddingCostOptional,
+} from "./budget/cost.js";
 
 // ─── Authentication state (alpha.31.1+) ──────────────────────────────
 

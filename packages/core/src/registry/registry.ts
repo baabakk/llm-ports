@@ -125,8 +125,18 @@ export interface AdapterRegistration {
   createLLMPort?: (modelId: string, alias: string) => LLMPort;
   /** Build an EmbeddingsPort for a specific model. Optional. */
   createEmbeddingsPort?: (modelId: string, alias: string) => EmbeddingsPort;
-  /** Pricing table this adapter ships, keyed by modelId. */
-  pricing: Record<string, ModelPricing>;
+  /**
+   * Pricing table this adapter ships, keyed by modelId, or the string
+   * `"free"` to declare that this adapter never bills.
+   *
+   * `"free"` is not the same as a table of zeroes, and the difference is why
+   * it exists (alpha.34+). An adapter with an **open-ended model set** cannot
+   * enumerate its models at all: a local runtime serves whatever the operator
+   * pulled, and every unlisted name would otherwise be unroutable. `"free"`
+   * says "no model here costs anything", which is both true and knowable, and
+   * is distinct from a model whose price is simply unknown.
+   */
+  pricing: Record<string, ModelPricing> | "free";
 }
 
 // ─── Registry options ────────────────────────────────────────────────
@@ -362,6 +372,26 @@ export interface RegistryOptions {
    * one means a misconfiguration you want to hear about loudly.
    */
   strictConfig?: boolean;
+  /**
+   * What to do when an alias **is cost-gated** and its model has no known
+   * price. Default `"throw"`, which is the pre-alpha.34 behaviour.
+   *
+   * This governs exactly one situation, and naming the others is the
+   * clearest way to say what it does not do. An alias with no cost gate is
+   * never refused for want of a price, whatever this is set to. An adapter
+   * declaring `pricing: "free"` has a known price of zero and never consults
+   * it. Only "you asked for money to be enforced and no rate exists" reaches
+   * here.
+   *
+   *   - `"throw"`: refuse the alias, so a budget is never enforced against a
+   *     number nobody has. The chain walks past it as it does today.
+   *   - `"warn"`: admit it, warn once per model, and report `cost` as
+   *     undefined. The gate cannot bind on that call.
+   *   - `"silent"`: admit it with no warning.
+   *
+   * Added in `0.1.0-alpha.34`. Announced as alpha.28 item 11.
+   */
+  pricingPolicy?: "throw" | "warn" | "silent";
 }
 
 // ─── Credential-probe result (alpha.30+) ─────────────────────────────
@@ -419,7 +449,8 @@ export interface ModelSelection {
   alias: string;
   adapter: AdapterRegistration;
   modelId: string;
-  pricing: ModelPricing;
+  /** Absent when the model has no known price. See `PricingState`. */
+  pricing?: ModelPricing;
   port?: LLMPort;
   embeddingsPort?: EmbeddingsPort;
 }
@@ -448,6 +479,7 @@ export class Registry {
   public readonly observability: ObservabilityHooks;
   /** Per-attempt timeout in ms, applied by `walkChain` to each provider attempt. (alpha.23+) */
   public readonly perAttemptTimeoutMs: number | undefined;
+  public readonly pricingPolicy: "throw" | "warn" | "silent";
   /** Deprecation-warning dedup state for the alpha.26+ legacy `{instructions, prompt}` path. */
   public readonly warningState: WarningState;
   /**
@@ -497,6 +529,7 @@ export class Registry {
     this.shouldFallback = resolveRuntimeFallback(opts.runtimeFallback);
     this.observability = opts.observability ?? {};
     this.perAttemptTimeoutMs = opts.perAttemptTimeoutMs;
+    this.pricingPolicy = opts.pricingPolicy ?? "throw";
     this.warningState = createWarningState({
       suppressed: opts.suppressDeprecationWarnings ?? false,
       ...(opts.deprecationWarningHandler ? { handler: opts.deprecationWarningHandler } : {}),
@@ -862,10 +895,10 @@ export class Registry {
         }
       }
 
-      const pricing =
-        this.pricingOverrides[entry.modelId] ?? adapter.pricing[entry.modelId];
-      if (!pricing) {
-        reasons[alias] = `no pricing entry for model "${entry.modelId}"`;
+      const priceState = resolvePricingState(this.pricingOverrides, adapter, entry.modelId);
+      const refusal = pricingRefusal(this, priceState, entry);
+      if (refusal) {
+        reasons[alias] = refusal;
         continue;
       }
 
@@ -873,7 +906,7 @@ export class Registry {
         alias,
         adapter,
         modelId: entry.modelId,
-        pricing,
+        ...(priceState.kind === "unknown" ? {} : { pricing: priceState.pricing }),
         port: adapter.createLLMPort?.(entry.modelId, alias),
         embeddingsPort: adapter.createEmbeddingsPort?.(entry.modelId, alias),
       };
@@ -920,18 +953,16 @@ export class Registry {
         });
       }
     }
-    const pricing =
-      this.pricingOverrides[entry.modelId] ?? adapter.pricing[entry.modelId];
-    if (!pricing) {
-      throw new NoProvidersAvailableError(`forced:${alias}`, [alias], {
-        [alias]: `no pricing entry for model "${entry.modelId}"`,
-      });
+    const priceState = resolvePricingState(this.pricingOverrides, adapter, entry.modelId);
+    const refusal = pricingRefusal(this, priceState, entry);
+    if (refusal) {
+      throw new NoProvidersAvailableError(`forced:${alias}`, [alias], { [alias]: refusal });
     }
     return {
       alias,
       adapter,
       modelId: entry.modelId,
-      pricing,
+      ...(priceState.kind === "unknown" ? {} : { pricing: priceState.pricing }),
       port: adapter.createLLMPort?.(entry.modelId, alias),
       embeddingsPort: adapter.createEmbeddingsPort?.(entry.modelId, alias),
     };
@@ -1013,17 +1044,17 @@ export class Registry {
           continue;
         }
       }
-      const pricing =
-        this.pricingOverrides[entry.modelId] ?? adapter.pricing[entry.modelId];
-      if (!pricing) {
-        reasons[alias] = `no pricing entry for model "${entry.modelId}"`;
+      const priceState = resolvePricingState(this.pricingOverrides, adapter, entry.modelId);
+      const refusal = pricingRefusal(this, priceState, entry);
+      if (refusal) {
+        reasons[alias] = refusal;
         continue;
       }
       viable.push({
         alias,
         adapter,
         modelId: entry.modelId,
-        pricing,
+        ...(priceState.kind === "unknown" ? {} : { pricing: priceState.pricing }),
         port: adapter.createLLMPort?.(entry.modelId, alias),
         embeddingsPort: adapter.createEmbeddingsPort?.(entry.modelId, alias),
       });
@@ -1125,9 +1156,15 @@ export class Registry {
           liveInputPer1M: number;
           liveOutputPer1M: number;
         }> = [];
+        // An adapter declaring itself free has no bundled table, so there is
+        // nothing for live pricing to drift against. Reporting drift here
+        // would mean reporting that free is not free, which is a statement
+        // about the declaration rather than about staleness.
+        const bundledTable = adapter.pricing;
+        if (bundledTable === "free") continue;
         for (const liveModel of live) {
           if (liveModel.inputPer1M === undefined && liveModel.outputPer1M === undefined) continue;
-          const bundled = adapter.pricing[liveModel.id];
+          const bundled = bundledTable[liveModel.id];
           if (!bundled) continue;
           if (
             liveModel.inputPer1M !== undefined &&
@@ -1695,7 +1732,7 @@ class RegistryPort implements LLMPort {
       //    same swallow-error contract as the observability emits above).
       const key = registry.scopedKey(meta.providerAlias, budgetScope);
       Promise.resolve()
-        .then(() => registry.cost.recordCost(key, meta.cost.totalUSD))
+        .then(() => recordKnownCost(registry, key, meta.cost))
         .catch(() => {
           // Budget backend errors on the streamed-cost path are not fatal
           // to the caller; the stream already yielded. Observability hooks
@@ -2481,6 +2518,65 @@ function toFingerprintable(options: object): FingerprintableRequest {
  * the caller still holds a reference to. Copying keeps that boundary.
  */
 /**
+ * The three states a model's price can be in, made explicit.
+ *
+ * Before alpha.34 there were two, present and absent, and absent meant
+ * unroutable. Conflating "costs nothing" with "nobody knows" is what made a
+ * consumer invent a placeholder rate, which is a fabricated number that
+ * becomes a budget input the moment a cost gate is switched on.
+ */
+type PricingState =
+  | { kind: "priced"; pricing: ModelPricing }
+  | { kind: "free"; pricing: ModelPricing }
+  | { kind: "unknown" };
+
+/** Zero, but *known* to be zero. Distinct from an absent price. */
+const FREE_PRICING: ModelPricing = Object.freeze({ inputPer1M: 0, outputPer1M: 0 });
+
+function resolvePricingState(
+  overrides: Record<string, ModelPricing>,
+  adapter: AdapterRegistration,
+  modelId: string,
+): PricingState {
+  // An explicit override wins over anything the adapter declares, including
+  // "free": a consumer who states a rate has said the thing does bill.
+  const override = overrides[modelId];
+  if (override) return { kind: "priced", pricing: override };
+  if (adapter.pricing === "free") return { kind: "free", pricing: FREE_PRICING };
+  const bundled = adapter.pricing[modelId];
+  return bundled ? { kind: "priced", pricing: bundled } : { kind: "unknown" };
+}
+
+/**
+ * Decide whether an alias with no known price may still be selected.
+ *
+ * Returns a refusal reason, or `undefined` to admit. The whole matrix is
+ * two questions: is the price known, and is anyone enforcing money. Only the
+ * cell where the answer is "no" and "yes" consults `pricingPolicy`.
+ */
+function pricingRefusal(
+  registry: Registry,
+  state: PricingState,
+  entry: ProviderEntry,
+): string | undefined {
+  if (state.kind !== "unknown") return undefined;
+  // No cost gate means no number is being enforced, so a missing rate cannot
+  // make anything wrong. Admit and report cost as undefined.
+  if (entry.costLimit.kind === "unlimited") return undefined;
+  if (registry.pricingPolicy === "throw") {
+    return `no pricing entry for model "${entry.modelId}" and this alias is cost-gated (set pricingPolicy to admit it)`;
+  }
+  if (registry.pricingPolicy === "warn") {
+    warnOnce(
+      registry.warningState,
+      `pricing:unknown:${entry.modelId}`,
+      `[llm-ports] No pricing entry for model "${entry.modelId}" on a cost-gated alias. Admitting it because pricingPolicy is "warn"; the cost gate cannot bind on these calls and cost is reported as undefined.`,
+    );
+  }
+  return undefined;
+}
+
+/**
  * Record spend only when spend is known.
  *
  * A call against an unpriced model under an unlimited gate has no cost to
@@ -2589,7 +2685,7 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
     const result = await sel.embeddingsPort!.generateEmbedding(options);
     const key = this.registry.scopedKey(sel.alias, options.budgetScope);
     await this.registry.budget.recordRequest(key);
-    await this.registry.cost.recordCost(key, result.cost.totalUSD);
+    await recordKnownCost(this.registry, key, result.cost);
     return result;
   }
 
@@ -2598,7 +2694,7 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
     const result = await sel.embeddingsPort!.generateEmbeddings(options);
     const key = this.registry.scopedKey(sel.alias, options.budgetScope);
     await this.registry.budget.recordRequest(key);
-    await this.registry.cost.recordCost(key, result.cost.totalUSD);
+    await recordKnownCost(this.registry, key, result.cost);
     return result;
   }
 }

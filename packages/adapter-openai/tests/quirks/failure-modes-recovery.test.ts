@@ -137,10 +137,34 @@ describe("Phase 8: failure-mode recovery", () => {
     expect(round2Req.temperature).toBeUndefined();
   });
 
-  it("missing pricing throws clear error at port creation, not on first call", () => {
+  it("an unpriced model is constructible, and reports cost as undefined", async () => {
+    // Behaviour changed in alpha.34. This previously asserted that
+    // `createLLMPort` threw for an unknown model, failing fast so a missing
+    // price could never reach a call. That fail-fast is what had to go: the
+    // Registry now admits an unpriced model when nobody is enforcing a
+    // budget, and a constructor that refuses it would defeat the whole
+    // change. A cost-gated alias is still refused, upstream in the Registry.
     const adapter = createOpenAIAdapter({ apiKey: "test" });
-    expect(() => adapter.createLLMPort("totally-unknown-model", "live")).toThrow(
-      /No pricing entry for OpenAI model "totally-unknown-model"/,
+    const port = adapter.createLLMPort("totally-unknown-model", "live");
+
+    mockChatCompletionsCreate.mockResolvedValueOnce(
+      buildOpenAIChatResponse({
+        text: "answered anyway",
+        promptTokens: 10,
+        completionTokens: 4,
+      }),
     );
+
+    const result = await port.generateText({
+      taskType: "chat",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(result.text).toBe("answered anyway");
+    // Undefined, never zero. A zero would read as a free call to anything
+    // aggregating spend, and the under-count would look plausible.
+    expect(result.cost).toBeUndefined();
+    // Usage is separately knowable and must survive.
+    expect(result.usage.totalTokens).toBeGreaterThan(0);
   });
 });
