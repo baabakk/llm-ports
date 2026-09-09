@@ -8,6 +8,57 @@ Format: timestamped headings (date + system + subsystem), severity + status fiel
 
 ---
 
+# 2026-09-09T14:58 PDT
+
+## llm-ports
+
+### TD-LLMPORTS-NO-NONSTREAMING-CHAT-WITH-TOOLS: there is no port method for the most common OpenAI request shape
+
+- **Severity:** High
+- **Status:** Open. Found 2026-09-09 answering a question from the RLM gateway about what its OpenAI-compatible surface can and cannot measure.
+- **Files:** `packages/core/src/ports/llm-port.ts` (the `LLMPort` method set; `tools` appears only on `StreamChatOptions` at line 610 and `RunAgentOptions` at line 637)
+- **Problem:** Only two methods accept tools, and neither serves a non-streaming caller who wants to run the loop themselves.
+
+  | Caller wants | Method |
+  |---|---|
+  | No tools, whole response | `generateText` |
+  | No tools, streamed | `streamText` |
+  | Tools surfaced not executed, streamed | `streamChat` |
+  | **Tools surfaced not executed, whole response** | **nothing** |
+
+  `runAgent` takes tools and executes them, owning the loop and resolving once. `streamChat` surfaces tool calls without executing them, which is the right semantic, but only as a stream.
+
+  So `POST /v1/chat/completions` with `tools` and `stream: false` has no implementation path. That is the default shape for most agent frameworks and for the OpenAI SDK's own tool loop, which makes it the most common request an OpenAI-compatible server receives.
+- **Impact:** It blocks the adoption pattern of putting an OpenAI-compatible HTTP surface in front of this library, which is plausibly the most common way anyone would adopt it. A consumer reaching that shape has three bad options: refuse tool requests, hand the loop to `runAgent` and silently change the contract by executing tools the client meant to run itself, or fake non-streaming by draining `streamChat` and reassembling, which discards the streaming machinery to emulate a method that should exist.
+
+  The RLM gateway has taken the first option. Its request type carries no `tools` field, so client tool definitions are accepted by Fastify and silently discarded, and the caller gets a plausible text answer with no signal that the tools were dropped.
+- **Note on where the argument already exists:** the JSDoc justifying `streamChat` in this same file makes the case almost word for word. It observes that `streamText` "cannot carry tools at all" and that `runAgent` "runs the loop itself and resolves once, so the caller sees nothing until the whole thing finishes", then positions `streamChat` as the middle. That reasoning does not depend on streaming. It stopped at streaming because the motivating consumer was realtime voice.
+- **Resolution path:** Add `generateChat(options: GenerateChatOptions): Promise<ChatResult>` as an optional method, mirroring `streamChat` exactly: same options including `tools`, tool calls surfaced and never executed, caller owns the loop.
+
+  The result carries what a caller needs to answer the request in one response: assistant text, the assembled tool calls, `stopReason`, usage, cost, `modelId`, `providerAlias`.
+
+  Cheap relative to its value, because `streamChat` already did the hard part. Adapters have the tool-call reassembly logic, which exists precisely because providers stream tool arguments in fragments; a non-streaming call gets them whole and needs less work, not more.
+
+  **Additive**, so this does not gate the beta freeze. It is a new optional method exactly as `streamChat` was, and consumers who never call it see no change. That makes it schedulable on value rather than on the freeze deadline, and the value is high.
+- **Side effect worth naming:** `ChatResult.stopReason` also closes the RLM gateway's `TD-GW-04`, where `finish_reason` is hardcoded to `"stop"` because `GenerateTextResult` carries no stop or length distinction. Verified: that result type has `text`, `usage`, `cost`, `modelId`, `providerAlias`, `latencyMs`, and nothing about why generation ended.
+
+### TD-LLMPORTS-STRUCTURED-OUTPUT-IS-ZOD-ONLY: a schema that arrives over the wire cannot be used
+
+- **Severity:** Medium
+- **Status:** Open. Found 2026-09-09, same review.
+- **Files:** `packages/core/src/ports/llm-port.ts` lines 367 and 469 (`schema: z.ZodType<T>`)
+- **Problem:** `generateStructured` and `streamStructured` accept a Zod schema and nothing else. Adapters then convert it with `zodToJsonSchema` before sending it to the provider.
+
+  A consumer whose schema arrives as JSON Schema, which is what `response_format: { type: "json_schema", ... }` carries and what a schema stored in a database or a config file usually is, has to convert JSON Schema to Zod so that this library can convert it back to JSON Schema. Two conversions to arrive where they started, and the first one is the lossy, awkward direction.
+- **Impact:** Structured output is unreachable for any consumer holding a schema they did not author in TypeScript. That includes every OpenAI-compatible proxy, and anyone whose schemas are operator-editable rather than code.
+
+  Zod remains the right default. It gives the caller a parsed, typed result, which is most of the value of `generateStructured`. The problem is that it is the only door.
+- **Resolution path:** Accept a JSON Schema alongside Zod. The typed-result question is the design work: with a Zod schema the caller gets `T` inferred and validated, and with a JSON Schema there is nothing to infer, so that path returns `unknown` and validates against the schema rather than parsing into a type. Those are different enough that a separate optional field reads more honestly than widening `schema`, and it avoids disturbing `T` inference for every existing caller.
+
+  Widening the existing field would be a pre-beta change. A separate field is additive and is not gated by the freeze. Prefer the additive shape unless the design review finds a reason not to.
+
+---
+
 # 2026-09-06T17:10 PDT
 
 ## llm-ports
