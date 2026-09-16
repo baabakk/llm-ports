@@ -26,3 +26,13 @@ CLAUDE.local.md
 # Development_*.md catches a dev or plan log created at the root by mistake.
 TECH-DEBT.md
 Development_*.md
+
+# Plans are private, including every future one. plans/ stays at the root so
+# existing references resolve for maintainers; the public repository stopped
+# carrying it 2026-09-16. Earlier versions remain in public history.
+plans/
+# A plan written at the root by mistake is caught here rather than published.
+/RELEASE-PLAN*.md
+/ROADMAP*.md
+/*[-_]plan*.md
+/*[-_]PLAN*.md

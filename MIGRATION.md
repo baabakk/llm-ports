@@ -79,6 +79,6 @@ If a release breaks you and the migration page doesn't cover it, [open an issue]
 
 **This section was stale for three months.** It named `alpha.21` as the last alpha and a beta date in June, while the project shipped through `alpha.33`. It is corrected here and the durable version now lives in the repository rather than in this paragraph.
 
-Beta is gated on a list, not a date: every change that moves an existing shape or behaviour ships first, then the surface freezes. That list, the release sequence that clears it, and which packages freeze are in [`plans/ROAD-TO-BETA.md`](https://github.com/baabakk/llm-ports/blob/main/plans/ROAD-TO-BETA.md). Beta minors will be additive only.
+Beta is gated on a list, not a date: every change that moves an existing shape or behaviour ships first, then the surface freezes. The core packages and the most widely used adapters freeze first; newer packages stay in alpha until they have had more consumer contact. Beta minors will be additive only.
 
 Until then, pin exact versions rather than tracking the `@alpha` dist-tag.
