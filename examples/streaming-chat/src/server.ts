@@ -135,7 +135,8 @@ app.post("/chat", async (req: Request, res: Response) => {
     return res.json({
       content: result.text,
       usage: result.usage,
-      cost: result.cost.totalUSD,
+      // Omitted from the JSON when the model has no known price.
+      cost: result.cost?.totalUSD,
       provider: result.providerAlias,
       model: result.modelId,
     });
@@ -211,7 +212,8 @@ app.post("/chat/agent", async (req: Request, res: Response) => {
       stepsTaken: result.stepsTaken,
       terminationReason: result.terminationReason,
       usage: result.usage,
-      cost: result.cost.totalUSD,
+      // Omitted from the JSON when the model has no known price.
+      cost: result.cost?.totalUSD,
       provider: result.providerAlias,
     });
   } catch (err) {

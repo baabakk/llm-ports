@@ -109,7 +109,7 @@ const draft = await llm.generateText({
 console.log("Text:    ", draft.text.trim());
 console.log("Model:   ", draft.modelId);
 console.log("Provider:", draft.providerAlias);
-console.log("Cost USD:", draft.cost.totalUSD.toFixed(6));
+console.log("Cost USD:", draft.cost ? draft.cost.totalUSD.toFixed(6) : "unknown");
 console.log("Latency: ", draft.latencyMs, "ms");
 
 // ─── 2. generateStructured ─────────────────────────────────────────────

@@ -79,7 +79,8 @@ All tests skip; nothing is hit.
 1. Add it to the relevant adapter test file under `src/live/`.
 2. Use the assertion helpers from `src/live/shared.ts` for shape consistency.
 3. Call `recordCost(adapterName, result.cost.totalUSD)` after each call so the
-   summary at the end is accurate.
+   summary at the end is accurate. Live tests use priced models, so fail the
+   test if `result.cost` is absent rather than recording zero.
 4. Document any new env vars in the table above.
 
 ---

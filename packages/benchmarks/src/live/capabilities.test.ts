@@ -101,15 +101,20 @@ function makeLLM(): LLMPort {
   return registry.getPort();
 }
 
-function expectCapabilityEvent<T>(event: CapabilityEvent<T>, capability: string): void {
+/** Checks the event and returns its cost in USD. */
+function expectCapabilityEvent<T>(event: CapabilityEvent<T>, capability: string): number {
   expect(event.capability).toBe(capability);
   expect(event.modelId).toBeTypeOf("string");
   expect(event.providerAlias).toBe("live");
   expect(event.usage.totalTokens).toBeGreaterThan(0);
+  // Live runs use priced models, so a missing cost is a failure here rather
+  // than the "unknown price" it would mean elsewhere.
+  if (!event.cost) throw new Error(`live ${capability} call reported no cost`);
   expect(event.cost.totalUSD).toBeGreaterThan(0);
   expect(event.latencyMs).toBeGreaterThanOrEqual(0);
   expect(event.output).toBeDefined();
   expect(event.validationAttempts ?? 1).toBeGreaterThanOrEqual(1);
+  return event.cost.totalUSD;
 }
 
 afterAll(() => {
@@ -138,8 +143,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       const result = await classify({ content: "Can I get a refund?" });
       expect(["question", "request", "complaint", "feedback"]).toContain(result.intent);
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "classify");
-      recordCost("classify", captured!.cost.totalUSD);
+      recordCost("classify", expectCapabilityEvent(captured!, "classify"));
     });
 
     it("hook errors are caught and don't break the call", async () => {
@@ -210,8 +214,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       expect(result.score).toBeGreaterThanOrEqual(1);
       expect(result.score).toBeLessThanOrEqual(10);
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "score");
-      recordCost("score", captured!.cost.totalUSD);
+      recordCost("score", expectCapabilityEvent(captured!, "score"));
     });
   });
 
@@ -242,8 +245,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       });
       expect(result.name.toLowerCase()).toContain("alice");
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "extract");
-      recordCost("extract", captured!.cost.totalUSD);
+      recordCost("extract", expectCapabilityEvent(captured!, "extract"));
     });
   });
 
@@ -272,8 +274,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       const result = await summarize({ content: longText });
       expect(result.length).toBeGreaterThan(20);
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "summarize");
-      recordCost("summarize", captured!.cost.totalUSD);
+      recordCost("summarize", expectCapabilityEvent(captured!, "summarize"));
     });
   });
 
@@ -300,8 +301,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       // Soft check: no AI-isms (the model usually obeys, but not strictly enforced)
       // expect(result.toLowerCase()).not.toMatch(/reach out|hope this finds/);
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "draft");
-      recordCost("draft", captured!.cost.totalUSD);
+      recordCost("draft", expectCapabilityEvent(captured!, "draft"));
     });
   });
 
@@ -338,8 +338,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       });
       expect(result.steps.length).toBeGreaterThanOrEqual(2);
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "plan");
-      recordCost("plan", captured!.cost.totalUSD);
+      recordCost("plan", expectCapabilityEvent(captured!, "plan"));
     });
   });
 
@@ -375,8 +374,7 @@ describe.skipIf(skipCapabilities)(`live: capabilities (via ${TEST_PROVIDER})`, (
       expect(result.strengths.length).toBeGreaterThan(0);
       expect(result.recommendation.length).toBeGreaterThan(0);
       expect(captured).not.toBeNull();
-      expectCapabilityEvent(captured!, "analyze");
-      recordCost("analyze", captured!.cost.totalUSD);
+      recordCost("analyze", expectCapabilityEvent(captured!, "analyze"));
     });
   });
 });

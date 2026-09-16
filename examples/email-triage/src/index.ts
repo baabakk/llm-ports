@@ -204,13 +204,16 @@ for (const email of testEmails) {
 
 // ─── Quality tracking summary ──────────────────────────────────────
 
-const triageCost = triageEvents.reduce((s, e) => s + e.cost.totalUSD, 0);
-const draftCost = draftEvents.reduce((s, e) => s + e.cost.totalUSD, 0);
+// Unpriced calls are counted separately, never added as zero: a total that
+// silently includes them would look complete when it is not.
+const triageCost = triageEvents.reduce((s, e) => (e.cost ? s + e.cost.totalUSD : s), 0);
+const draftCost = draftEvents.reduce((s, e) => (e.cost ? s + e.cost.totalUSD : s), 0);
+const unpriced = [...triageEvents, ...draftEvents].filter((e) => !e.cost).length;
 const triageRetries = triageEvents.filter((e) => (e.validationAttempts ?? 1) > 1).length;
 
 console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 console.log(`Capability calls: ${triageEvents.length} triages, ${draftEvents.length} drafts`);
-console.log(`Total cost: $${(triageCost + draftCost).toFixed(6)} (triage $${triageCost.toFixed(6)} + draft $${draftCost.toFixed(6)})`);
+console.log(`Total cost: $${(triageCost + draftCost).toFixed(6)} (triage $${triageCost.toFixed(6)} + draft $${draftCost.toFixed(6)})${unpriced > 0 ? `, plus ${unpriced} call(s) with no known price` : ""}`);
 console.log(`Provider routing: ${triageEvents.map((e) => e.providerAlias).join(", ")}`);
 console.log(`Validation retries: ${triageRetries} of ${triageEvents.length} triages needed a 2nd attempt`);
 console.log(

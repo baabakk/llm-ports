@@ -52,7 +52,8 @@ const result = await llm.generateText({
 
 console.log("Generated text:", result.text);
 console.log("Usage:", result.usage);
-console.log("Cost (USD):", result.cost.totalUSD.toFixed(6));
+// `cost` is absent when the model has no known price. That means unknown, not free.
+console.log("Cost (USD):", result.cost ? result.cost.totalUSD.toFixed(6) : "unknown");
 console.log("Latency (ms):", result.latencyMs);
 console.log("Provider alias:", result.providerAlias);
 console.log("Model:", result.modelId);

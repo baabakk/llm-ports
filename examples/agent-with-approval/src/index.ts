@@ -225,7 +225,7 @@ for (const scenario of scenarios) {
   });
 
   console.log(`\n   Agent: ${result.text}`);
-  console.log(`   → tool calls: ${result.toolCalls.length}, steps: ${result.stepsTaken}, finished: ${result.terminationReason}, cost: $${result.cost.totalUSD.toFixed(6)}\n`);
+  console.log(`   → tool calls: ${result.toolCalls.length}, steps: ${result.stepsTaken}, finished: ${result.terminationReason}, cost: ${result.cost ? `$${result.cost.totalUSD.toFixed(6)}` : "unknown"}\n`);
 }
 
 console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

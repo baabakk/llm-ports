@@ -211,7 +211,7 @@ for (const sample of samples) {
     console.log(`   subtotal: $${invoice.subtotalUSD.toFixed(2)}, tax: $${invoice.taxUSD.toFixed(2)}, total: $${invoice.totalUSD.toFixed(2)}`);
 
     const lastEvent = events[events.length - 1]!;
-    console.log(`   → cost: $${lastEvent.cost.totalUSD.toFixed(6)}, latency: ${lastEvent.latencyMs}ms, validation attempts: ${lastEvent.validationAttempts ?? 1}`);
+    console.log(`   → cost: ${lastEvent.cost ? `$${lastEvent.cost.totalUSD.toFixed(6)}` : "unknown"}, latency: ${lastEvent.latencyMs}ms, validation attempts: ${lastEvent.validationAttempts ?? 1}`);
   } catch (err) {
     // After validation-retry exhausts, you get a typed ValidationError.
     // In production you'd land this in a "needs human review" queue.
@@ -223,11 +223,14 @@ for (const sample of samples) {
 
 // ─── Summary ──────────────────────────────────────────────────────
 
-const totalCost = events.reduce((s, e) => s + e.cost.totalUSD, 0);
+// Unpriced calls are counted separately, never added as zero: a total that
+// silently includes them would look complete when it is not.
+const totalCost = events.reduce((s, e) => (e.cost ? s + e.cost.totalUSD : s), 0);
+const unpriced = events.filter((e) => !e.cost).length;
 const retried = events.filter((e) => (e.validationAttempts ?? 1) > 1).length;
 
 console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 console.log(`Extracted ${events.length} of ${samples.length} invoices`);
-console.log(`Total cost: $${totalCost.toFixed(6)}`);
+console.log(`Total cost: $${totalCost.toFixed(6)}${unpriced > 0 ? `, plus ${unpriced} call(s) with no known price` : ""}`);
 console.log(`Validation retries: ${retried} of ${events.length} extractions needed a 2nd attempt`);
 console.log(`Avg latency: ${Math.round(events.reduce((s, e) => s + e.latencyMs, 0) / Math.max(events.length, 1))}ms`);
