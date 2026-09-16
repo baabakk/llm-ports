@@ -26,7 +26,6 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import type {
   AgentResult,
-  CostUsage,
   Instrumentation,
   LLMPort,
   RunAgentOptions,
@@ -252,7 +251,11 @@ async function runCodexAgent(
             // parse failure fall through to treating the line as opaque text.
             const parsedEvents = parseCodexJsonLines(outcome.stdout);
             const usage = deriveUsage(parsedEvents);
-            const cost: CostUsage = { inputUSD: 0, outputUSD: 0, totalUSD: 0 };
+            // No cost is reported (alpha.34+). The Codex CLI does not tell this
+            // adapter what a run cost, and this adapter has no pricing table to
+            // compute one from. It previously reported an explicit zero, which
+            // is indistinguishable from a genuinely free run and made every spend
+            // total that included these calls under-count without saying so.
             const finalText = deriveFinalText(parsedEvents) ?? outcome.stdout.trim();
             const modelId = deriveModelId(parsedEvents) ?? model ?? "(codex-default)";
 
@@ -271,7 +274,6 @@ async function runCodexAgent(
               ],
               toolCalls: [],
               usage,
-              cost,
               modelId,
               providerAlias: alias,
               latencyMs,
@@ -282,7 +284,6 @@ async function runCodexAgent(
             return {
               value: result,
               usage,
-              cost,
               modelId,
               responseCharCount: finalText.length,
               responsePreviewSource: finalText,

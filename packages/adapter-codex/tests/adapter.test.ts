@@ -129,6 +129,10 @@ console.log(JSON.stringify({ type: "response.completed", text: "Hello from codex
       // Ensure the result shape is well-formed regardless.
       expect(typeof result.text).toBe("string");
       expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+      // alpha.34: the CLI reports no cost and this adapter has no pricing
+      // table, so cost is unknown. It must be absent, not an explicit zero,
+      // which would read as a free run and silently shrink any spend total.
+      expect(result.cost).toBeUndefined();
       expect(mockCli).toBeTruthy(); // reference the mock so the compile chain doesn't drop it
     });
   });

@@ -28,7 +28,6 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import type {
   AgentResult,
-  CostUsage,
   Instrumentation,
   LLMPort,
   RunAgentOptions,
@@ -250,7 +249,11 @@ async function runAiderAgent(
             // Report zeros for usage; the caller can layer richer accounting
             // via observability metadata or by scraping stdout downstream.
             const usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-            const cost: CostUsage = { inputUSD: 0, outputUSD: 0, totalUSD: 0 };
+            // No cost is reported (alpha.34+). The Aider CLI does not tell this
+            // adapter what a run cost, and this adapter has no pricing table to
+            // compute one from. It previously reported an explicit zero, which
+            // is indistinguishable from a genuinely free run and made every spend
+            // total that included these calls under-count without saying so.
             const finalText = outcome.stdout;
             const modelId = model ?? "(aider-default)";
 
@@ -266,7 +269,6 @@ async function runAiderAgent(
               ],
               toolCalls: [],
               usage,
-              cost,
               modelId,
               providerAlias: alias,
               latencyMs,
@@ -277,7 +279,6 @@ async function runAiderAgent(
             return {
               value: result,
               usage,
-              cost,
               modelId,
               responseCharCount: finalText.length,
               responsePreviewSource: finalText,
