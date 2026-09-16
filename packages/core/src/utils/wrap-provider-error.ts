@@ -15,6 +15,13 @@
  *     RateLimitError (with parsed retryAfterMs); 502/503/504 →
  *     ServiceUnavailableError; everything else → ProviderUnavailableError.
  *
+ *   - A request that never reached the server (refused, DNS failure,
+ *     connect timeout) → ProviderUnavailableError, even though `fetch`
+ *     reports it as a `TypeError`.
+ *
+ *   - Any other local `TypeError`, `ReferenceError` or `SyntaxError` →
+ *     AdapterInternalError, because it is almost always a bug in the adapter.
+ *
  *   - Non-Error values (strings, undefined, primitives) are stringified
  *     into an Error first, then classified.
  *
@@ -34,6 +41,38 @@ import {
   RateLimitError,
   ServiceUnavailableError,
 } from "../errors.js";
+
+/**
+ * The messages a `fetch` implementation gives a `TypeError` when the request
+ * never reached the server. Node's (undici) comes first; the others are the
+ * browser engines', in the order Chromium, Firefox, Safari. Compared in
+ * lower case.
+ *
+ * Matching the whole message, not a substring, is deliberate: a bug such as
+ * "fetch is not a function" is also a `TypeError` that mentions fetch, and it
+ * must stay classified as a bug.
+ */
+const FETCH_FAILURE_MESSAGES: ReadonlySet<string> = new Set([
+  "fetch failed",
+  "failed to fetch",
+  "networkerror when attempting to fetch resource.",
+  "load failed",
+]);
+
+/**
+ * Whether a `TypeError` is `fetch` reporting a network failure rather than a
+ * bug in local code.
+ *
+ * Node's `fetch` puts the actual reason (`ECONNREFUSED`, `ENOTFOUND`,
+ * `UND_ERR_CONNECT_TIMEOUT`) in `cause` and a fixed message on the error
+ * itself. Some client libraries convert it to their own connection error
+ * (the OpenAI and Anthropic SDKs do); `ollama` and `@google/genai` let it
+ * through unchanged. The Vercel AI SDK applies the same message test before
+ * marking such an error retryable.
+ */
+function isFetchNetworkFailure(err: TypeError): boolean {
+  return FETCH_FAILURE_MESSAGES.has(err.message.toLowerCase());
+}
 
 /**
  * Extract HTTP status code from an SDK error if present. Provider SDKs
@@ -149,6 +188,14 @@ export function wrapProviderError(
   // by-name check as a safety net for any code paths still constructing
   // it without the base class.
   if (err instanceof Error && err.name === "ValidationError") return err;
+
+  // A request that never reached the server. `fetch` reports this as a
+  // TypeError, so it has to be recognised before the rule below, which would
+  // otherwise call a stopped Ollama daemon an adapter bug and stop the chain.
+  // Fixed in alpha.34 (TD-LLMPORTS-UNREACHABLE-PROVIDER-DOES-NOT-FAIL-OVER).
+  if (err instanceof TypeError && isFetchNetworkFailure(err)) {
+    return new ProviderUnavailableError(alias, err);
+  }
 
   // Local JS runtime errors (TypeError, ReferenceError, SyntaxError) are
   // almost always adapter or registry bugs, not provider-side failures.

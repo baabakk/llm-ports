@@ -859,12 +859,22 @@ export function aggressiveShouldFallback(err: unknown, ctx?: ShouldFallbackConte
     return ctx !== undefined && !ctx.hasEverAuthenticated;
   }
 
-  // 1. Existing default (ProviderUnavailableError; covers 5xx via SDK wrap
-  //    and any other unknown-provider-error surface).
-  if (err instanceof ProviderUnavailableError) return true;
+  // 1. The transient tier, by its parent class. This comment used to say
+  //    ProviderUnavailableError "covers 5xx via SDK wrap", which stopped being
+  //    true in alpha.18: a provider 5xx is wrapped as ServiceUnavailableError
+  //    itself, the parent, so naming only the subclass meant a real 502, 503 or
+  //    504 never failed over. The raw status check at the end could not help,
+  //    because a wrapped error carries no status field. Fixed in alpha.34.
+  if (err instanceof ServiceUnavailableError) return true;
 
   // 2. Rate limits — try the next provider rather than waiting out backoff.
   if (err instanceof RateLimitError) return true;
+
+  // 2a. A content block this provider cannot express. A static capability
+  //     mismatch: the provider will never carry it, so walking is the only
+  //     route to an answer. Missing until alpha.34, which left this preset
+  //     routing documents less than the unconfigured default did.
+  if (err instanceof ContentBlockUnsupportedError) return true;
 
   // 3. Empty responses after starvation retries gave up.
   if (err instanceof EmptyResponseError) return true;
@@ -995,8 +1005,11 @@ export function aggressiveShouldFallback(err: unknown, ctx?: ShouldFallbackConte
  * looks like an unreliable provider, not like a narrower policy.
  *
  * Walks on:
- *   - `ProviderUnavailableError` (and subclasses, including
- *     `AttemptTimeoutError`), unconditionally.
+ *   - `ServiceUnavailableError` and every subclass, unconditionally: a
+ *     provider HTTP 5xx, `ProviderUnavailableError`, `AttemptTimeoutError`
+ *     and `EmptyResponseError`. Until alpha.34 this named only
+ *     `ProviderUnavailableError`, which is a subclass; since alpha.18 wraps a
+ *     provider 5xx as the parent class, a 502, 503 or 504 did not fail over.
  *   - `AuthenticationError`, only when the alias has never authenticated,
  *     so a dead key is skipped while a credential that worked and then
  *     stopped aborts loudly instead of quietly degrading.
@@ -1011,7 +1024,9 @@ export function conservativeShouldFallback(
   err: unknown,
   ctx?: ShouldFallbackContext,
 ): boolean {
-  if (err instanceof ProviderUnavailableError) return true;
+  // The parent class, not ProviderUnavailableError alone: a provider HTTP 5xx
+  // is wrapped as ServiceUnavailableError itself.
+  if (err instanceof ServiceUnavailableError) return true;
   if (err instanceof AuthenticationError) {
     return ctx !== undefined && !ctx.hasEverAuthenticated;
   }

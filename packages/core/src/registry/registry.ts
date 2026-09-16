@@ -199,15 +199,17 @@ export interface RegistryOptions {
    * the registry walks to the next viable provider and retries — without the
    * caller having to catch and re-route themselves.
    *
-   * Default: walks on `ProviderUnavailableError` only (the safest class —
-   * covers 5xx, network errors, rate-limit-style 429s the SDK wraps).
+   * Default: {@link conservativeShouldFallback}. It walks on
+   * `ServiceUnavailableError` and its subclasses (a provider HTTP 5xx, an
+   * unreachable provider, an attempt timeout, an empty response), on a
+   * content block the provider cannot express, and on a credential that has
+   * never worked. A rate limit does not walk under the default.
    *
    * Set to `"none"` to disable runtime fallback entirely (v0.1 behavior;
    * caller catches `ProviderUnavailableError` and routes manually).
    *
    * Set to a custom predicate for finer control (e.g. walk on
-   * `EmptyResponseError` too, or skip 429s and let the SDK's own backoff
-   * handle them).
+   * `RateLimitError` too, or never walk on an empty response).
    *
    * Added in `0.1.0-alpha.7`.
    *
@@ -217,10 +219,10 @@ export interface RegistryOptions {
    * {@link aggressiveShouldFallback} for the full matrix; the summary is
    * "walk on RateLimitError, EmptyResponseError, ContextWindowExceededError,
    * BadRequestError with credit-exhaustion body patterns, and raw 5xx status
-   * codes — in addition to the default ProviderUnavailableError".
+   * codes, in addition to everything the default walks on".
    */
   runtimeFallback?:
-    | "default" // walk on ProviderUnavailableError
+    | "default" // conservativeShouldFallback, the same as leaving this unset
     | "aggressive" // walk on any provider-side signal (alpha.25+, LP-REQ-01)
     | "none" // disable; caller handles errors
     | { shouldFallback: (err: unknown, ctx?: ShouldFallbackContext) => boolean };
@@ -2705,7 +2707,7 @@ class RegistryEmbeddingsPort implements EmbeddingsPort {
  * Translate the user-friendly `runtimeFallback` config into a predicate
  * the registry uses to decide whether to walk the chain on an error.
  *
- *   - `"default"` (or undefined): walk on `ProviderUnavailableError` only.
+ *   - `"default"` (or undefined): {@link conservativeShouldFallback}.
  *   - `"aggressive"` (alpha.25+, LP-REQ-01): walk on any provider-side
  *     signal via {@link aggressiveShouldFallback}.
  *   - `"none"`: never walk — preserves v0.1 behavior.
