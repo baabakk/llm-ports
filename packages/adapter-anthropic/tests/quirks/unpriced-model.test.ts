@@ -1,0 +1,37 @@
+/**
+ * Alpha.34: a model missing from the pricing table is usable, and reports no
+ * cost.
+ *
+ * Before this release the adapter threw an untyped error when a port was
+ * created for a model with no price, so an unpriced model could never reach
+ * the Registry's own, better-informed admission rule. The price is resolved
+ * once, when the port is created, so constructing the port and making one
+ * call covers every method on it.
+ *
+ * `cost` must be absent, not zero: a zero reads as a free call to anything
+ * totalling spend, and the resulting under-count looks plausible.
+ */
+
+import { beforeEach, describe, expect, it } from "vitest";
+import { buildAnthropicResponse, mockCreate, resetMocks } from "../helpers/mock-sdk.js";
+import { createAnthropicAdapter } from "../../src/index.js";
+
+beforeEach(() => {
+  resetMocks();
+});
+
+describe("an unpriced model", () => {
+  it("is constructible, answers, and reports cost as undefined", async () => {
+    const adapter = createAnthropicAdapter({ apiKey: "test-key" });
+    const port = adapter.createLLMPort("model-with-no-published-price", "live");
+
+    mockCreate.mockResolvedValueOnce(
+      buildAnthropicResponse({ textBlocks: ["answered anyway"], inputTokens: 10, outputTokens: 4 }),
+    );
+    const result = await port.generateText({ messages: [{ role: "user", content: "hi" }] });
+
+    expect(result.text).toBe("answered anyway");
+    expect(result.cost).toBeUndefined();
+    expect(result.usage.totalTokens).toBeGreaterThan(0);
+  });
+});

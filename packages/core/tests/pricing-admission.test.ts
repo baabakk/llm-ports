@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createRegistryFromEnv,
+  NoProvidersAvailableError,
   type AdapterRegistration,
   type GenerateTextResult,
   type LLMPort,
@@ -169,5 +170,86 @@ describe("explicit overrides", () => {
       pricingOverrides: { "billed-after-all": PRICED },
     });
     await expect(r.getPort().generateText({ ...CALL })).resolves.toBeDefined();
+  });
+});
+
+/** The error a refused call rejects with, so a test can check it was the price. */
+async function refusal(call: Promise<unknown>): Promise<NoProvidersAvailableError> {
+  const err = await call.then(() => undefined, (e: unknown) => e);
+  expect(err).toBeInstanceOf(NoProvidersAvailableError);
+  return err as NoProvidersAvailableError;
+}
+
+describe("the matrix at priority P0", () => {
+  // P0 skips the budget and cost checks. The price check is not one of them:
+  // under the default policy it refused an unpriced model at every priority
+  // before alpha.34, and that default exists to preserve exactly that.
+  const P0 = { ...CALL, priority: 0 as const };
+
+  it("admits an unknown price when nothing is enforcing money", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(UNLIMITED, "unpriced-model"),
+      adapters: { alpha: pricedAdapter() },
+    });
+    await expect(r.getPort().generateText(P0)).resolves.toBeDefined();
+  });
+
+  it("still refuses an unknown price on a cost-gated alias by default, and says it was the price", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(COST_GATED, "unpriced-model"),
+      adapters: { alpha: pricedAdapter() },
+    });
+    const err = await refusal(r.getPort().generateText(P0));
+    expect(Object.values(err.reasons).join(" ")).toContain("no pricing entry");
+  });
+
+  it("admits an unknown price on a cost-gated alias when pricingPolicy is warn", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(COST_GATED, "unpriced-model"),
+      adapters: { alpha: pricedAdapter() },
+      pricingPolicy: "warn",
+      deprecationWarningHandler: () => {},
+    });
+    await expect(r.getPort().generateText(P0)).resolves.toBeDefined();
+  });
+
+  it("admits a free adapter on a cost-gated alias", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(COST_GATED, "anything-local"),
+      adapters: { alpha: freeAdapter() },
+    });
+    await expect(r.getPort().generateText(P0)).resolves.toBeDefined();
+  });
+});
+
+describe("the matrix on a forced alias", () => {
+  // forceProviderAlias skips task routing through a separate selection path,
+  // which applies the same price rule and must be checked on its own.
+  const FORCED = { ...CALL, forceProviderAlias: "a" };
+
+  it("admits an unknown price when nothing is enforcing money", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(UNLIMITED, "unpriced-model"),
+      adapters: { alpha: pricedAdapter() },
+    });
+    await expect(r.getPort().generateText(FORCED)).resolves.toBeDefined();
+  });
+
+  it("refuses an unknown price on a cost-gated alias by default, and says it was the price", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(COST_GATED, "unpriced-model"),
+      adapters: { alpha: pricedAdapter() },
+    });
+    const err = await refusal(r.getPort().generateText(FORCED));
+    expect(Object.values(err.reasons).join(" ")).toContain("no pricing entry");
+  });
+
+  it("admits an unknown price on a cost-gated alias when pricingPolicy is silent", async () => {
+    const r = createRegistryFromEnv({
+      env: envFor(COST_GATED, "unpriced-model"),
+      adapters: { alpha: pricedAdapter() },
+      pricingPolicy: "silent",
+    });
+    await expect(r.getPort().generateText(FORCED)).resolves.toBeDefined();
   });
 });
