@@ -80,11 +80,11 @@ result.usage.cacheReadTokens;    // e.g. 80_000
 result.usage.cacheWriteTokens;   // e.g. 0
 
 // USD saved by the cache hit, vs paying the full input rate
-result.cost.cacheSavingsUSD;     // e.g. 0.216
-result.cost.totalUSD;            // total bill for this call
+result.cost?.cacheSavingsUSD;    // e.g. 0.216
+result.cost?.totalUSD;           // total bill for this call
 ```
 
-`cacheSavingsUSD` is populated whenever the provider returns cache telemetry (`cacheReadTokens > 0`). When no cache reads occurred, the field is `undefined`.
+`cacheSavingsUSD` is populated whenever the provider returns cache telemetry (`cacheReadTokens > 0`). When no cache reads occurred, the field is `undefined`. `cost` itself is absent when the model has no known price.
 
 Capability factories carry the same field on their `onResult` event:
 

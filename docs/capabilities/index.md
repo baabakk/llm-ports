@@ -130,7 +130,7 @@ const classify = createClassifier({
       capability: event.capability,
       schemaName: event.schemaName,
       modelId: event.modelId,
-      cost: event.cost.totalUSD,
+      cost: event.cost?.totalUSD ?? null,   // null, never 0, when the price is unknown
       latencyMs: event.latencyMs,
       timestamp: new Date(),
     });

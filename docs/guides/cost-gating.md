@@ -11,10 +11,22 @@ Each adapter ships a [pricing table](https://github.com/baabakk/llm-ports/blob/m
 1. Reads the token usage from the provider response (`usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens`, etc.)
 2. Looks up the model's pricing entry: `inputPer1M`, `outputPer1M`, optional `cacheReadPer1M`, `cacheWritePer1M`
 3. Computes USD cost via `computeChatCost(usage, pricing)`
-4. Returns it on the result object as `result.cost.totalUSD`
+4. Returns it on the result object as `result.cost.totalUSD` (or omits `cost` when no price is known; see below)
 5. Records it against the provider's running totals via the registered `CostBackend`
 
-If the model id has no pricing entry, the call **fails fast** with an explicit error — no silent zero-costing. That includes models you might add to env config but forget to price; the fix is one of:
+A model's price is in one of three states, and since `0.1.0-alpha.34` they behave differently:
+
+| State | Meaning | `result.cost` |
+|---|---|---|
+| **Priced** | A rate is known, from the adapter's table or `pricingOverrides` | Computed |
+| **Free** | The adapter declares `pricing: "free"`, for a runtime that never bills | All zeros, and known to be zero |
+| **Unknown** | No rate is available | **`undefined`** |
+
+**An unknown price is only refused when something is enforcing money.** On an alias with no cost cap, an unpriced model is routed normally and reports `cost` as `undefined`. On an alias with a cost cap, the default is to refuse the alias, because a budget cannot be enforced against a price nobody has; set `pricingPolicy` to `"warn"` or `"silent"` to admit it instead, knowing the cap cannot bind on those calls.
+
+**Unknown cost is `undefined`, never zero.** A zero is indistinguishable from a genuinely free call, so a total over mixed calls would under-count without any sign that it had. When summing, skip calls whose `cost` is `undefined` rather than treating them as zero.
+
+To price a model:
 
 - Add the entry to the adapter's `pricing.ts` and submit a PR
 - Override locally via `pricingOverrides` (next section)
@@ -62,15 +74,17 @@ When a release ships updated bundled pricing, you can drop the override.
 
 ## Inspect cost per call
 
-Every call returns full cost breakdown:
+Every call on a model with a known price returns a full cost breakdown:
 
 ```ts
 const result = await llm.generateText({ taskType: "triage", prompt });
 
-result.cost.inputUSD;   // input tokens cost (incl. cache reads/writes)
-result.cost.outputUSD;  // output tokens cost
-result.cost.totalUSD;   // sum
-result.cost.cacheSavingsUSD;  // savings vs paying full input rate (when cache used; alpha.19+)
+if (result.cost) {                // absent when the model has no known price
+  result.cost.inputUSD;           // input tokens cost (incl. cache reads/writes)
+  result.cost.outputUSD;          // output tokens cost
+  result.cost.totalUSD;           // sum
+  result.cost.cacheSavingsUSD;    // savings vs paying full input rate (when cache used; alpha.19+)
+}
 
 result.usage.inputTokens;       // raw token counts
 result.usage.outputTokens;

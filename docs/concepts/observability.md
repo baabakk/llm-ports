@@ -407,7 +407,7 @@ const registry = createRegistryFromEnv({
 
 ## Aggressive fallback preset (alpha.25+)
 
-`RegistryOptions.runtimeFallback: "aggressive"` bundles the opinionated classifier three consumers rebuilt by hand (BEPA Plan 29, HomeSignal, SalesCoach Plan 30). Walks the chain on `RateLimitError`, `EmptyResponseError`, `ContextWindowExceededError`, `BadRequestError` matching credit-exhaustion body patterns, and raw 5xx status codes — in addition to the default `ProviderUnavailableError`. Does NOT walk on `AuthenticationError`, generic malformed `BadRequestError`, or budget-exhaustion.
+`RegistryOptions.runtimeFallback: "aggressive"` bundles the opinionated classifier three consumers rebuilt by hand (BEPA Plan 29, HomeSignal, SalesCoach Plan 30). Beyond what the unconfigured registry walks on (provider outages including HTTP 5xx, timeouts, empty responses, unsupported content blocks, and a credential that has never worked), it also walks on `RateLimitError`, `ContextWindowExceededError`, and a `BadRequestError` whose message indicates exhausted credit. It does not walk on a credential that worked and then failed, on any other `BadRequestError`, or on budget exhaustion. The [multi-provider guide](/guides/multi-provider#which-errors-move-on-to-the-next-provider) compares all three policies side by side.
 
 ```ts
 import { createRegistryFromEnv } from "@llm-ports/core";

@@ -28,7 +28,7 @@ The factory pattern: register the adapter once at startup; the registry calls `c
 ```ts
 import {
   computeChatCost,
-  ProviderUnavailableError,
+  wrapProviderError,
   type AdapterRegistration,
   type LLMPort,
   type ModelPricing,
@@ -99,8 +99,9 @@ function createPort(opts: MyAdapterOptions, modelId: string, alias: string): LLM
           latencyMs: Date.now() - start,
         };
       } catch (err) {
-        // Always wrap unknown errors in ProviderUnavailableError
-        throw new ProviderUnavailableError(alias, err instanceof Error ? err : new Error(String(err)));
+        // Classify the failure by HTTP status, so a 5xx fails over while a bad
+        // request or a revoked key comes back to the caller.
+        throw wrapProviderError(alias, err, modelId);
       }
     },
 
@@ -152,6 +153,8 @@ The mock-control surface (the `setup*` callbacks) is yours to implement against 
 ## Required: pricing table
 
 Cost gating only works if every model id has a pricing entry. Ship a `pricing.ts`:
+
+> **If your adapter never bills**, such as a local runtime serving whatever models the operator has pulled, set `pricing: "free"` on the registration instead of a table. That declares a known price of zero for every model, including ones you cannot list in advance. Without it, an unlisted model is routed only on aliases that have no cost cap, and reports `cost` as `undefined`.
 
 ```ts
 // packages/adapter-mycorp/src/pricing.ts

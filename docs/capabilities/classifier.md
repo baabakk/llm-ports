@@ -112,7 +112,7 @@ export const classifyIntent = createClassifier({
   onResult: async (event) => {
     await analytics.track("intent_classified", {
       intent: event.output.intent,
-      cost: event.cost.totalUSD,
+      cost: event.cost?.totalUSD,   // undefined when the model has no known price
       latencyMs: event.latencyMs,
       modelId: event.modelId,
     });

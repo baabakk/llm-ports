@@ -98,7 +98,7 @@ const result = await llm.generateText({
 });
 
 console.log(result.text);              // model output
-console.log(result.cost.totalUSD);     // exact USD cost of this call
+console.log(result.cost?.totalUSD);    // USD cost of this call; undefined if the model has no known price
 console.log(result.modelId);           // which model was actually used
 console.log(result.providerAlias);     // which alias from the env was selected
 console.log(result.latencyMs);         // measured end-to-end latency
@@ -147,7 +147,7 @@ export const classifyEmail = createClassifier({
   onResult: async (event) => {
     await myAnalytics.track({
       capability: event.capability,
-      cost: event.cost.totalUSD,
+      cost: event.cost?.totalUSD,   // undefined when the model has no known price
       latencyMs: event.latencyMs,
     });
   },

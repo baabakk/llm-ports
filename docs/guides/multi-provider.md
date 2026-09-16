@@ -53,13 +53,41 @@ The adapter token in env config (`LLM_PROVIDER_FAST=anthropic|...`) matches the 
 
 For each call, the registry walks the task's chain in order. A provider is **skipped** if:
 
-- It's not registered (token doesn't match any adapter)
 - Its budget cap is exceeded (`req:N/hour` already hit this hour)
 - Its cost cap is exceeded (`cost:N/day` already exceeded this day)
+- It is cost-capped and its model has no known price, under the default `pricingPolicy`
+
+A provider whose adapter is not registered never reaches this point. Since `0.1.0-alpha.34` it is dropped when the registry is constructed, removed from every chain that named it, and reported once as a warning; the other providers keep working. Set `strictConfig: true` to make that a construction error instead. The registry still refuses to construct if nothing usable is left.
 
 The first provider that passes all checks gets the call. If the call **succeeds**, the cost is recorded against that provider's running totals.
 
-If the call **fails** (network error, provider returns 5xx, etc.), the registry today **does not automatically retry on the next provider** — that's coming in v0.2. For now, retry-on-failure is the application's responsibility (or wrap the call in a retry helper).
+If the call **fails** with a provider-side error (network failure, a 5xx, an unreachable provider, a per-attempt timeout, or a content block the provider cannot express), the registry **moves on to the next provider in the chain** automatically. The `runtimeFallback` option decides which errors do that; `"none"` turns it off.
+
+### Which errors move on to the next provider
+
+It depends on `runtimeFallback`. There are three ready-made policies, and **the one you get when you set nothing is not the one called `defaultShouldFallback`**: that name belongs to a broader table you have to pass in explicitly. The policy you get by default is exported as `conservativeShouldFallback`.
+
+In the table, "walks" means the registry tries the next provider in the chain, and "stops" means the error goes back to your code.
+
+| Error | Nothing set, or `"default"` (`conservativeShouldFallback`) | `"aggressive"` | `{ shouldFallback: defaultShouldFallback }` |
+|---|---|---|---|
+| Provider HTTP 5xx, provider unreachable (refused, DNS failure, connect timeout), attempt timed out, empty response | walks | walks | walks |
+| A content block this provider cannot carry, such as a document | walks | walks | walks |
+| A credential that has never worked in this process | walks | walks | walks |
+| A credential that worked earlier and has now failed | stops | stops | stops |
+| Rate limited | stops | walks | walks |
+| Prompt too long for this model's context window | stops | walks | walks |
+| Content policy violation | stops | stops | walks |
+| Image larger than this provider accepts | stops | stops | walks |
+| Any other bad request, a configuration error, or a bug in the adapter's own code | stops | stops | stops |
+
+`"aggressive"` also walks on a bad request whose message indicates exhausted credit. `defaultShouldFallback` also walks on `CreditExhaustionError` and `ProviderMalformed400Error`; no shipped adapter throws either, so they matter only for an adapter of your own.
+
+A credential that worked and then stopped working is treated as a change worth hearing about, so it stops under every policy rather than quietly moving on.
+
+**Before `0.1.0-alpha.34`, parts of the first two rows stopped.** With nothing set, a provider HTTP 5xx and an empty response went back to your code instead of walking. Under `"aggressive"`, a provider HTTP 5xx and an unsupported content block did the same. Under every policy, an Ollama daemon that was not running, or a Google endpoint that could not be reached, was reported as a bug in the adapter and stopped. Upgrade if you rely on any of them.
+
+To choose something else entirely, pass your own predicate: `runtimeFallback: { shouldFallback: (err) => ... }`. `"none"` turns fallback off.
 
 If **every provider in the chain is skipped**, the registry throws `NoProvidersAvailableError` with details on what failed and why:
 
