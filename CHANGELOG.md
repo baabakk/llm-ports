@@ -19,6 +19,53 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.34 (2026-09-16)
+
+**Configuration that survives an incomplete deployment.** A missing API key no longer takes the registry down, models nobody is cost-gating no longer need a price, and core becomes a peer dependency whose errors survive a duplicate copy.
+
+**Title marker: `TS-BREAKING: cost, AdapterRegistration.pricing`.** See [the migration page](docs/migration/alpha-33-to-alpha-34.md).
+
+### Changed
+
+- **An unregistered adapter is dropped with a warning** instead of failing construction, and removed from every chain that named it. The registry still refuses to construct when nothing usable is left. `strictConfig: true` restores the old behaviour.
+- **Pricing is required only where it is enforced.** An unpriced model routes on an alias with no cost cap. On a cost-capped alias it is refused by default; `pricingPolicy` can admit it.
+- **`cost` is optional**, and `undefined` when no price is known, on results, the capability event, the streamed-completion metadata and the attempt-completed event. The `onCost` hook does not fire for such a call.
+- **Unknown cost is no longer reported as zero.** Two sources are gone: zero substituted by the instrumentation layer, and an explicit zero reported by the Codex and Aider adapters on every call.
+- **Adapters no longer throw an untyped error for a model missing from their pricing table.**
+- **`@llm-ports/core` is a peer dependency** of the adapters and `@llm-ports/capabilities`, with a caret range. Previously an exact pinned dependency, so any version difference installed two copies and silently disabled failover.
+
+### New
+
+- `RegistryOptions.config`, to configure providers and routes with an object. Model ids containing `/`, `.` or capitals can now be named.
+- `RegistryOptions.strictConfig` and `RegistryOptions.pricingPolicy`.
+- `AdapterRegistration.pricing: "free"`, for adapters that never bill.
+- `conservativeShouldFallback`, the policy an unconfigured registry actually applies, now exported.
+- `computeChatCostOptional` and `computeEmbeddingCostOptional`.
+- **Errors are recognised across duplicate copies of core.** `instanceof` falls back to a lineage recorded under a shared symbol; narrowing is unchanged.
+
+### Fixed
+
+- **A provider HTTP 5xx now fails over** under the default policy and the `"aggressive"` preset. Since alpha.18 both named only subclasses of the class a 5xx is wrapped as, so a 502, 503 or 504 went back to the caller with the chain unused. The default policy missed an empty response the same way.
+- **A stopped Ollama daemon, or an unreachable Google endpoint, now fails over.** Those client libraries report a network failure as `TypeError: fetch failed`, which was classified as a bug in the adapter and stopped the chain under every policy.
+- **The `"aggressive"` preset now walks on an unsupported content block**, as the default already did.
+- Two guides described behaviour that had changed: one said a model with no price always fails fast, and another said the registry does not move on to the next provider when a call fails, which has not been true since alpha.7.
+- **The examples no longer compiled** once `cost` became optional. They now print `unknown` for an unpriced call and leave such calls out of totals, as the migration page recommends. The benchmark suite's capability checks were updated the same way.
+- The multi-provider guide now compares the three fallback policies side by side, and the custom-adapter guide no longer tells adapter authors to wrap every failure as an outage, which made bad requests fail over.
+
+### Migration notes
+
+Guard reads of `result.cost`, and check `adapter.pricing` for `"free"` before indexing it. **Do not coalesce an unknown cost to zero when totalling**; that reintroduces the under-count this release removes.
+
+Make sure your project depends on `@llm-ports/core` directly, and that only one version is installed.
+
+**Check your dashboards.** Cost rows for calls with no known price, including every Codex and Aider call, are now absent rather than zero.
+
+**Expect more failover.** A 5xx, an empty response and an unreachable provider now walk the chain where they previously returned an error. If you relied on catching those yourself, set `runtimeFallback: "none"` or pass your own predicate.
+
+### Verification
+
+`pnpm -r build` clean across all 27 workspace projects, including the examples. `pnpm -r typecheck` clean across the 15 packages that define it. `pnpm -r test` 1767 passing, zero failures, up from 1684. `pnpm lint` 0 errors.
+
 ## v0.1.0-alpha.33 (2026-09-06)
 
 **Failover that fires, and documents that route.** Three items, one theme: the chain doing the right thing when a provider cannot serve a call.
