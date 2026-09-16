@@ -10,3 +10,19 @@ coverage/
 *.tsbuildinfo
 .vitepress/cache/
 .vitepress/dist/
+
+# Internal material: never published.
+# Release strategy, future plans, research, publication drafts, and the
+# maintainer's working rules for this repository. These are versioned in a
+# separate private history whose metadata lives in internal/.git (see
+# internal/README.md), so ignoring them here does not leave them unprotected.
+internal/
+CLAUDE.local.md
+
+# Internal working logs. The tech-debt log stays at the root so that every
+# reference to it keeps resolving for maintainers, while the public repository
+# stops carrying it. Removed from the public index 2026-09-16; its earlier
+# versions remain in public history, which this rule cannot change.
+# Development_*.md catches a dev or plan log created at the root by mistake.
+TECH-DEBT.md
+Development_*.md
