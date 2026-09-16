@@ -28,14 +28,15 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@llm-ports/core": "workspace:*",
     "ollama": "^0.5.10"
   },
   "peerDependencies": {
+    "@llm-ports/core": "workspace:^",
     "zod": ">=3.24.0 <5"
   },
   "devDependencies": {
     "@llm-ports/adapter-contract-tests": "workspace:*",
+    "@llm-ports/core": "workspace:*",
     "tsup": "^8.3.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4",

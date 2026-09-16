@@ -326,9 +326,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.32.1
         version: 0.32.1
-      '@llm-ports/core':
-        specifier: workspace:*
-        version: link:../core
       zod-to-json-schema:
         specifier: ^3.24.1
         version: 3.25.2(zod@3.25.76)
@@ -336,6 +333,9 @@ importers:
       '@llm-ports/adapter-contract-tests':
         specifier: workspace:*
         version: link:../adapter-contract-tests
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
@@ -388,9 +388,6 @@ importers:
 
   packages/adapter-google:
     dependencies:
-      '@llm-ports/core':
-        specifier: workspace:*
-        version: link:../core
       zod-to-json-schema:
         specifier: ^3.23.5
         version: 3.25.2(zod@3.25.76)
@@ -401,6 +398,9 @@ importers:
       '@llm-ports/adapter-contract-tests':
         specifier: workspace:*
         version: link:../adapter-contract-tests
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
@@ -416,9 +416,6 @@ importers:
 
   packages/adapter-ollama:
     dependencies:
-      '@llm-ports/core':
-        specifier: workspace:*
-        version: link:../core
       ollama:
         specifier: ^0.5.10
         version: 0.5.18
@@ -426,6 +423,9 @@ importers:
       '@llm-ports/adapter-contract-tests':
         specifier: workspace:*
         version: link:../adapter-contract-tests
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
@@ -441,9 +441,6 @@ importers:
 
   packages/adapter-openai:
     dependencies:
-      '@llm-ports/core':
-        specifier: workspace:*
-        version: link:../core
       openai:
         specifier: ^4.73.0
         version: 4.104.0(ws@8.21.3)(zod@3.25.76)
@@ -454,6 +451,9 @@ importers:
       '@llm-ports/adapter-contract-tests':
         specifier: workspace:*
         version: link:../adapter-contract-tests
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
@@ -469,9 +469,6 @@ importers:
 
   packages/adapter-vercel:
     dependencies:
-      '@llm-ports/core':
-        specifier: workspace:*
-        version: link:../core
       ai:
         specifier: ^4.3.19
         version: 4.3.19(react@19.2.5)(zod@3.25.76)
@@ -479,6 +476,9 @@ importers:
       '@llm-ports/adapter-contract-tests':
         specifier: workspace:*
         version: link:../adapter-contract-tests
+      '@llm-ports/core':
+        specifier: workspace:*
+        version: link:../core
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)
@@ -545,11 +545,10 @@ importers:
         version: 2.1.9(@types/node@20.19.39)
 
   packages/capabilities:
-    dependencies:
+    devDependencies:
       '@llm-ports/core':
         specifier: workspace:*
         version: link:../core
-    devDependencies:
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@5.9.3)

@@ -63,8 +63,88 @@ import type { ZodIssue } from "zod";
  * { /* library error *\/ } }`. Direct subclass of `Error`, so existing
  * `instanceof Error` checks continue to work.
  */
+/**
+ * Shared across every copy of this package: `Symbol.for` returns the same
+ * symbol for the same key anywhere in the runtime. Holds an error's class
+ * lineage so `instanceof` can recognise errors from a duplicate copy.
+ */
+const ERROR_LINEAGE: unique symbol = Symbol.for("llm-ports.error.lineage") as never;
+
 export class LLMPortError extends Error {
+  static readonly errorId: string = "LLMPortError";
   public override readonly name: string = "LLMPortError";
+
+  constructor(message?: string, options?: ErrorOptions) {
+    super(message, options);
+    // Record this error's class lineage by stable id, under a symbol every
+    // copy of this package shares. See `[Symbol.hasInstance]` below.
+    const lineage: string[] = [];
+    for (
+      let proto: unknown = Object.getPrototypeOf(this);
+      proto !== null && proto !== Error.prototype && proto !== Object.prototype;
+      proto = Object.getPrototypeOf(proto)
+    ) {
+      // Only a class that declares its own id contributes. Static fields are
+      // inherited, so a consumer subclass that declares none would otherwise
+      // repeat its parent's id and be indistinguishable from it.
+      const ctor = (proto as { constructor?: unknown }).constructor;
+      if (typeof ctor === "function" && Object.prototype.hasOwnProperty.call(ctor, "errorId")) {
+        const id = (ctor as { errorId?: unknown }).errorId;
+        if (typeof id === "string") lineage.push(id);
+      }
+    }
+    Object.defineProperty(this, ERROR_LINEAGE, { value: Object.freeze(lineage), enumerable: false });
+  }
+
+  /**
+   * `instanceof` that also recognises errors thrown by another copy of this
+   * package (alpha.34+).
+   *
+   * **Why this exists.** A consumer can end up with two copies of
+   * `@llm-ports/core`, for instance after upgrading core without upgrading an
+   * adapter. The two copies define different class objects, so a plain
+   * `instanceof` returns false for an error from the other copy. Every
+   * fallback decision in the Registry is an `instanceof` test, so the result
+   * was that failover silently stopped: no error, no log line, and a symptom
+   * that looked like an unreliable provider.
+   *
+   * Moving core to a peer dependency prevents most duplicates. This makes the
+   * taxonomy correct even when one happens anyway.
+   *
+   * **How.** The ordinary prototype check runs first, so the common case costs
+   * what it always did. Failing that, an error from any copy carries its
+   * lineage under `Symbol.for("llm-ports.error.lineage")`, which resolves to
+   * the same symbol in every copy, and the check passes if the tested class's
+   * stable `errorId` appears in it. Ids are explicit strings rather than class
+   * names, so bundler renaming cannot break them.
+   *
+   * Declared as a type predicate so TypeScript narrowing after `instanceof`
+   * behaves exactly as before.
+   */
+  static override [Symbol.hasInstance]<T>(
+    this: abstract new (...args: never[]) => T,
+    value: unknown,
+  ): value is T {
+    // Every copy of this package shares the runtime's global Error, so an
+    // error from another copy still passes this. A plain object that merely
+    // carries the symbol does not.
+    if (!(value instanceof Error)) return false;
+    const cls = this as unknown as { prototype: object; errorId?: unknown };
+    if (Object.prototype.isPrototypeOf.call(cls.prototype, value)) return true;
+    // The cross-copy fallback applies only to classes that declare their own
+    // id, which is every class this package exports. A consumer's subclass
+    // that declares none inherits its parent's id, and trusting that would
+    // make every error of the parent's kind pass as the consumer's class.
+    // Consumer classes are defined once, in consumer code, so the ordinary
+    // prototype check above is the right answer for them.
+    if (!Object.prototype.hasOwnProperty.call(cls, "errorId")) return false;
+    const lineage = (value as unknown as Record<symbol, unknown>)[ERROR_LINEAGE];
+    return (
+      Array.isArray(lineage) &&
+      typeof cls.errorId === "string" &&
+      lineage.includes(cls.errorId)
+    );
+  }
 }
 
 // ─── 400-class (client-fixable; do NOT retry the same request) ────────
@@ -79,6 +159,7 @@ export class LLMPortError extends Error {
  * with a larger window or more permissive policy.
  */
 export class BadRequestError extends LLMPortError {
+  static override readonly errorId: string = "BadRequestError";
   public override readonly name: string = "BadRequestError";
   constructor(
     public readonly alias: string,
@@ -96,6 +177,7 @@ export class BadRequestError extends LLMPortError {
  * larger-window model explicitly.
  */
 export class ContextWindowExceededError extends BadRequestError {
+  static override readonly errorId: string = "ContextWindowExceededError";
   public override readonly name: string = "ContextWindowExceededError";
   constructor(
     alias: string,
@@ -122,6 +204,7 @@ export class ContextWindowExceededError extends BadRequestError {
  * succeed on a provider with different policy thresholds.
  */
 export class ContentPolicyViolationError extends BadRequestError {
+  static override readonly errorId: string = "ContentPolicyViolationError";
   public override readonly name: string = "ContentPolicyViolationError";
   constructor(
     alias: string,
@@ -149,6 +232,7 @@ export class ContentPolicyViolationError extends BadRequestError {
  * be fixed externally.
  */
 export class AuthenticationError extends LLMPortError {
+  static override readonly errorId: string = "AuthenticationError";
   public override readonly name: string = "AuthenticationError";
   constructor(
     public readonly alias: string,
@@ -170,6 +254,7 @@ export class AuthenticationError extends LLMPortError {
  * backoff.
  */
 export class RateLimitError extends LLMPortError {
+  static override readonly errorId: string = "RateLimitError";
   public override readonly name: string = "RateLimitError";
   constructor(
     public readonly alias: string,
@@ -189,6 +274,7 @@ export class RateLimitError extends LLMPortError {
  * `cost:N/day` or `req:N/hour` gating, evaluated BEFORE the provider call.
  */
 export class BudgetExceededError extends LLMPortError {
+  static override readonly errorId: string = "BudgetExceededError";
   public override readonly name: string = "BudgetExceededError";
   constructor(
     public readonly alias: string,
@@ -213,6 +299,7 @@ export class BudgetExceededError extends LLMPortError {
  * cap is a hard backstop independent of the per-provider gates.
  */
 export class SessionBudgetExceededError extends LLMPortError {
+  static override readonly errorId: string = "SessionBudgetExceededError";
   public override readonly name: string = "SessionBudgetExceededError";
   /**
    * Optional reason tag distinguishing which session-grain cap tripped
@@ -251,6 +338,7 @@ export class SessionBudgetExceededError extends LLMPortError {
  * fallback chains: another provider may serve the same request fine.
  */
 export class ServiceUnavailableError extends LLMPortError {
+  static override readonly errorId: string = "ServiceUnavailableError";
   public override readonly name: string = "ServiceUnavailableError";
   constructor(
     public readonly alias: string,
@@ -271,6 +359,7 @@ export class ServiceUnavailableError extends LLMPortError {
  * ProviderUnavailableError` checks continue to work.
  */
 export class ProviderUnavailableError extends ServiceUnavailableError {
+  static override readonly errorId: string = "ProviderUnavailableError";
   public override readonly name: string = "ProviderUnavailableError";
   constructor(
     alias: string,
@@ -302,6 +391,7 @@ export class ProviderUnavailableError extends ServiceUnavailableError {
  * highest-leverage item.
  */
 export class AttemptTimeoutError extends ProviderUnavailableError {
+  static override readonly errorId: string = "AttemptTimeoutError";
   public override readonly name: string = "AttemptTimeoutError";
   constructor(
     alias: string,
@@ -329,6 +419,7 @@ export class AttemptTimeoutError extends ProviderUnavailableError {
  * a transient failure.
  */
 export class EmptyResponseError extends ServiceUnavailableError {
+  static override readonly errorId: string = "EmptyResponseError";
   public override readonly name: string = "EmptyResponseError";
   constructor(
     alias: string,
@@ -349,6 +440,7 @@ export class EmptyResponseError extends ServiceUnavailableError {
  * and none succeeded (each either errored, was budget-blocked, or was missing).
  */
 export class NoProvidersAvailableError extends LLMPortError {
+  static override readonly errorId: string = "NoProvidersAvailableError";
   public override readonly name: string = "NoProvidersAvailableError";
   constructor(
     public readonly taskType: string,
@@ -363,6 +455,7 @@ export class NoProvidersAvailableError extends LLMPortError {
 
 /** Thrown by validation strategies when generated structured output fails schema. */
 export class ValidationError extends LLMPortError {
+  static override readonly errorId: string = "ValidationError";
   public override readonly name: string = "ValidationError";
   constructor(
     public readonly issues: ZodIssue[],
@@ -375,6 +468,7 @@ export class ValidationError extends LLMPortError {
 
 /** Thrown when a content block kind is sent to an adapter that does not support it. */
 export class ContentBlockUnsupportedError extends LLMPortError {
+  static override readonly errorId: string = "ContentBlockUnsupportedError";
   public override readonly name: string = "ContentBlockUnsupportedError";
   constructor(
     public readonly adapter: string,
@@ -386,6 +480,7 @@ export class ContentBlockUnsupportedError extends LLMPortError {
 
 /** Thrown by the registry when env config is malformed. */
 export class ConfigError extends LLMPortError {
+  static override readonly errorId: string = "ConfigError";
   public override readonly name: string = "ConfigError";
   constructor(message: string) {
     super(message);
@@ -400,6 +495,7 @@ export class ConfigError extends LLMPortError {
  * (alpha.26+)
  */
 export class MessagesRequiredError extends LLMPortError {
+  static override readonly errorId: string = "MessagesRequiredError";
   public override readonly name: string = "MessagesRequiredError";
   constructor(public readonly method: string) {
     super(
@@ -413,6 +509,7 @@ export class MessagesRequiredError extends LLMPortError {
  * provider requires at least one message. (alpha.26+)
  */
 export class EmptyMessagesError extends LLMPortError {
+  static override readonly errorId: string = "EmptyMessagesError";
   public override readonly name: string = "EmptyMessagesError";
   constructor(public readonly method: string) {
     super(`${method}: 'messages' array is empty. At least one message is required.`);
@@ -425,6 +522,7 @@ export class EmptyMessagesError extends LLMPortError {
  * calling it with no prompt is a caller bug. (alpha.26+)
  */
 export class PromptRequiredError extends LLMPortError {
+  static override readonly errorId: string = "PromptRequiredError";
   public override readonly name: string = "PromptRequiredError";
   constructor() {
     super(
@@ -440,6 +538,7 @@ export class PromptRequiredError extends LLMPortError {
  * the deprecated fields) this error is unreachable. (alpha.26+)
  */
 export class MessagesConflictError extends LLMPortError {
+  static override readonly errorId: string = "MessagesConflictError";
   public override readonly name: string = "MessagesConflictError";
   constructor(public readonly method: string, public readonly conflictingFields: readonly string[]) {
     super(
@@ -464,6 +563,7 @@ export class MessagesConflictError extends LLMPortError {
  * (alpha.27+)
  */
 export class NonContiguousSystemError extends LLMPortError {
+  static override readonly errorId: string = "NonContiguousSystemError";
   public override readonly name: string = "NonContiguousSystemError";
   constructor(
     public readonly alias: string,
@@ -490,6 +590,7 @@ export class NonContiguousSystemError extends LLMPortError {
  * caller's `prompt` ContentBlock[] array.
  */
 export class ImageTooLargeError extends LLMPortError {
+  static override readonly errorId: string = "ImageTooLargeError";
   public override readonly name: string = "ImageTooLargeError";
   constructor(
     public readonly alias: string,
@@ -509,6 +610,7 @@ export class ImageTooLargeError extends LLMPortError {
  * or a URL with no scheme. Caught at the adapter boundary BEFORE the SDK call.
  */
 export class InvalidImageUrlError extends LLMPortError {
+  static override readonly errorId: string = "InvalidImageUrlError";
   public override readonly name: string = "InvalidImageUrlError";
   constructor(
     public readonly alias: string,
@@ -543,6 +645,7 @@ export class InvalidImageUrlError extends LLMPortError {
  * while aborting on true `AuthenticationError`.
  */
 export class CreditExhaustionError extends LLMPortError {
+  static override readonly errorId: string = "CreditExhaustionError";
   public override readonly name: string = "CreditExhaustionError";
   constructor(
     public readonly alias: string,
@@ -575,6 +678,7 @@ export class CreditExhaustionError extends LLMPortError {
  * aborting on true generic `BadRequestError`.
  */
 export class ProviderMalformed400Error extends BadRequestError {
+  static override readonly errorId: string = "ProviderMalformed400Error";
   public override readonly name: string = "ProviderMalformed400Error";
 }
 
@@ -602,6 +706,7 @@ export class ProviderMalformed400Error extends BadRequestError {
  * chain-wide failover with the same error re-thrown at every hop.
  */
 export class AdapterInternalError extends LLMPortError {
+  static override readonly errorId: string = "AdapterInternalError";
   public override readonly name: string = "AdapterInternalError";
   constructor(
     public readonly alias: string,

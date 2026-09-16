@@ -28,7 +28,7 @@
   },
   "peerDependencies": {
     "@livekit/agents": ">=1.6 <2",
-    "@llm-ports/core": "workspace:*"
+    "@llm-ports/core": "workspace:^"
   },
   "devDependencies": {
     "@livekit/agents": "^1.6.1",

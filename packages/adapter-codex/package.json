@@ -28,7 +28,7 @@
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
-    "@llm-ports/core": "workspace:*",
+    "@llm-ports/core": "workspace:^",
     "@llm-ports/observability-contract": "workspace:*"
   },
   "devDependencies": {
