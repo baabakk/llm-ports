@@ -19,7 +19,7 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
-## v0.1.0-alpha.34 (2026-09-16)
+## v0.1.0-alpha.34 (2026-09-17)
 
 **Configuration that survives an incomplete deployment.** A missing API key no longer takes the registry down, models nobody is cost-gating no longer need a price, and core becomes a peer dependency whose errors survive a duplicate copy.
 
