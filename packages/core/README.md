@@ -54,6 +54,40 @@ LLM_PROVIDER_SMART=anthropic|claude-sonnet-4-6|cost:50/day
 LLM_TASK_ROUTE_TRIAGE=fast,smart
 ```
 
+## Tool use
+
+A tool is a named function with a Zod input schema. The model decides when to call it, the library runs it, feeds the result back, and loops until the model answers in words.
+
+```typescript
+import { z } from "zod";
+import type { ToolDefinition } from "@llm-ports/core";
+
+const getOrderStatus: ToolDefinition = {
+  name: "get_order_status",
+  description: "Look up the current status of a customer order by its id.",
+  inputSchema: z.object({ orderId: z.string() }),
+  execute: async ({ orderId }) => db.orders.findById(orderId),
+};
+
+const result = await llm.runAgent({
+  taskType: "support",
+  instructions: "You are a support agent. Use the tools when a fact is needed.",
+  messages: [{ role: "user", content: "Where is ORD-10293?" }],
+  tools: { get_order_status: getOrderStatus },
+  maxSteps: 10,
+});
+
+result.text;              // the final answer
+result.toolCalls;         // [{ name, input, output }], in call order
+result.terminationReason; // "completed" | "max_steps" | "stopped_by_user"
+```
+
+**Check `terminationReason` before trusting `text`.** `"max_steps"` means the model was still working when the budget ran out.
+
+Your schema is converted to each provider's own tool-schema format by the adapter serving that attempt, so a fallback chain of providers that disagree needs one schema from you.
+
+Full reference: [Tool use](https://baabakk.github.io/llm-ports/guides/tool-use). For gating which tools may run without a human approving: [Tool-Use Security](https://baabakk.github.io/llm-ports/guides/security).
+
 ## License
 
 MIT

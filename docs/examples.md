@@ -37,6 +37,10 @@ Ten worked examples ship in the repo at [`examples/`](https://github.com/baabakk
 |---|---|
 | [live-integration-tests](https://github.com/baabakk/llm-ports/tree/main/examples/live-integration-tests) | Four `.mjs` scripts that exercise the full `LLMPort` surface against real provider APIs (no mocks). Used to close Gate C of the publishing checklist; ~$0.002 to run the full suite. The `live-anthropic.mjs` `runAgent` step is the highest-value end-to-end verification of the alpha.1 zod-to-json-schema fix. |
 
+## Tool use
+
+[`agent-with-approval`](https://github.com/baabakk/llm-ports/tree/main/examples/agent-with-approval) is the runnable tool example: three tools, one read-only, one destructive and auto-approved, one destructive and requiring confirmation, run end to end. The shape of a tool and what `runAgent` returns are documented in [Tool Use](/guides/tool-use); the approval wrapper it uses is in [Tool-Use Security](/guides/security).
+
 ## Reading next
 
 - [Getting Started](/getting-started) — install and first call in under 5 minutes

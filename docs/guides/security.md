@@ -1,5 +1,7 @@
 # Tool-Use Security
 
+> **Registering a tool is covered in [Tool Use](/guides/tool-use).** This page assumes you can already define one and asks a different question: which tools may run, and which need a human to say yes first.
+
 A framework that ships `runAgent()` and a tool-execution surface without naming the threat model is a CVE waiting to happen. `llm-ports` ships security primitives, not afterthoughts. This guide covers the threats, the mitigations, and what's still your responsibility.
 
 ## The threat model
