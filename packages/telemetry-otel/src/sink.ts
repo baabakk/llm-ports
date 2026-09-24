@@ -39,6 +39,7 @@ import type {
   AttemptCompletedData,
   AttemptFailedData,
   ObservabilitySink,
+  OperationCompletedData,
   OperationFailedData,
   OperationStartedData,
   StreamChunkData,
@@ -151,6 +152,11 @@ export function createOtelSink(options: OtelSinkOptions): ObservabilitySink {
           return;
 
         case "llm.operation.completed":
+          annotateOperationWithAggregate(
+            event.data as OperationCompletedData,
+            event.operation_id,
+            spans,
+          );
           closeOperationSpan(event.operation_id, spans, "ok");
           return;
 
@@ -236,6 +242,22 @@ function annotateSpanWithCompletion(
   if (data.provider_response_id) {
     attrs["gen_ai.response.id"] = data.provider_response_id;
   }
+  // Alpha.35: dollar cost on the span, which is plausibly the reason anyone
+  // turns this bridge on and was the one field the mapping dropped.
+  //
+  // Emitted only when a price was known. `cost` is optional since alpha.34,
+  // where absent means unknown rather than free, and writing a zero here would
+  // put a real-looking $0 row in a spend dashboard for a call whose price
+  // nobody has. That is the defect alpha.34 removed from results, and it must
+  // not reappear in the place spend is actually read.
+  if (data.cost) {
+    attrs["gen_ai.usage.cost.input_usd"] = data.cost.inputUSD;
+    attrs["gen_ai.usage.cost.output_usd"] = data.cost.outputUSD;
+    attrs["gen_ai.usage.cost.total_usd"] = data.cost.totalUSD;
+    if (data.cost.savingsUSD !== undefined) {
+      attrs["gen_ai.usage.cost.savings_usd"] = data.cost.savingsUSD;
+    }
+  }
   span.setAttributes(attrs);
 
   // Metrics — dimensioned by response model + token type per gen_ai semconv.
@@ -254,6 +276,39 @@ function annotateSpanWithCompletion(
   if (typeof providerCacheRead === "number" && providerCacheRead > 0) {
     cacheReadHist?.record(providerCacheRead, modelDim);
   }
+}
+
+/**
+ * Put the operation's aggregate spend on its span, when there is any to put.
+ *
+ * **Guarded rather than written unconditionally.** The contract's
+ * `aggregate_cost` starts at zero and only accumulates costs that were known,
+ * so an operation whose models have no pricing reports zeros here,
+ * indistinguishable from a genuinely free one. Writing that to a span would
+ * produce a confident $0 for an operation nobody priced.
+ *
+ * So a zero total means "nothing known to report" and the attributes are
+ * omitted. The per-attempt attributes carry the finer truth, since those are
+ * present only when that attempt's price was known.
+ *
+ * The deeper fix, making the aggregate able to say "unknown" rather than zero,
+ * is `TD-LLMPORTS-OPERATION-AGGREGATE-COST-SUBSTITUTES-ZERO`.
+ */
+function annotateOperationWithAggregate(
+  data: OperationCompletedData,
+  operationId: string,
+  spans: Map<string, Span>,
+): void {
+  const span = spans.get(operationId);
+  if (!span) return;
+  const cost = data.aggregate_cost;
+  if (!cost || cost.totalUSD === 0) return;
+  span.setAttributes({
+    "gen_ai.usage.cost.input_usd": cost.inputUSD,
+    "gen_ai.usage.cost.output_usd": cost.outputUSD,
+    "gen_ai.usage.cost.total_usd": cost.totalUSD,
+    ...(cost.savingsUSD !== undefined ? { "gen_ai.usage.cost.savings_usd": cost.savingsUSD } : {}),
+  });
 }
 
 function annotateSpanWithFailure(

@@ -545,3 +545,157 @@ describe("createOtelSink — span events (stream + agent)", () => {
     // No throw.
   });
 });
+
+describe("createOtelSink — dollar cost on the span", () => {
+  // Alpha.35 item 12. The mapping carried tokens but not money, which is
+  // plausibly the reason a team turns this bridge on at all.
+  //
+  // Every test here is really about one rule: a span may say what a call cost
+  // only when somebody knew. An absent price means unknown, and a zero written
+  // into a tracing backend is read as "this call was free", which is a
+  // confident answer to a question nobody had the data for.
+
+  function started(sink: ObservabilitySink): AnyObservabilityEvent {
+    return ev(sink, "llm.operation.started", { operation_id: "op1" }, {
+      task_type: "triage",
+      method: "generateText",
+      provider_chain: ["openai"],
+    });
+  }
+
+  it("writes input, output and total cost when the price is known", () => {
+    const { tracer, spans } = makeFakeTracer();
+    const capture = createCollectingSink();
+    const otel = createOtelSink({ tracer });
+
+    otel.emit(started(capture));
+    otel.emit(
+      ev(capture, "llm.attempt.completed", { operation_id: "op1", attempt_id: "att1" }, {
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        cost: { inputUSD: 0.001, outputUSD: 0.002, totalUSD: 0.003 },
+        latency_ms: 500,
+        final_model_id: "gpt-4o",
+      }),
+    );
+
+    const s = spans[0]!;
+    expect(s.attributes["gen_ai.usage.cost.input_usd"]).toBe(0.001);
+    expect(s.attributes["gen_ai.usage.cost.output_usd"]).toBe(0.002);
+    expect(s.attributes["gen_ai.usage.cost.total_usd"]).toBe(0.003);
+  });
+
+  it("omits cost entirely for a model with no pricing, rather than writing zero", () => {
+    const { tracer, spans } = makeFakeTracer();
+    const capture = createCollectingSink();
+    const otel = createOtelSink({ tracer });
+
+    otel.emit(started(capture));
+    // A self-hosted or unpriced model: real tokens, no price. Since alpha.34
+    // the cost field is absent in exactly this case instead of zero-filled.
+    otel.emit(
+      ev(capture, "llm.attempt.completed", { operation_id: "op1", attempt_id: "att1" }, {
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        latency_ms: 500,
+        final_model_id: "llama-3.3-70b",
+      }),
+    );
+
+    const s = spans[0]!;
+    // Absent, not zero. A spend dashboard summing this attribute must not be
+    // able to report a confident $0.00 for a call nobody priced.
+    expect(s.attributes).not.toHaveProperty("gen_ai.usage.cost.input_usd");
+    expect(s.attributes).not.toHaveProperty("gen_ai.usage.cost.output_usd");
+    expect(s.attributes).not.toHaveProperty("gen_ai.usage.cost.total_usd");
+    // The tokens are still there: unknown price does not mean unknown usage.
+    expect(s.attributes["gen_ai.usage.total_tokens"]).toBe(120);
+  });
+
+  it("records the cache-read saving when the adapter reported one", () => {
+    const { tracer, spans } = makeFakeTracer();
+    const capture = createCollectingSink();
+    const otel = createOtelSink({ tracer });
+
+    otel.emit(started(capture));
+    otel.emit(
+      ev(capture, "llm.attempt.completed", { operation_id: "op1", attempt_id: "att1" }, {
+        usage: { inputTokens: 1000, outputTokens: 20, totalTokens: 1020 },
+        cost: { inputUSD: 0.0002, outputUSD: 0.002, totalUSD: 0.0022, savingsUSD: 0.0008 },
+        latency_ms: 500,
+        final_model_id: "gpt-4o",
+      }),
+    );
+
+    // What the prompt cache was worth in money, which is the number that
+    // justifies keeping a cache-friendly prompt shape.
+    expect(spans[0]!.attributes["gen_ai.usage.cost.savings_usd"]).toBe(0.0008);
+  });
+
+  it("omits the saving when there was none to report", () => {
+    const { tracer, spans } = makeFakeTracer();
+    const capture = createCollectingSink();
+    const otel = createOtelSink({ tracer });
+
+    otel.emit(started(capture));
+    otel.emit(
+      ev(capture, "llm.attempt.completed", { operation_id: "op1", attempt_id: "att1" }, {
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        cost: { inputUSD: 0.001, outputUSD: 0.002, totalUSD: 0.003 },
+        latency_ms: 500,
+        final_model_id: "gpt-4o",
+      }),
+    );
+
+    expect(spans[0]!.attributes).not.toHaveProperty("gen_ai.usage.cost.savings_usd");
+  });
+
+  it("puts the whole operation's spend on the span before closing it", () => {
+    const { tracer, spans } = makeFakeTracer();
+    const capture = createCollectingSink();
+    const otel = createOtelSink({ tracer });
+
+    otel.emit(started(capture));
+    otel.emit(
+      ev(capture, "llm.operation.completed", { operation_id: "op1" }, {
+        aggregate_usage: { inputTokens: 300, outputTokens: 60, totalTokens: 360 },
+        aggregate_cost: { inputUSD: 0.003, outputUSD: 0.006, totalUSD: 0.009 },
+        attempts_made: 3,
+        final_provider_alias: "openai",
+        total_duration_ms: 1500,
+      }),
+    );
+
+    const s = spans[0]!;
+    // Three attempts were paid for, and the operation span is where the total
+    // belongs: a query summing attempt spans would double count a retried call
+    // against the operation, and summing operations is the usual question.
+    expect(s.attributes["gen_ai.usage.cost.total_usd"]).toBe(0.009);
+    expect(s.ended).toBe(true);
+  });
+
+  it("writes no aggregate when the operation was never priced", () => {
+    const { tracer, spans } = makeFakeTracer();
+    const capture = createCollectingSink();
+    const otel = createOtelSink({ tracer });
+
+    otel.emit(started(capture));
+    // The shape an unpriced operation actually produces. The contract requires
+    // `aggregate_cost`, and the instrumentation starts it at zero and only adds
+    // costs it knew, so zeros here mean "nothing was ever known" rather than
+    // "this was free". Guarding on that is why the attribute is absent.
+    otel.emit(
+      ev(capture, "llm.operation.completed", { operation_id: "op1" }, {
+        aggregate_usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        aggregate_cost: { inputUSD: 0, outputUSD: 0, totalUSD: 0 },
+        attempts_made: 1,
+        final_provider_alias: "ollama",
+        total_duration_ms: 500,
+      }),
+    );
+
+    const s = spans[0]!;
+    expect(s.attributes).not.toHaveProperty("gen_ai.usage.cost.total_usd");
+    // The span still closes normally: an unknown price is not a failure.
+    expect(s.status?.code).toBe(SPAN_STATUS_OK);
+    expect(s.ended).toBe(true);
+  });
+});
