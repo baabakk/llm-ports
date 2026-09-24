@@ -26,6 +26,8 @@ import type {
   StreamTextOptions,
   StreamChatOptions,
   ChatStreamEvent,
+  ChatResult,
+  GenerateChatOptions,
 } from "../ports/llm-port.js";
 import {
   attachStreamCompleteCallback,
@@ -997,13 +999,32 @@ export class Registry {
    * survivors reports the reasons together.
    */
   aliasSupportsStreamChat(alias: string): boolean {
+    return this.aliasImplements(alias, "streamChat");
+  }
+
+  /**
+   * Alpha.35+: the same probe for the optional `LLMPort.generateChat`.
+   */
+  aliasSupportsGenerateChat(alias: string): boolean {
+    return this.aliasImplements(alias, "generateChat");
+  }
+
+  /**
+   * Does the adapter behind this alias implement an optional port method?
+   *
+   * One probe for every optional method, because the alternative is a
+   * hand-maintained list of which adapter supports what, and that list is a
+   * second source of truth that drifts the moment an adapter gains a method.
+   * Asking the object cannot drift.
+   */
+  private aliasImplements(alias: string, method: "streamChat" | "generateChat"): boolean {
     try {
       const entry = this.config.providers[alias];
       if (!entry) return false;
       const adapter = this.adapters[entry.adapter];
       if (!adapter?.createLLMPort) return false;
       const port = adapter.createLLMPort(entry.modelId, alias);
-      return typeof port.streamChat === "function";
+      return typeof port[method] === "function";
     } catch {
       return false;
     }
@@ -1317,11 +1338,19 @@ async function walkChain<R>(
     | "generateStructured"
     | "streamText"
     | "streamChat"
+    | "generateChat"
     | "streamStructured"
     | "runAgent" = "generateText",
   refs?: Record<string, ArtifactRef>,
   opCtx?: OperationContext,
   extractMetrics?: (r: R) => AttemptMetrics,
+  /**
+   * Alpha.35+: restrict the walk to these aliases. Used by `generateChat`,
+   * whose port method is optional, so an adapter that does not implement it
+   * must be skipped rather than attempted and failed. Undefined means every
+   * viable provider, which is every other caller.
+   */
+  onlyAliases?: readonly string[],
 ): Promise<R> {
   // ─── Helper: run one attempt, optionally wrapped in withAttempt ────
   const runAttempt = async (sel: ModelSelection, isFallback: boolean): Promise<R> => {
@@ -1373,7 +1402,11 @@ async function walkChain<R>(
     registry.markProviderAuthenticated(sel.alias);
     return result;
   }
-  const chain = await registry.selectViableChain(taskType, priority, budgetScope);
+  const resolvedChain = await registry.selectViableChain(taskType, priority, budgetScope);
+  const chain =
+    onlyAliases === undefined
+      ? resolvedChain
+      : resolvedChain.filter((sel) => onlyAliases.includes(sel.alias));
   const reasons: Record<string, string> = {};
   let lastErr: unknown;
   let prevSelForFallback: ModelSelection | undefined;
@@ -1468,7 +1501,7 @@ async function walkChain<R>(
  * backwards-compat adapter reads during the alpha.26 window.
  */
 function normalizeMessagesOnOptions(
-  method: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat",
+  method: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "generateChat",
   opts: {
     messages?: LLMMessage[];
   },
@@ -1534,7 +1567,7 @@ class RegistryPort implements LLMPort {
    */
   private emitResultEvents(
     result: { cost?: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
-    operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "runAgent" | "embed" | "rerank",
+    operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "generateChat" | "runAgent" | "embed" | "rerank",
     taskType: string | undefined,
     budgetScope?: BudgetScopeRef,
     refs?: Record<string, ArtifactRef>,
@@ -1646,6 +1679,81 @@ class RegistryPort implements LLMPort {
       // `startOperation`'s precedence chain (per-call > registry-level >
       // fresh mint). Returns undefined for unwrapped consumers, so the
       // Registry keeps minting fresh ids for everyone else.
+      getObservabilityContext(this),
+    );
+  }
+
+  /**
+   * Alpha.35+. One complete turn with tool calls surfaced, not executed.
+   *
+   * Routes like `generateText`, with one difference borrowed from
+   * `streamChat`: the chain is filtered to providers whose adapter actually
+   * implements the method, and a chain with no survivors reports that by
+   * alias instead of failing mid-call with a missing-function error.
+   */
+  async generateChat(options: GenerateChatOptions): Promise<ChatResult> {
+    const messages = normalizeMessagesOnOptions("generateChat", options);
+    const normalizedOptions = { ...options, messages };
+    const taskType = normalizedOptions.taskType ?? "general";
+    const fullChain = normalizedOptions.forceProviderAlias
+      ? [normalizedOptions.forceProviderAlias]
+      : this.registry.resolveTaskChain(taskType);
+    const providerChain = fullChain.filter((alias) =>
+      this.registry.aliasSupportsGenerateChat(alias),
+    );
+    if (providerChain.length === 0) {
+      throw new NoProvidersAvailableError(
+        taskType,
+        fullChain,
+        Object.fromEntries(
+          fullChain.map((alias) => [
+            alias,
+            "adapter does not implement the optional LLMPort.generateChat method (alpha.35+)",
+          ]),
+        ),
+      );
+    }
+
+    return withOperation(
+      this.registry.instrumentation,
+      { taskType, method: "generateChat", providerChain },
+      async (opCtx) => {
+        maybeComputeFingerprint(opCtx, toFingerprintable(normalizedOptions));
+        const result = await walkChain(
+          this.registry,
+          normalizedOptions.taskType,
+          normalizedOptions.priority,
+          (sel) =>
+            withPerAttemptTimeout(
+              this.registry.resolvePerAttemptTimeoutMs(
+                normalizedOptions.taskType,
+                normalizedOptions.perAttemptTimeoutMs,
+              ),
+              normalizedOptions.signal,
+              (signal) =>
+                scopedPortForAdapter(sel.port!, opCtx).generateChat!(
+                  signal ? { ...normalizedOptions, signal } : normalizedOptions,
+                ),
+              sel.alias,
+            ),
+          (_sel, result, key) => recordKnownCost(this.registry, key, result.cost),
+          normalizedOptions.forceProviderAlias,
+          normalizedOptions.budgetScope,
+          "generateChat",
+          normalizedOptions.refs,
+          opCtx,
+          toContractMetricsForText,
+          providerChain,
+        );
+        this.emitResultEvents(
+          result,
+          "generateChat",
+          normalizedOptions.taskType,
+          normalizedOptions.budgetScope,
+          normalizedOptions.refs,
+        );
+        return result;
+      },
       getObservabilityContext(this),
     );
   }

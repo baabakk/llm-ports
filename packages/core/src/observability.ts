@@ -77,7 +77,21 @@ export interface CostEvent {
   /** Adapter alias used (the Registry-side name, e.g. `gptoss-cerebras`). */
   providerAlias: string;
   /** Operation kind. */
-  operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "runAgent" | "embed" | "rerank";
+  /**
+   * Which port method the operation ran. `"generateChat"` was added in
+   * alpha.35; a consumer switching exhaustively over this union sees a new
+   * case, which is the only way a new method can be reported at all.
+   */
+  operation:
+    | "generateText"
+    | "generateStructured"
+    | "streamText"
+    | "streamStructured"
+    | "streamChat"
+    | "generateChat"
+    | "runAgent"
+    | "embed"
+    | "rerank";
   /** Optional task-type tag from the call site. */
   taskType?: string;
   /** Optional scope hint passed by the caller for downstream attribution. */

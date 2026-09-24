@@ -180,7 +180,14 @@ export interface OperationStartParams {
    * Adapter method being invoked. Restricted to the five known LLMPort
    * methods.
    */
-  method: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "runAgent";
+  method:
+    | "generateText"
+    | "generateStructured"
+    | "streamText"
+    | "streamStructured"
+    | "streamChat"
+    | "generateChat"
+    | "runAgent";
 
   /**
    * The chain of provider aliases the caller intends to attempt in

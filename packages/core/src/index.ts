@@ -27,6 +27,8 @@ export type {
   StreamTextOptions,
   StreamChatOptions,
   ChatStreamEvent,
+  GenerateChatOptions,
+  ChatResult,
   TaskType,
   TokenUsage,
   ToolDefinition,

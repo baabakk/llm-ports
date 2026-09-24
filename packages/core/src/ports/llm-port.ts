@@ -629,6 +629,69 @@ export interface StreamChatOptions {
   refs?: Record<string, ArtifactRef>;
 }
 
+/**
+ * Options for `generateChat`. **Identical to `StreamChatOptions`**, which is
+ * deliberate: the two methods differ in delivery, not in what they accept, so
+ * a caller can move a call between them by changing the method name.
+ *
+ * Added in `0.1.0-alpha.35`.
+ */
+export type GenerateChatOptions = StreamChatOptions;
+
+/**
+ * One complete model turn with tool calls **surfaced, not executed**.
+ *
+ * The whole-response counterpart of `streamChat`. Everything a caller needs
+ * to answer a request in one go: the assistant's text, the tool calls it
+ * wants run, why it stopped, and the accounting.
+ *
+ * Added in `0.1.0-alpha.35`.
+ */
+export interface ChatResult {
+  /**
+   * Assistant text. **Empty string when the model only asked for tools**,
+   * which is the ordinary case for a tool-using turn rather than a failure.
+   * Check `toolCalls.length` before treating empty text as a problem.
+   */
+  text: string;
+  /**
+   * The tool calls the model wants executed, fully assembled. **This library
+   * does not execute them**; the caller owns the loop, which is the entire
+   * reason this method exists alongside `runAgent`.
+   *
+   * `args` is `undefined` when the provider emitted arguments the adapter
+   * could not parse as JSON. That is reported rather than thrown, so one
+   * malformed call does not fail the turn, and `rawArguments` always carries
+   * the original for a caller that wants to salvage it.
+   */
+  toolCalls: Array<{
+    toolCallId: string;
+    toolName: string;
+    args?: unknown;
+    rawArguments: string;
+  }>;
+  /**
+   * The provider's own finish reason, normalized where the meaning is
+   * unambiguous and passed through otherwise. The same field `streamChat`
+   * reports on its `step-finish` event.
+   *
+   * **A caller must read this before trusting `text`.** A turn that stopped
+   * to call a tool and a turn that finished answering are different things,
+   * and treating them alike is how a caller silently half-answers.
+   */
+  stopReason: string;
+  usage: TokenUsage;
+  /**
+   * USD cost, or `undefined` when the model has no pricing entry and the
+   * alias is not cost-gated. Absent means unknown, never free: see the note
+   * on `GenerateTextResult.cost`.
+   */
+  cost?: CostUsage;
+  modelId: string;
+  providerAlias: string;
+  latencyMs: number;
+}
+
 export interface RunAgentOptions {
   taskType: TaskType;
   priority?: LLMPriority;
@@ -838,6 +901,35 @@ export interface LLMPort {
    * `typeof port.streamChat === "function"`.
    */
   streamChat?(options: StreamChatOptions): AsyncIterable<ChatStreamEvent>;
+
+  /**
+   * Alpha.35+. One complete model turn with tool calls **surfaced, not
+   * executed**. The whole-response counterpart of `streamChat`.
+   *
+   * ## Why this exists
+   *
+   * Before it, a caller who wanted tools had two options and neither fit.
+   * `runAgent` takes tools and runs the loop itself, so it executes what the
+   * caller meant to execute and resolves once at the end. `streamChat`
+   * surfaces tool calls without executing them, which is the right
+   * semantics, but only as a stream.
+   *
+   * So a request with tools and no streaming, **the default shape for most
+   * agent frameworks and for the OpenAI SDK's own tool loop**, had no
+   * implementation path. A consumer building an OpenAI-compatible HTTP
+   * surface had to drain a stream and reassemble it to emulate a method that
+   * should exist, or silently drop the caller's tools. The RLM gateway did
+   * the latter: its request type carried no tools field, so client tool
+   * definitions were accepted and discarded.
+   *
+   * ## Optional by design
+   *
+   * Same reasoning as `streamChat`: an adapter that cannot serve it omits
+   * the method, and the Registry reports the gap by alias rather than
+   * failing obscurely mid-call. Detect support with
+   * `typeof port.generateChat === "function"`.
+   */
+  generateChat?(options: GenerateChatOptions): Promise<ChatResult>;
 
   /**
    * Runtime model discovery (alpha.9+). Returns the models the provider

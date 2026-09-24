@@ -61,7 +61,13 @@ import {
   toOpenAIMessages,
   type OpenAIMessage,
 } from "./content.js";
-import type { ChatStreamEvent, LLMMessage, StreamChatOptions } from "@llm-ports/core";
+import type {
+  ChatResult,
+  ChatStreamEvent,
+  GenerateChatOptions,
+  LLMMessage,
+  StreamChatOptions,
+} from "@llm-ports/core";
 import {
   getEffectiveCapabilities,
   isJsonModeRejection,
@@ -563,6 +569,104 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       const text = r.choices[0]?.message.content ?? "";
       return {
         text,
+        usage,
+        cost: computeChatCostOptional(usage, pricing),
+        modelId: r.model ?? modelId,
+        providerAlias: alias,
+        latencyMs: Date.now() - start,
+      };
+    },
+
+    /**
+     * Alpha.35+. One complete turn with tool calls surfaced, never executed.
+     *
+     * The same request `streamChat` builds, without `stream: true`, which is
+     * why the tool plumbing is shared rather than reimplemented: the tools go
+     * through `toOpenAITools` and `tool_choice` rides `providerExtras` for the
+     * same reason it does there, so a compat provider that rejects the
+     * parameter can be handled by the caller without a core change.
+     *
+     * Arguments arrive whole here rather than in fragments, so there is no
+     * reassembly. A call whose arguments are not valid JSON is reported with
+     * `args` undefined and `rawArguments` intact, matching `streamChat`: one
+     * malformed call must not fail the turn.
+     */
+    async generateChat(options: GenerateChatOptions): Promise<ChatResult> {
+      throwIfAborted(options.signal);
+      const start = Date.now();
+      const { messages: chatMessages, instructions } = resolveMessagesFromCallOptions(options);
+      const tools = toOpenAITools(options.tools);
+
+      const { response } = await executeChatRequest(ctx.client, ctx, alias, pricing, {
+        modelId,
+        messages: chatMessages,
+        ...(instructions !== undefined ? { instructions } : {}),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxOutputTokens !== undefined
+          ? { maxOutputTokens: options.maxOutputTokens }
+          : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.toolChoice && tools.length > 0
+          ? {
+              providerExtras: {
+                ...(options.providerExtras ?? {}),
+                tool_choice: options.toolChoice,
+              },
+            }
+          : options.providerExtras
+            ? { providerExtras: options.providerExtras }
+            : {}),
+        ...(tools.length > 0 ? { tools } : {}),
+        stream: false,
+      });
+
+      const r = response as {
+        model?: string;
+        choices: Array<{
+          message: {
+            content: string | null;
+            tool_calls?: Array<{
+              id?: string;
+              function?: { name?: string; arguments?: string };
+            }>;
+          };
+          finish_reason?: string;
+        }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_tokens_details?: { cached_tokens?: number };
+        };
+      };
+      const choice = r.choices[0];
+      const usage = parseUsage(r);
+
+      const toolCalls: ChatResult["toolCalls"] = (choice?.message.tool_calls ?? []).map((call) => {
+        const rawArguments = call.function?.arguments ?? "";
+        let args: unknown;
+        try {
+          args = rawArguments === "" ? undefined : JSON.parse(rawArguments);
+        } catch {
+          // Reported, not thrown: rawArguments carries the original so the
+          // caller can salvage it, and the rest of the turn still returns.
+          args = undefined;
+        }
+        return {
+          toolCallId: call.id ?? "",
+          toolName: call.function?.name ?? "",
+          ...(args !== undefined ? { args } : {}),
+          rawArguments,
+        };
+      });
+
+      return {
+        text: choice?.message.content ?? "",
+        toolCalls,
+        // A turn that stopped to call a tool and a turn that finished
+        // answering are different things, so the provider's own reason is
+        // passed through rather than flattened.
+        stopReason: choice?.finish_reason ?? "unknown",
         usage,
         cost: computeChatCostOptional(usage, pricing),
         modelId: r.model ?? modelId,
