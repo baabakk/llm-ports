@@ -727,11 +727,19 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       });
       let finalUsageChunk: OpenAIStreamChunk | undefined;
       for await (const chunk of stream) {
-        // Alpha.25+: watch for the final usage-only chunk (choices=[] + usage
+        // Take usage from any chunk that carries it, keeping the last seen.
+        // Two shapes exist in the wild and both must work: OpenAI ends with a
+        // usage-only chunk (choices=[] + usage), while Together AI and Cerebras
+        // attach usage to the chunk carrying finish_reason, which has choices.
+        // Until alpha.35 this required an empty choices array, so usage from
+        // those providers was silently discarded and their streamed calls
+        // reported no tokens and no cost. Found in the RLM gateway, which
+        // carried a patch for it (TD-LLMPORTS-STREAMED-USAGE-LOST-ON-COMPAT-PROVIDERS).
+        // Alpha.25+: watch for the final usage chunk (choices=[] + usage
         // populated) that `stream_options: { include_usage: true }` produces.
         // The final chunk usually has no delta, so we intercept and stash it
         // for post-loop cost emission instead of yielding.
-        if (chunk.usage && (!chunk.choices || chunk.choices.length === 0)) {
+        if (chunk.usage) {
           finalUsageChunk = chunk;
           continue;
         }
@@ -816,9 +824,10 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let stopReason: string | undefined;
 
       for await (const chunk of stream) {
-        // Alpha.25+: the final usage-only chunk (choices=[] + usage) that
+        // Usage from any chunk that carries it; see the note in streamText.
+        // Alpha.25+: the final usage chunk (choices=[] + usage) that
         // `stream_options: { include_usage: true }` produces.
-        if (chunk.usage && (!chunk.choices || chunk.choices.length === 0)) {
+        if (chunk.usage) {
           finalUsageChunk = chunk;
           continue;
         }
@@ -925,7 +934,7 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let finalUsageChunk: OpenAIStreamChunk | undefined;
       for await (const chunk of stream) {
         // Alpha.25+: intercept the final usage-only chunk (see streamText).
-        if (chunk.usage && (!chunk.choices || chunk.choices.length === 0)) {
+        if (chunk.usage) {
           finalUsageChunk = chunk;
           continue;
         }
