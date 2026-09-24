@@ -95,7 +95,11 @@ Wire this to your analytics / observability pipeline via the [observability hook
 
 ## Swap in a Redis backend for multi-process
 
-The default `InMemoryBudget` and `InMemoryCost` backends work for single-process apps. For multi-process deployments (Temporal workers, multiple API server replicas, etc.), the counters need to be shared. Implement the `CostBackend` interface against Redis:
+**This works today and needs nothing from us.** `BudgetBackend` and `CostBackend` are public interfaces, and the registry takes an implementation of either through its `budget` and `cost` options. Two consumers have recorded persistent budget counters as a missing capability and written the limitation into their own notes, when what is missing is only a prebuilt package: the seam it would plug into has shipped since the registry gained cost gating. If you need counters that survive a restart or that several processes share, you can have them this afternoon.
+
+What the prebuilt package will add is a tested implementation of the window arithmetic below, not the ability to supply one.
+
+The default `InMemoryBudget` and `InMemoryCost` backends work for single-process apps. For multi-process deployments (Temporal workers, multiple API server replicas, and so on), the counters need to be shared. Implement the `CostBackend` interface against Redis:
 
 ```ts
 import type { CostBackend, CostCheckResult, CostLimit } from "@llm-ports/core";
@@ -130,7 +134,9 @@ export const registry = createRegistryFromEnv({
 });
 ```
 
-A reference Redis backend will ship as `@llm-ports/backend-redis` in v0.2.
+A reference Redis backend will ship as `@llm-ports/backend-redis`. Until it does, an implementation of your own is not a workaround: it is the supported path, and the published package will be one of these rather than a replacement for it.
+
+**Two practical notes for writing one.** `check` runs before every request that is subject to a cap, so it sits on the latency path and wants to be cheap. And a throw from `check` is not caught: it propagates and fails the call, rather than being read as permission to proceed. That is the safe direction, since a store outage can never silently uncap spend, but note that it fails the whole call rather than skipping that one provider, so decide deliberately whether your backend throws when the store is unreachable or answers from a degraded local view.
 
 ## Sunset / monthly budgets
 

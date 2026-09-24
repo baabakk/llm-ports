@@ -82,13 +82,13 @@ Not all adapters support all block types. The adapter throws `ContentBlockUnsupp
 | Block | Anthropic | OpenAI | Google | Ollama | Vercel |
 |-------|-----------|--------|--------|--------|--------|
 | `text` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `image` (base64) | ✓ | ✓ (data URI) | ✓ | ✓ | partial (via SDK) |
-| `image` (URL) | ✓ | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | partial |
+| `image` (base64) | ✓ | ✓ (data URI) | ✓ | ✓ | ✓ (data URI) |
+| `image` (URL) | ✓ | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | ✓ |
 | `audio` | ✗ | ✓ (wav, mp3 only; ogg ✗) | ✓ (base64) | ✗ | ✓ (base64) |
 | `document` (base64) | ✗ (not expressible in the supported SDK range) | ✓ | ✓ | ✗ | ✓ |
 | `document` (URL) | ✗ | ✗ (no URL form on OpenAI's file part) | ✓ (needs `mediaType`) | ✗ | ✓ (needs `mediaType`) |
-| `tool_use` (assistant) | ✓ | ✓ (as `tool_calls`) | ✓ | ✓ | partial (single-turn in v0.1) |
-| `tool_result` (user→tool message) | ✓ | ✓ (separate `role: tool` message) | ✓ | ✓ | partial |
+| `tool_use` (assistant) | ✓ | ✓ (as `tool_calls`) | ✓ | ✓ | ✓ |
+| `tool_result` (user→tool message) | ✓ | ✓ (separate `role: tool` message) | ✓ | ✓ | flattened to user text |
 
 See [the adapter feature matrix →](/adapters/) for the full breakdown.
 

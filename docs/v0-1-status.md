@@ -42,7 +42,7 @@ These are load-bearing today, with comprehensive test coverage. Not "experimenta
 | OpenAI adapter (chat + embeddings + 12 compat providers via `baseURL`, `useStrictResponseFormat` auto-detects on OpenAI native + Cerebras + Groq, `dangerouslyAllowBrowser`, `reasoning_effort` passthrough) | full live + contract; runtime capability discovery; reasoning-model auto-handling; transient-401 burst-protection retry |
 | Google Gemini adapter (chat + multimodal + streaming + multi-turn agent + native `responseSchema`) | alpha.9; offline content + contract + quirks |
 | Ollama adapter (chat + embeddings + model management + `listModels`) | offline + Phase 2 live |
-| Vercel AI SDK adapter (migration-friendly) | offline + contract; v0.1: single-turn agent + text-only multimodal |
+| Vercel AI SDK adapter (migration-friendly, multi-turn agent + multimodal + bundled pricing) | offline + contract |
 | Capability factories (`createClassifier`, `createScorer`, `createDrafter`, `createSummarizer`, `createExtractor`, `createPlanner`, `createAnalyzer`) — carry full port surface (`reasoningEffort` + `signal` + `forceProviderAlias`) since alpha.13 | offline + 13 passthrough tests + Phase 3 live (via Cerebras/Anthropic) |
 | Validation strategies (`throw`, `retry-with-feedback`, `fallback-to-next-provider`, `custom`) | offline tests + Phase 2 live exercise |
 | Two-layer validation hardening (jsonrepair fallback in `extractJSON` + Zod-issue repair pass with 8 patterns including markdown decorator strip, stringified-JSON-as-object, single-element-array-unwrap) | alpha.5 base + alpha.13 extensions; 29 offline tests; each catch saves an LLM retry round-trip |
@@ -79,7 +79,7 @@ Fourteen medium-impact issues filed between alpha.0 and alpha.9 have been resolv
 | URL-form image scheme not validated (`file://`, `data:`, missing) | [#21](https://github.com/baabakk/llm-ports/issues/21) | alpha.5 (`InvalidImageUrlError`) |
 | `signal?: AbortSignal` missing on `*Options`; no mid-flight cancel | [#24](https://github.com/baabakk/llm-ports/issues/24) | alpha.6 |
 | Adapters don't expose `dangerouslyAllowBrowser` — blocks browser usage | [#32](https://github.com/baabakk/llm-ports/issues/32) | alpha.9 (openai + anthropic) |
-| Gemini `generateStructured` uses prompted JSON, not native `responseSchema`; `runAgent` is single-turn | (rolled-up from alpha.5 release notes) | alpha.9 |
+| Gemini `generateStructured` uses prompted JSON, not native `responseSchema`; `runAgent` is single-turn | (rolled-up from alpha.5 release notes) | alpha.9 (both; the adapter's own file header went on claiming otherwise until alpha.35) |
 | `claude-opus-4-7` rejects `temperature` in streaming methods (catalog only covered 4-5) | BEPA TD-LLMPORTS-OPUS-4-7 | alpha.10 (`/^claude-(opus\|sonnet)-4-\d/`) |
 | `generateStructured` overwrites `usage` across retry-with-feedback attempts instead of accumulating | BEPA TD-LLMPORTS-VALIDATION-ATTEMPTS | alpha.11 (mergeTokenUsage across all 5 adapters) |
 | `reasoning_effort` parameter not exposed; Groq `gpt-oss-120b` can't reach `"high"` effort | BEPA TD-LLMPORTS-REASONING-EFFORT | alpha.12 (per-call option on all 5 `*Options`) |
@@ -105,8 +105,6 @@ No medium-impact items are currently open. New ones will land here as users repo
 | First call to an unknown reasoning model pays one wasted round-trip | OpenAI adapter | The adapter's per-process cache learns the constraint after the first starved attempt. alpha.5 added a static `KNOWN_REASONING_MODELS` catalog covering o-series / gpt-5-nano / Cerebras gpt-oss / Clarifai Qwen3.6 / SambaNova MiniMax-M2.7, so the wasted round-trip is skipped for those. For other reasoning models, supply `pricingOverrides[modelId].capabilities.reasoningModel = true`. |
 | Compat-provider live coverage is one-test-deep (basic `generateText` only) | OpenAI adapter via `baseURL` (Cerebras, Groq, Together AI, Fireworks, Clarifai, SambaNova, etc.) | Structured / streaming / agent / embeddings are not regression-tested for compat providers in v0.1. alpha.9 added `useStrictResponseFormat` to fix the Cerebras silent-ignore-`json_object` case. Broader test coverage targeted for v0.2. |
 | `adapter-ollama` honors `AbortSignal` at entry but cannot cancel an in-flight request | Ollama adapter | `ollama-js` v0.5 doesn't expose a per-call signal. Coarse `client.abort()` cancels all in-flight, too blunt. Lands when ollama-js v0.7+ exposes per-call signal. |
-| `adapter-vercel`'s `runAgent` is single-turn only | Vercel adapter | Multi-step tool use through Vercel's own agent loop ships in v0.2. For multi-turn agents today, prefer the direct adapters. |
-| `adapter-vercel` multimodal inputs pass as `[image content]` placeholder strings | Vercel adapter | Image and audio content blocks downgrade to text. Direct adapters support full multimodal. |
 | `adapter-vercel` has no `listModels()` implementation | Vercel adapter | Underlying `LanguageModel` is opaque per-provider; no uniform discovery surface. `Registry.checkPricingFreshness` reports it as skipped. |
 | Gemini embeddings, explicit context caching, code execution tool | Google Gemini adapter | All v0.2 scope. |
 | Some compat-provider models require a `pricingOverrides` entry | Registry pricing-validation | Cerebras `gpt-oss-120b`, Clarifai Qwen3.6, SambaNova MiniMax-M2.7, Groq Llama variants, etc. need an explicit pricing override before the registry will admit them. |
@@ -183,7 +181,8 @@ Each of these was announced publicly and none has a consumer still asking. Withd
 
 - **Alpha.31's local runtime theme** in full: `adapter-transformers-node`, `adapter-tesseractjs`, and the `port.pipeline([...])` primitive. The v0.3 roadmap already places browser-native local inference much further out, so the announcement and the roadmap contradict each other today.
 - **`@llm-ports/express`** (alpha.28 item 14): a separate package for one convenience helper.
-- **`pricing: 'free'` sentinel** (alpha.28 item 12).
+
+The `pricing: 'free'` sentinel was on this list and has been taken off it: **it shipped in `alpha.34`** and is documented in the cost-gating and custom-adapter guides. It was listed here because the withdrawal was proposed before the release that delivered it, and nothing reconciled the two.
 
 ### Where the strategic work sits
 
@@ -225,7 +224,7 @@ So the observability arc consumed **four consecutive release slots** that had be
 
 | Item | State | Notes |
 |---|---|---|
-| Persistent budget and cost backends | **Owed; inventory done 2026-09-05** | Announced as alpha.30's theme. The ask is `@llm-ports/budget-redis` (BEPA 9). `BudgetBackend` and `CostBackend` are injectable, but only in-memory implementations ship. **Two consumers believe the seam itself is missing and it is not**, so the "you can implement this today" note is worth publishing ahead of the package. Ships with alpha.28 item 4, whose design question defers here. `plans/alpha.30-persistent-backends-and-caching.md`. |
+| Persistent budget and cost backends | **Owed; inventory done 2026-09-05** | Announced as alpha.30's theme. The ask is `@llm-ports/budget-redis` (BEPA 9). `BudgetBackend` and `CostBackend` are injectable, but only in-memory implementations ship. **Two consumers believe the seam itself is missing and it is not.** The note saying so is now published in the [cost-gating guide](/guides/cost-gating) as of `alpha.35`, ahead of the package: supplying your own persistent backend is the supported path today, and the package will add a tested implementation rather than the ability to supply one. Ships with alpha.28 item 4, whose design question defers here. `plans/alpha.30-persistent-backends-and-caching.md`. |
 | Response caching | **Owed, displaced from alpha.30** | The other half of alpha.30's announced theme. Provider prompt-cache accounting shipped (`CacheStats.provider_cache`), which is not the same thing and should not be mistaken for it: no response cache exists at any layer. |
 | Capability factory ergonomics | **Owed; inventory done 2026-09-05** | **0 of 11 shipped**, scored against source. Per consumer: BEPA 0 of 5, Dramma 0 of 3, SalesCoach 0 of 3. Nothing here blocks on an unresolved design question, which makes it unusually shippable for its size. Item 17 (optional `schema` on `createAnalyzer`) is still cited in a consumer's own project rules as the reason it carries a custom wrapper. Full scoring in `plans/alpha.29-capability-factory-ergonomics.md`. |
 | Local runtime and orchestration | **Withdrawal reopened 2026-09-05** | Three items, all Dramma's: `adapter-transformers-node`, `adapter-tesseractjs`, and a `port.pipeline([...])` primitive. The 2026-08-21 withdrawal proposal cited a clash with the v0.3 roadmap's browser-native placement; **the ask is Node-side, and the pipeline primitive is runtime-independent**, so that reasoning does not apply to any of the three. Withdraw on true grounds, keep item 33 alone, or keep the theme. `plans/alpha.31-local-runtime-and-orchestration.md`. |

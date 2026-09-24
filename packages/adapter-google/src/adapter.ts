@@ -8,18 +8,21 @@
  *     (base64) or fileData (URL). NO degradation, unlike OpenAI-compat
  *     baseURL where image_url.detail is silently ignored.
  *   - Native streaming via generateContentStream
- *   - Structured output via prompted-JSON + Zod retry-with-feedback
- *     + alpha.5 programmatic repair. Native Gemini responseSchema lands
- *     in v0.2.
- *   - Image-block boundary validation (size + URL scheme) — same shape
- *     as adapter-anthropic and adapter-openai (alpha.5).
+ *   - Structured output through Gemini's native responseSchema, so decoding
+ *     is constrained to the schema before tokens are produced. A Zod schema
+ *     using a feature responseSchema cannot express falls back to prompted
+ *     JSON with Zod retry-with-feedback and programmatic repair, and says
+ *     which feature forced the fallback.
+ *   - Multi-turn runAgent: a real tool loop bounded by maxSteps, default 10,
+ *     emitting per-step and per-tool events.
+ *   - Image-block boundary validation (size + URL scheme), the same shape
+ *     as adapter-anthropic and adapter-openai.
  *
- * Out of scope for v0.1 alpha:
- *   - Embeddings (Gemini's embedding API is separate; lands in v0.2)
- *   - Multi-turn runAgent through Gemini's native automatic tool calling
- *     (v0.1 ships a single-turn shim consistent with adapter-vercel)
- *   - Caching API (Gemini supports explicit context caching; lands in v0.2)
- *   - Code execution tool (Gemini's built-in code interpreter; lands in v0.2)
+ * Not implemented here:
+ *   - Embeddings. Gemini's embedding API is a separate surface and this
+ *     adapter does not implement EmbeddingsPort.
+ *   - The explicit context-caching API.
+ *   - The built-in code-execution tool.
  */
 
 import { GoogleGenAI, type HttpOptions } from "@google/genai";

@@ -7,7 +7,7 @@ Adapter for the [Vercel AI SDK](https://www.npmjs.com/package/ai). Migration hel
 - You already have `@ai-sdk/anthropic`, `@ai-sdk/openai`, etc. wired into your project
 - You want to add `llm-ports` (cost gating, fallback chains, capability factories) without rewriting the integration
 
-For new projects, prefer the direct adapters (`@llm-ports/adapter-anthropic`, `@llm-ports/adapter-openai`). Fewer layers, full multimodal, full agent features.
+For new projects, prefer the direct adapters (`@llm-ports/adapter-anthropic`, `@llm-ports/adapter-openai`). Not because this one is missing features, since the feature table below is nearly identical, but because it reaches the provider through one more library: a provider quirk arrives here filtered through Vercel's own translation, and reasoning-token budgets are handled less precisely as a result.
 
 ## Install
 
@@ -58,7 +58,7 @@ interface VercelAdapterOptions {
 }
 ```
 
-`pricing` is required because the adapter has no built-in pricing table — models can come from any of `@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`, etc. You supply the pricing for whatever you wire up.
+`pricing` is optional. The adapter ships a bundled table covering the common OpenAI, Anthropic and Google models reached through `@ai-sdk/openai`, `@ai-sdk/anthropic` and `@ai-sdk/google`, and anything you pass merges on top of it, with your entries winning. Since the Vercel ecosystem is wider than the bundled table (LMStudio, OpenRouter, Perplexity and others are not in it), supply pricing for whatever it does not cover. A model with no pricing reports usage without cost rather than reporting a cost of zero.
 
 ## Supported features
 
@@ -68,19 +68,18 @@ interface VercelAdapterOptions {
 | `generateStructured` (Zod schemas) | ✓ (prompted JSON + retry-with-feedback) |
 | `streamText` | ✓ |
 | `streamStructured` | ✓ (best-effort partial parse) |
-| `runAgent` | **Limited in v0.1**: single-turn only; multi-turn tool use through Vercel's own agent loop comes in v0.2 |
+| `runAgent` | ✓ multi-turn, through Vercel's own tool loop (`maxSteps`, default 10) |
 | `generateEmbedding` / `generateEmbeddings` | ✓ |
-| Multimodal content blocks | partial (string conversion in v0.1; full multimodal in v0.2) |
+| Multimodal content blocks | ✓ images, audio and documents as base64; images also by URL |
 
 ## Limitations to know
 
-These are also surfaced in the cross-package [v0.1 status page](/v0-1-status) along with their resolution paths.
+Current as of `0.1.0-alpha.35`, checked against the adapter source rather than against earlier release notes. Four entries that stood here through v0.1 are gone because the features shipped: the multi-turn agent loop, multimodal content, bundled pricing, and a typed empty-response error, all in `0.1.0-alpha.8` or since.
 
-- **`runAgent` is single-turn in v0.1.** Multi-step tool use through Vercel's own agent loop will land in v0.2 once the API surface is locked down. For multi-turn agents today, prefer the direct adapters.
-- **Multimodal is text-only in v0.1.** Image and audio content blocks pass through as a stringified `[image content]` placeholder. Direct adapters support full multimodal.
-- **You bring your own pricing.** No bundled table. Look up the rates for your chosen models from the provider's pricing page.
-- **No reasoning-model handling.** The Vercel adapter does NOT apply the headroom multiplier the OpenAI adapter does. Calling against `gpt-5-nano`, `o3`, `o3-mini`, Cerebras `gpt-oss-120b`, or other reasoning models with a small `maxOutputTokens` (e.g. 20) reliably starves the model and returns empty text. **Workaround**: set `maxOutputTokens` 5-10× higher than your visible-output budget, or use `@llm-ports/adapter-openai` directly for reasoning models in v0.1. Tracked at [#4](https://github.com/baabakk/llm-ports/issues/4).
-- **`generateStructured` throws `SyntaxError` on empty model responses.** When a reasoning model returns an empty completion (above), the JSON parser throws `SyntaxError: Unexpected end of JSON input`, which currently wraps as a generic `ProviderUnavailableError`. v0.2 ships a more specific `EmptyResponseError` class. Tracked at [#5](https://github.com/baabakk/llm-ports/issues/5).
+- **Reasoning budgets are rescued after the fact, not anticipated.** The OpenAI adapter multiplies the token budget up front for a model it knows reasons internally. This adapter does not: a reasoning model given a small `maxOutputTokens` can spend the whole budget thinking and return empty text, at which point the adapter retries once with an expanded budget and fires `onRetry` with reason `reasoning-starvation`. That recovers the call and costs an extra round trip. Setting `maxOutputTokens` well above your visible-output budget avoids it, and `@llm-ports/adapter-openai` avoids it without help.
+- **Audio by URL is refused.** Vercel routes audio as file data rather than as a fetchable URL, so an audio block in URL form throws `ContentBlockUnsupportedError` naming that. Pass audio as base64 with its media type. Images accept either form.
+- **Tool-role messages are flattened to user text.** Vercel carries tool results in a dedicated role with its own part shape, and threading tool-call identifiers through it is not implemented here, so a `tool` message is sent as user text. Multi-turn agent runs are unaffected, since the loop belongs to Vercel and never round-trips those messages through this adapter.
+- **The model surface is yours to keep current.** You wire `@ai-sdk/*` model objects in yourself, which is the point of this adapter, and that also means a model rename or deprecation in one of those packages surfaces here rather than being absorbed for you.
 
 ## Cancellation
 

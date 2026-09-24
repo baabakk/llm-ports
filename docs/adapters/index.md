@@ -25,11 +25,11 @@ alpha.30 adds two subprocess-driven agent adapters — `@llm-ports/adapter-codex
 | Structured output (Zod schema) | ✓ | ✓ | ✓\* | ✓ |
 | Streaming text | ✓ | ✓ | ✓ | ✓ |
 | Streaming structured (partial JSON) | ✓ | ✓ | ✓ | ✓ |
-| Tool use | ✓ | ✓ | ✓\* | partial (single-turn in v0.1) |
+| Tool use | ✓ | ✓ | ✓\* | ✓ (multi-turn via Vercel's own loop) |
 | Tool parameter schemas advertised to model | stub\*\* | stub\*\* | stub\*\* | via Vercel SDK |
-| Vision input (base64) | ✓ | ✓ (data URI) | ✓\* | partial (string conversion) |
-| Vision input (URL) | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | partial |
-| Audio input | ✗ (Anthropic chat) | ✓ (wav, mp3) | ✗ | ✗ |
+| Vision input (base64) | ✓ | ✓ (data URI) | ✓\* | ✓ (data URI) |
+| Vision input (URL) | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | ✓ |
+| Audio input | ✗ (Anthropic chat) | ✓ (wav, mp3) | ✗ | ✓ (base64 only) |
 | Audio output | ✗ | ✓ | ✗ | ✗ |
 | Prompt caching | ✓ native | partial (cached_tokens reported) | n/a | via Vercel |
 | Embeddings | ✗ | ✓ | ✓ | ✓ (via Vercel) |

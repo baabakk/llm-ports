@@ -24,11 +24,11 @@ features:
     title: USD-denominated cost gating
     details: Set per-hour, per-day, per-month dollar caps per provider. Fallback chains pick the next provider when the cap trips.
   - icon: 🧱
-    title: 17 capability factories
-    details: classify, score, draft, summarize, extract, plan, analyze (v0.1) — configure once, call many times. 10 more in v0.2.
+    title: 7 capability factories
+    details: classify, score, draft, summarize, extract, plan, analyze. Configure once, call many times. More are planned, and this number counts only what ships.
   - icon: 🌐
-    title: 4 adapters, 16+ providers
-    details: Anthropic, OpenAI (+12 compatible providers via baseURL — Groq, Together, Fireworks, Cerebras, Clarifai, SambaNova, and others), Ollama (local + model management), Vercel AI SDK migration helper.
+    title: 7 adapters, 16+ providers
+    details: Anthropic, OpenAI (plus 12 compatible providers through baseURL: Groq, Together, Fireworks, Cerebras, Clarifai, SambaNova and others), Google Gemini, Ollama (local, with model management), the Vercel AI SDK migration helper, and two coding agents (Codex, Aider).
   - icon: 🛡️
     title: Tool-use security primitives
     details: Mark tools destructive, requireConfirmation, set output size limits. Safety isn't an afterthought.
