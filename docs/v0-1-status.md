@@ -1,19 +1,23 @@
 # v0.1 status
 
-A single canonical inventory of what's stable in `llm-ports` v0.1, what's still being hardened, and what's deferred to v0.2. Other docs pages link here when a caveat is in play; this page is the authoritative source.
+A single canonical inventory of what is stable in `llm-ports` today, what is still being hardened, and what comes next. Other pages link here when a caveat is in play, and this page is the authoritative source for all three.
 
 This is the page to share when someone asks "what works in alpha?" or "what should I expect to break?"
+
+**Where this is heading, since it changes how to read the rest of the page.** The alpha line ends at `0.1.0-alpha.35`, and the next release is a candidate for `1.0.0` carrying every remaining breaking change at once. Everything below described as deferred to "v0.2" belongs to the additive line after that, which is `1.1.0`. The [sequence is set out further down](#what-ships-next).
 
 ---
 
 ## How to install during the alpha line
 
-> **Recommended: exact-version pin** during alphas, not the `@alpha` dist-tag. The `@alpha` tag tracks the latest published prerelease; a routine `pnpm install` can jump you across breaking changes. Pin the exact version (e.g. `0.1.0-alpha.20.1`) and bump deliberately, reading [MIGRATION.md](https://github.com/baabakk/llm-ports/blob/main/MIGRATION.md) at each step.
+> **Recommended: exact-version pin** during alphas, not the `@alpha` dist-tag. The `@alpha` tag tracks the latest published prerelease, so a routine `pnpm install` can carry you across a breaking change. Pin the exact version and bump deliberately, reading [MIGRATION.md](https://github.com/baabakk/llm-ports/blob/main/MIGRATION.md) at each step.
 >
 > ```jsonc
-> // package.json — recommended during alphas
-> { "dependencies": { "@llm-ports/core": "0.1.0-alpha.20.1" } }
+> // package.json, recommended while the version is a prerelease
+> { "dependencies": { "@llm-ports/core": "0.1.0-alpha.35" } }
 > ```
+>
+> **Once `1.0.0` ships this advice reverses.** A caret range is then the right thing, because a breaking change has to announce itself as a new major version and the range refuses it for you. That is the protection an exact pin is standing in for today.
 >
 > For mechanical migrations across releases:
 >
@@ -136,145 +140,77 @@ Four themed releases were announced in `docs/migration/alpha-26-to-alpha-27.md` 
 
 **32 items announced. 4 shipped, 2 partial, 26 not shipped.** Per-item scoring for alpha.28 is in `plans/alpha.28-reliability-observability-polish.md`; the other three slates live in planning discussions #65, #66, and #67 and are summarized in the sequence below.
 
-## Planned release sequence
+## What ships next
 
-> Each release has a plan written before it ships, and the maintainers keep a journal recording what every release announced against what it shipped. **A release is not finished until its journal row is filled**, which is the check that would have caught the four displacements below within one release instead of four.
+The plan below is the public form of the maintainers' sequence. It replaces a longer forward-looking section that had drifted: it still described a two-release path to beta that has since been merged into one, and named an `alpha.35` and `alpha.36` whose contents have changed.
 
-Ordered by three rules, in priority order: correctness before features; items asked for by two or more consumers before single-consumer items; and dependency clusters kept together so a design question is answered once rather than repeatedly.
+**The destination is `1.0.0`, and it is close.** Not because every idea is built, but because the shapes a consumer builds against are ready to stop moving. Below version 1 there is no way to say "this release breaks you" that a dependency range can act on; above it, a breaking change announces itself as a major version and a consumer's range refuses it automatically. That protection is the whole reason for the number.
 
-Deliberately **not** one large release. Bundling 26 items would produce something nobody can review, which is the same failure in reverse.
+### `0.1.0-alpha.35`, in flight
 
-### alpha.33 — "Failover that actually fires"
+Contract corrections, a missing method, and the close-out of the observability work. The largest release in the sequence, and the last one numbered `0.1.0-alpha`.
 
-| Item | Origin | Size |
-|---|---|---|
-| Prime streamed chains so `streamText` / `streamStructured` fall back | `TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING` | done |
-| `AttemptTimeoutError extends ProviderUnavailableError` | alpha.28 item 1, ADW A + SalesCoach B | ~50 LoC |
+The corrections are the load-bearing part: streamed calls through OpenAI-compatible providers were losing their token usage, so cost totals under-counted for those providers; a conversation whose system messages are not adjacent threw on two adapters instead of collapsing them; and every adapter now surfaces a validation failure the same way, pinned by a contract test rather than by convention.
 
-Correctness first. The streamed methods have never fallen back on any released version, which is shipped code contradicting its own documentation rather than a missing feature. Item 1 is the same concern arriving from the other direction and was the announced highest-leverage item of alpha.28. Building the streamed fix first settles that release's open design question 1 with evidence rather than argument.
+New in the same release: `generateChat`, which returns the assistant's turn with any tool calls surfaced and not executed, for callers who want the loop themselves; structured output from a JSON Schema rather than only a Zod schema; dollar cost on OpenTelemetry spans; a once-per-call completion hook; a bounded record of recent retries; and an unexplained provider 400 learned once rather than rediscovered on every call.
 
-### alpha.34: shipped with a different scope
+### `1.0.0-rc.36`: one release candidate, carrying every remaining break
 
-**Planned as "the rest of alpha.28". It shipped as "configuration that survives an incomplete deployment"** instead: registry admission, pricing in three states, and core as a peer dependency, plus fixes for three outages that did not fail over. Items 11, 12 and 13 of alpha.28 shipped with it. Items 2 (`onComplete`), 5 (opaque-400 detection), 9 (`recentRetries`), 15 (`ValidationError` contract test) and the `maxAttempts` half of item 7 did not. ADW now has 2 of its 5 alpha.28 items: the attempt timeout error from alpha.33 and `pricingPolicy` from this release.
+Everything that changes an existing shape travels together, so it can be baked once rather than trickled out:
 
-**The entries below were written before alpha.33 and no longer reflect the order of the releases that follow.** They are kept as the record of what was proposed, and will be revised.
+- A total spend ceiling per budget scope, with shared storage behind it, designed so that replacing a registry's configuration no longer resets spend counters.
+- Login state that works across processes, which turns the current synchronous interface asynchronous.
+- Removal of a setting that exists only to serve our own tests.
+- **One model record carrying both what a model can do and what it costs**, supplied as data. Including the context window, which this library models nowhere today: a prompt being too long is currently discovered only when a provider rejects it.
+- The Vercel adapter verified, hardened and settled rather than held back.
+- A Cohere adapter, the rerank port documented as consumer-implementable, and a reranker capability.
+- Tool schemas converted per attempt, never hoisted above failover.
 
-### alpha.35 — "Persistent state"
+Also carried: the migration pages owed for `alpha.31` and `alpha.32`, test depth against compatible providers beyond the single call currently covered, and the withdrawals below stated where they were announced.
 
-`@llm-ports/budget-redis` (alpha.30 item 2, ~250 LoC), per-scope budget ceilings (alpha.28 item 4, ADW B, ~150 LoC), and `createRedisSessionStore` (alpha.30 bonus item).
+**What gates the candidate:** a migration page covering every break it carries, a live sweep across the adapters against real APIs, and sign-off from an adopter running it against production.
 
-These three are one dependency cluster, not three items that happen to be related. Alpha.28's own design question 2 deferred the scope-budget accumulator to "alpha.30 alongside `@llm-ports/budget-redis`", so building them separately means answering the same question twice and probably answering it differently.
+### `1.0.0`: settled
 
-### alpha.36 — "Content cache"
+All twelve published packages settle at `1.0.0` together, and the shared version number retires there. From that point each package moves on its own, which is what lets a fix to one adapter stop being a version bump for eleven packages that did not change.
 
-The content-result cache primitive (alpha.30 item 1, ADW E, ~300 LoC): a `ContentCacheBackend` with in-memory, file, and Redis implementations, wired across the four non-agent methods.
+An earlier plan tiered the packages, calling seven settled and five still moving. That is not expressible at version 1: below it, "still moving" means "we may break you without warning", and that is not a promise worth keeping for anything published. The five thinner packages get the same protection as the rest.
 
-Its own planning note called it "substantial enough to be its own release note", and that judgment still holds.
+### `1.1.0` and beyond
 
-### alpha.37 — "Capability factory ergonomics", re-scoped
+Additive work, highest signal first, in a line where adding is safe and breaking announces itself. The `1.2.0` and later material is listed under the roadmap sections below.
 
-Alpha.29's eleven items, none of which shipped. **This needs re-scoping before it is committed**, not just re-queuing: it was written against the factories as they stood in July, and several items may be obsolete, changed, or already solved differently. Re-scoping is the first task of that release, not a prerequisite to planning it.
+### Withdrawn, and why
 
-### Withdraw explicitly rather than carry
+Stated rather than quietly dropped, since each was announced publicly.
 
-Each of these was announced publicly and none has a consumer still asking. Withdrawing them in a release note costs a paragraph; carrying them silently is what produced this section.
+- **The three local-runtime items**: a Transformers.js adapter, a Tesseract.js adapter, and the step-chaining primitive. Withdrawn **with an open mind kept deliberately**: if a later design can serve them without dragging non-model engines into a port built for language models, they return. The reason is worth publishing either way, because the only consumer who asked shipped its own answer and recorded that an OCR engine cannot produce the structured output this port's contract assumes.
+- **`@llm-ports/express`**: a whole package for one convenience helper.
+- **Named sessions as specified**, because they collide with the standing position that conversation state belongs to the application.
 
-- **Alpha.31's local runtime theme** in full: `adapter-transformers-node`, `adapter-tesseractjs`, and the `port.pipeline([...])` primitive. The v0.3 roadmap already places browser-native local inference much further out, so the announcement and the roadmap contradict each other today.
-- **`@llm-ports/express`** (alpha.28 item 14): a separate package for one convenience helper.
+**And that standing position is deliberately reopened.** The question asked is whether conversation history could be offered as an **optional** feature rather than excluded: today every consumer holds the transcript and passes it on each call, and the alternative is that the library can hold it for those who want that while holding nothing by default. Design questions for the `1.1.0` window, recorded rather than answered.
 
-The `pricing: 'free'` sentinel was on this list and has been taken off it: **it shipped in `alpha.34`** and is documented in the cost-gating and custom-adapter guides. It was listed here because the withdrawal was proposed before the release that delivered it, and nothing reconciled the two.
+The `pricing: "free"` sentinel was on this withdrawal list in error and has been taken off it. **It shipped in `alpha.34`** and is documented in the cost-gating and custom-adapter guides. It was listed because the withdrawal was proposed before the release that delivered it, and nothing reconciled the two.
 
-### Where the strategic work sits
+## The additive roadmap, after `1.0.0`
 
-The adoption research direction is not cancelled; it is sequenced behind the debt and now has a stated position rather than an implied one.
-
-`streamChat` and `@llm-ports/integration-livekit` already shipped in alpha.32, so that direction is delivered rather than waiting. Verifying `adapter-vercel` and the tool-schema-per-attempt guarantee are small enough to ride alongside any release above. The capability-based router (`TD-LLMP-20`) is the interesting case: it is simultaneously unshipped consumer debt and the strategic item the adoption research independently found the market asking for, which makes it the natural anchor once alpha.35 and alpha.36 land.
-
-## Near-term alpha queue
-
-The work queue inside the current `0.1.0-alpha.*` series. This section, not the README badge, is the durable record of alpha-series intent. The README's "coming next" line is a pointer to the top of this list and gets rewritten every release; this list does not.
-
-When a release ships contents other than what was queued here, the displacement is recorded in that release's changelog entry rather than by silently editing this list.
-
-| Item | State | Notes |
-|---|---|---|
-| Shared authentication state across Registry instances (`RegistryOptions.auth`) | **Shipped in `alpha.31.1`** | Injectable `AuthBackend` plus an `InMemoryAuth` default, matching the `budget` / `cost` shape. Default behavior is unchanged. Synchronous by design, so it closes the multi-instance-one-process case and not cross-process sharing; see the scope limit in the alpha.31.1 changelog entry. |
-| `@llm-ports/telemetry-otel` `Tracer` type compatibility | **Shipped in `alpha.31.1`** | `startSpan` widened to arity-3, `AttributeValue` array variants made mutable. Real `@opentelemetry/api` tracers now unify without a cast. |
-| Alpha.30 additive-compatibility correction | **Shipped in `alpha.31.1`** | The alpha.30 notes claimed identical behavior for consumers who did not opt in, which was false for multi-registry consumers. Corrected in the alpha.31.1 entry rather than edited in place. |
-**Status, 2026-08-21. Corrected after an external audit.** The statement below that every owed row was discharged was **wrong**, because this queue was built from recent working context rather than from the roadmap this project had already published. Three themed releases announced in the alpha.27 migration guide were displaced by the observability arc and never re-queued. They are restored below.
-
-**What was announced, in a shipped artifact.** `docs/migration/alpha-26-to-alpha-27.md`, released 2026-07-17, named four themed releases with target dates. What shipped under each:
-
-| Announced | Shipped instead |
-|---|---|
-| alpha.28 "Reliability + observability polish", 16 items synthesized from four consumers | Observability **contract foundation only**; the plan driving it committed to §5.1 alone, leaving most of the sixteen-item slate unshipped |
-| alpha.29 "Capability factory ergonomics" | Runtime observability instrumentation |
-| alpha.30 "Persistent backends + caching" | Streaming instrumentation, adapter-side emission, OpenTelemetry bridge |
-| alpha.31 "Local runtime + orchestration" | A single-issue `operation_id` hotfix |
-
-So the observability arc consumed **four consecutive release slots** that had been publicly themed for other work. Each displacement was individually defensible and none was recorded, which is how four of them happened without anyone noticing until a consumer counted.
-
-**Finish-first rule.** Rows marked *owed* are commitments already made: announced scope, or a resolution path a closed entry claimed. They rank above strategic work regardless of how much smaller or less interesting they are. The alpha.28-to-31 arc has so far produced no observable value in its motivating consumer, because the last mile was never walked while newer work kept being added in front of it. This section is ordered to stop that repeating.
-
-| Item | State | Notes |
-|---|---|---|
-| `AuthBackend` documentation and the registry-sharing statement | **Shipped**, commit e17ad1e | `AuthBackend` and `InMemoryAuth` shipped in alpha.31.1 as public API and appear nowhere in `docs/`. The promised statement of what is and is not shared across Registry instances was never written, and the parent entry was closed anyway. A consumer holding two registries still cannot discover that they should share a backend, which is exactly the situation that entry existed to prevent. See `TD-LLMPORTS-REGISTRY-SHARING-UNDOCUMENTED`. |
-| `@llm-ports/eval` Postgres backend | **Shipped in `alpha.31.2`** | Announced as alpha.31 scope, displaced once, still undelivered. Close to a mechanical port of the SQLite backend, and `ON CONFLICT DO NOTHING` gives the exact dedup boolean the contract requires, which is better than SQLite's catch-the-constraint-error approach. No open design questions; ships independently of part B. See `plans/alpha.31.2-eval-persistence-and-workflow.md`. |
-| Evaluation-workflow tooling | **Shipped in `alpha.31.2`** | Announced alpha.31 scope, undelivered. Definition adopted: batch judge runs, sampling plus a review queue, A/B comparison, and regression detection. **Source-verified constraint:** this package stores evaluations, not what was evaluated. `EvaluationTarget` is a `{kind, id}` pointer and the sink bridge forwards only `evaluation.recorded`, so two of the four capabilities cannot be built as announced without an operation source. The plan answers with a read-only `OperationSource` port the consumer implements over infrastructure they already run, rather than adding a competing store here. Carries the release's only real design risk. |
-
-| Item | State | Notes |
-|---|---|---|
-| Persistent budget and cost backends | **Owed; inventory done 2026-09-05** | Announced as alpha.30's theme. The ask is `@llm-ports/budget-redis` (BEPA 9). `BudgetBackend` and `CostBackend` are injectable, but only in-memory implementations ship. **Two consumers believe the seam itself is missing and it is not.** The note saying so is now published in the [cost-gating guide](/guides/cost-gating) as of `alpha.35`, ahead of the package: supplying your own persistent backend is the supported path today, and the package will add a tested implementation rather than the ability to supply one. Ships with alpha.28 item 4, whose design question defers here. `plans/alpha.30-persistent-backends-and-caching.md`. |
-| Response caching | **Owed, displaced from alpha.30** | The other half of alpha.30's announced theme. Provider prompt-cache accounting shipped (`CacheStats.provider_cache`), which is not the same thing and should not be mistaken for it: no response cache exists at any layer. |
-| Capability factory ergonomics | **Owed; inventory done 2026-09-05** | **0 of 11 shipped**, scored against source. Per consumer: BEPA 0 of 5, Dramma 0 of 3, SalesCoach 0 of 3. Nothing here blocks on an unresolved design question, which makes it unusually shippable for its size. Item 17 (optional `schema` on `createAnalyzer`) is still cited in a consumer's own project rules as the reason it carries a custom wrapper. Full scoring in `plans/alpha.29-capability-factory-ergonomics.md`. |
-| Local runtime and orchestration | **Withdrawal reopened 2026-09-05** | Three items, all Dramma's: `adapter-transformers-node`, `adapter-tesseractjs`, and a `port.pipeline([...])` primitive. The 2026-08-21 withdrawal proposal cited a clash with the v0.3 roadmap's browser-native placement; **the ask is Node-side, and the pipeline primitive is runtime-independent**, so that reasoning does not apply to any of the three. Withdraw on true grounds, keep item 33 alone, or keep the theme. `plans/alpha.31-local-runtime-and-orchestration.md`. |
-| The unshipped remainder of alpha.28's slate | **Owed; inventory done 2026-08-21** | **4 of 16 shipped, 2 partial, 10 not.** Full scoring in `plans/alpha.28-reliability-observability-polish.md`, verified against source rather than against changelogs. Per consumer: ADW 0 of 5, SalesCoach 1 of 5, Dramma 1 of 4, BEPA 2 of 3. The consumer report that prompted this was exactly right. **Updated 2026-09-06: `AttemptTimeoutError` (item 1) shipped in `alpha.33`**, so the count reached 5 of 16. **Items 11, 12 and 13 shipped in `alpha.34`, bringing it to 8 of 16 with 2 partial.** The remaining highest-value item is the combined `onComplete` hook, wanted by two consumers. |
-| `DocumentBlock` in the content model | **Shipped in `alpha.33`** | `ContentBlock` gains a `document` member carrying PDF and text formats from base64 or a URL. A separate member rather than a widened `ImageSource`, following the `AudioBlock` precedent. OpenAI, Google and Vercel carry documents; Anthropic and Ollama refuse and the chain routes past them, because `ContentBlockUnsupportedError` now walks under the default policy. **TS-BREAKING** for exhaustive switches. See `TD-LLM-PORTS-NO-DOCUMENT-BLOCK`. |
-| Pricing not required unless the alias is cost-gated | **Shipped in `alpha.34`** | A model with no pricing entry is unroutable even under `unlimited` gating, because the guard sits after the gating branch and is unconditional. The consumer fronting 392 models answers by assigning every unpriced model a fabricated $1/$1 per million, which is inert today and becomes wrong the moment they enable the cost gate the placeholder exists to keep reachable. See `TD-LLMPORTS-PRICING-REQUIRED-WITHOUT-COST-GATE`. |
-| Programmatic `RegistryConfig` alongside env configuration | **Shipped in `alpha.34`** | The constructor accepts only an env map, and a provider alias is derived from the env var's own name, so a model id containing `/`, `.` or capitals cannot be named at all. `RegistryConfig` and `parseRegistryConfig` are already exported; the constructor just will not take the parsed result. One consumer carries a generated 392-entry catalogue, ~784 synthesized env vars, opaque `m0001` route ids and a request-path resolver because of it. Additive. See `TD-LLMPORTS-NO-PROGRAMMATIC-REGISTRY-CONFIG`. |
-| Registry validation should drop incomplete config, not reject all of it | **Shipped in `alpha.34`** | `validateConfig` throws in the constructor on the first alias whose adapter is unregistered, so nine configured vendors and eight keys yields zero providers rather than eight. Every multi-vendor consumer rebuilds the same pre-filter; one spends ~50 lines on it. Drop and warn, throw only on an empty registry, keep the strict behaviour opt-in. See `TD-LLMPORTS-CONFIG-VALIDATION-ALL-OR-NOTHING`. |
-| Emit cost on OpenTelemetry spans | **New scope, queued after the owed work** | The lifecycle contract carries `cost` and `aggregate_cost`; the sink maps tokens, duration, cache reads, models and the whole agent surface, and drops cost entirely. Anyone wiring the supported bridge has to rebuild spend from a pricing table the library already applied, which is guaranteed to drift from what it charged its own gates. See `TD-LLMPORTS-OTEL-SINK-DROPS-COST`. |
-| Verify and harden `@llm-ports/adapter-vercel` | **Next, no new API** | The adoption wedge. Projects already built on the Vercel AI SDK will not replace their provider layer, but can in principle keep it and gain governance above it, turning "migrate to us" into "keep everything, add the missing layer." Whether that adapter can carry a real consumer's full provider set is currently an assumption, and it is the assumption the wedge rests on. Cheapest high-value work available. |
-| Tool-schema-across-failover guarantee | **Next, existing code** | Schemas must be converted per attempt by the adapter serving it, never hoisted above the attempt boundary. Believed true by construction; needs a test that fails on the hoisted behavior before the claim can be made publicly. A defect of exactly this shape is reported in another project, where a fallback model rejects the primary's tool definitions, which makes this a differentiator rather than an internal detail. |
-| `streamChat`: streaming with tool calls surfaced, plus `@llm-ports/integration-livekit` | **Shipped in `alpha.32`** | See `plans/alpha.32-streaming-tool-calls-and-livekit.md`. Today a caller can stream text without tools or use tools without streaming; realtime voice needs both at once. Named `streamChat`, not `streamAgent`, because it surfaces tool calls without executing them: the calling framework owns the loop. Introduces the `integration-*` category for inbound adapters, which points the opposite way from every existing `adapter-*`. |
-| ClickHouse evaluation backend | **Withdrawn, verified grounds** | Cannot honor the store's exact-dedup contract. Deduplication happens only at unpredictable background merges, and `FINAL` is documented as eventual-correctness-only and explicitly not to be relied on. `insert_deduplication_token` fits but is window-bounded and still cannot give `write()` its exact boolean. See `TD-LLMPORTS-ALPHA31-EVAL-BACKENDS-DEFERRED`. |
-| Fix streamed fallback for `streamText` / `streamStructured` | **Shipped in `alpha.33`** | Neither method could fall back on any released version: `walkStreamChain` expected `openStream` to throw, but an async generator runs no body until first iteration, so the walker saw a healthy open for a dead provider. Both call sites now prime through `primeStream` / `replayPrimed`, the same fix `alpha.32` used for `streamChat`. Commit 22709ef. See `TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING`. |
-| Configuration that survives an incomplete deployment | **Shipped in `alpha.34`** | Registry admission and pricing: unregistered adapters dropped with a warning, pricing required only where a cost cap enforces it, a `pricing: "free"` declaration, `pricingPolicy`, a programmatic `RegistryConfig`, core as a peer dependency with errors recognised across duplicate copies, and the real default fallback policy exported by name. Also fixed: a provider 5xx, an empty response and an unreachable Ollama or Google endpoint now fail over. See the migration page. |
-| `generateChat`: tools surfaced, not executed, without streaming | **Queued for `alpha.35`; additive, so not freeze-gated** | The most common OpenAI request shape has no method here. Tools appear only on `streamChat` (streamed, surfaced) and `runAgent` (non-streamed, executed), so `stream: false` plus `tools` has no implementation path, and that is the default for most agent frameworks. Blocks the whole "OpenAI-compatible surface in front of this library" adoption pattern. Cheap, because `streamChat` already built the tool-call reassembly. Its `stopReason` also closes a consumer's hardcoded `finish_reason`. See `TD-LLMPORTS-NO-NONSTREAMING-CHAT-WITH-TOOLS`. |
-| Structured output from a JSON Schema, not only Zod | **Queued for `alpha.35`**; additive as a separate field | `generateStructured` takes `z.ZodType<T>` and adapters convert it to JSON Schema anyway, so a consumer holding a JSON Schema must convert backwards to Zod for us to convert forwards again. Unreachable today for any proxy, or for schemas an operator edits rather than a developer authors. Zod stays the default; it should not be the only door. See `TD-LLMPORTS-STRUCTURED-OUTPUT-IS-ZOD-ONLY`. |
-| Adapter capability-declaration model | Queued, after `alpha.32` | One model expressing what an adapter can do, serving both task routing and streaming-support detection. `alpha.32` ships a runtime optional-method check instead, which this later subsumes without a break. External demand corroborates the routing half: a fallback request on another project asks for capability-aware model selection rather than a fixed list. |
-| `totalDeadlineMs` and realtime timeout profiles | Queued, **no longer gating** | The correct realtime primitive: spend a total budget across attempts, rather than capping each attempt independently, since two individually-reasonable attempts can blow a conversational budget. Measurement done (`packages/core/bench/STREAM-CHAT-RESULTS.md`): Registry overhead is 0.036 ms and each fallback hop 0.33 ms, against a ~680 ms budget. The risk this primitive guards against turns out to come from a slow provider failing slowly, which `perAttemptTimeoutMs` already bounds. So it is a convenience, not a necessity, and should wait for a consumer to ask. |
-| Cross-process shared authentication state (async `AuthBackend`) | Open, priority raised | The sync interface shipped in alpha.31.1 cannot perform blocking cross-process reads. Previously "wait for a consumer to ask"; the adoption research found self-hosted operators asking for per-tenant rather than per-process cost and usage attribution, which is the same shape of want. |
-| Registry-instance sharing semantics, documented | Queued | One explicit statement of what is and is not shared across Registry instances. Partially addressed by the `auth` option's documentation; the full inventory is still owed. |
-
-Items graduate from this list into a release's changelog when they ship. Items that slip record the slip.
-
-**Ordering note.** Owed rows come first, per the finish-first rule above. Below them, `adapter-vercel` verification and the tool-schema test carry no new public API and address better-evidenced demand than the streaming surface, which is why they precede `alpha.32` despite being smaller. Version numbers are labels and do not imply dependencies.
-
-**Downstream, tracked outside this repo.** Two items in the motivating consumer are what actually convert this arc into observable value, and neither is done: its span exporter emits JSON to a receiver that accepts protobuf only, so no span leaves the process at all; and the correlation work that `alpha.31` was specifically cut to unblock has not been implemented, so nothing is yet keyed on `operation_id`. Recording them here because this queue looks healthy while the consumer that motivated it sees nothing, and that gap is the thing worth watching.
-
----
-
-## What v0.2 adds
-
-Roadmap target — not promises, but the work queue. Order is approximate; what ships first is whatever has clearest user need.
+A work queue rather than a set of promises, and the order is approximate: what ships first is whatever has the clearest need. **This was written as "what v0.2 adds" and the version names no longer apply**, since the line after `1.0.0` is `1.1.0`. Three rows have been removed because they shipped: multi-turn agent support in the Vercel adapter (`alpha.8`), registry runtime fallback with a chain walk (`alpha.34`), and typed empty-response handling.
 
 | Surface | What ships |
 |---|---|
-| Vercel adapter feature parity | Multi-turn `runAgent` through Vercel's own agent loop. (Reasoning-model handling and `EmptyResponseError` already landed in `0.1.0-alpha.1` — #4, #5.) |
-| Registry runtime fallback | Retry-on-`ProviderUnavailableError` with chain walk. Catch-class configurable. |
-| Compat-provider test depth | Structured / streaming / agent / embeddings live tests across Cerebras, Groq, Together, Fireworks. |
-| `createAgent` capability factory | Higher-level ergonomics matching `createClassifier` / `createDrafter`. Bundles `wrapWithApprovalGate` + tool/message plumbing into one configure-once factory. The v0.1 path (`runAgent` directly) keeps working. |
-| `@llm-ports/observability` | Quality tracking hooks, sinks, deterministic edit-diff helpers. The pieces of BEPA that learn from production traffic, extracted into a separate package so users opt in. |
-| Expanded capabilities | Targeted: `redact`, `route`, `decide`, `answer`, `rerank`. Prioritized by user requests in the [capability-request issues](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Acapability). |
+| Test depth against compatible providers | Structured output, streaming, agent and embedding tests against Cerebras, Groq, Together and Fireworks, rather than the single call covered today. Moved forward into the release candidate. |
+| `createAgent` capability factory | The same configure-once ergonomics the seven existing factories have, bundling the approval-gate wrapper and the tool plumbing. Calling `runAgent` directly keeps working. |
+| `@llm-ports/observability` | Quality-tracking hooks, sinks and deterministic edit-diff helpers: the parts of a consumer that learn from production traffic, extracted so they are opt-in. |
+| More capabilities | `redact`, `route`, `decide`, `answer` and `rerank`, prioritized by the [capability-request issues](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Acapability). The reranker arrives earlier, alongside the Cohere adapter in the release candidate. |
+| Conversation history, if it is offered | Optional, holding nothing by default. See the reopened question above. |
 
 ---
 
-## What v0.3+ adds
+## Further out
 
-Further out. Subject to change based on v0.1 + v0.2 user signal.
+Subject to change based on what adopters actually ask for.
 
-- `@llm-ports/adapter-transformers-web` or `@llm-ports/adapter-onnxruntime-web` for browser-native local-model inference (transformers.js / onnxruntime-web). Tracked as [#13](https://github.com/baabakk/llm-ports/issues/13). Use cases: SmolDocling, PaddleOCR-VL, SmolVLM running entirely in the browser. Highest-impact single addition still on the roadmap.
+- `@llm-ports/adapter-transformers-web` or `@llm-ports/adapter-onnxruntime-web` for browser-native local-model inference (transformers.js, onnxruntime-web). Tracked as [#13](https://github.com/baabakk/llm-ports/issues/13). Use cases: SmolDocling, PaddleOCR-VL, SmolVLM running entirely in the browser. Note that this is a different item from the withdrawn Node-side local-runtime adapters above, and the two were previously conflated in a withdrawal proposal: this one is browser-native and still on the roadmap.
 - `@llm-ports/adapter-mistral` if the Mistral API stops fitting under the OpenAI compat shape.
 - A portable skill / capability format (Markdown-with-YAML-frontmatter) — being evaluated; not a commitment.
 - Native streaming for `runAgent` (currently you can stream tool-use steps via the lower-level adapter, but not from the agent loop).
