@@ -23,6 +23,8 @@ import {
   failValidation,
   mergeTokenUsage,
   NonContiguousSystemError,
+  createWarningState,
+  warnOnce,
   resurrectOperationContext,
   sha256Hex,
   throwIfAborted,
@@ -200,6 +202,24 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): Anthropic
 
 // ─── The port implementation ─────────────────────────────────────────
 
+/** Warn-once state for the non-contiguous-system fold (alpha.35). */
+const NON_CONTIGUOUS_SYSTEM_WARNINGS = createWarningState();
+
+/**
+ * Text of a system message, or `undefined` when it carries a block a
+ * top-level system field cannot hold. Decides whether a late system message
+ * can be folded in or must still be refused.
+ */
+function systemTextOrUndefined(content: LLMMessage["content"]): string | undefined {
+  if (typeof content === "string") return content;
+  const fragments: string[] = [];
+  for (const block of content) {
+    if ((block as { type: string }).type !== "text") return undefined;
+    fragments.push((block as { text: string }).text);
+  }
+  return fragments.join("");
+}
+
 /**
  * Resolve the canonical `messages` array (alpha.27+) into Anthropic's shape:
  * a top-level `system` string (concatenated from leading contiguous
@@ -241,16 +261,38 @@ function resolveMessagesForAnthropic(
     }
     i++;
   }
-  const system = leadingSystem.length > 0 ? leadingSystem.join("\n\n") : undefined;
   const remaining = arr.slice(i);
-  // Assert: NO system-role messages in the remaining array. Anthropic rejects
-  // non-leading system messages structurally.
+  // Alpha.35: a late system message is folded into the system field with a
+  // warning instead of failing the call. The caller's intent is never
+  // ambiguous, so refusing protected nothing; asked for by SalesCoach as
+  // alpha.29 item 20. The one case still refused is a late system message
+  // carrying a non-text block, which this field cannot represent at all.
+  const lateSystem: string[] = [];
+  const keptMessages: LLMMessage[] = [];
   for (let j = 0; j < remaining.length; j++) {
-    if (remaining[j]!.role === "system") {
+    const message = remaining[j]!;
+    if (message.role !== "system") {
+      keptMessages.push(message);
+      continue;
+    }
+    const text = systemTextOrUndefined(message.content);
+    if (text === undefined) {
       throw new NonContiguousSystemError(alias, method, i + j);
     }
+    lateSystem.push(text);
   }
-  const messages: AnthropicMessage[] = remaining.map((m) => ({
+  if (lateSystem.length > 0) {
+    warnOnce(
+      NON_CONTIGUOUS_SYSTEM_WARNINGS,
+      "non-contiguous-system",
+      `Provider "${alias}" (${method}): a system-role message appeared after a non-system message. ` +
+        `Anthropic takes system content as a separate field, so its text was folded into that field ` +
+        `rather than sent as a conversation turn. Group system messages at the start of the array to silence this.`,
+    );
+  }
+  const systemParts = [...leadingSystem, ...lateSystem];
+  const system = systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
+  const messages: AnthropicMessage[] = keptMessages.map((m) => ({
     role: m.role === "tool" ? "user" : (m.role as "user" | "assistant"),
     content: toAnthropicContent(m.content),
   }));
