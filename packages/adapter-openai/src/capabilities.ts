@@ -88,9 +88,30 @@ export function rememberConstraint(modelId: string, constraint: Partial<ModelCap
   learner.remember(normalizeModelId(modelId), constraint);
 }
 
+/**
+ * Models whose opaque-400 probe was already tried and did not help.
+ *
+ * Separate from the learner because it records something different: not a
+ * constraint the model has, but an experiment already run against it. Without
+ * it, a 400 caused by something other than `response_format` would make every
+ * structured call in the process pay one wasted request forever.
+ */
+const opaqueProbeExhausted = new Set<string>();
+
+/** True if the opaque-400 downgrade has already been tried for this model and failed. */
+export function opaqueProbeExhaustedFor(modelId: string): boolean {
+  return opaqueProbeExhausted.has(normalizeModelId(modelId));
+}
+
+/** Record that the opaque-400 downgrade did not rescue this model, so it is not retried. */
+export function rememberOpaqueProbeExhausted(modelId: string): void {
+  opaqueProbeExhausted.add(normalizeModelId(modelId));
+}
+
 /** Test-only: clear learned state. */
 export function _resetLearnedConstraints(): void {
   learner._reset();
+  opaqueProbeExhausted.clear();
 }
 
 // ─── Static catalog of known reasoning models ────────────────────────
@@ -274,4 +295,45 @@ export function isSystemMessageRejection(err: unknown): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * True if this error is a 400 that says nothing about why.
+ *
+ * **Why this needs its own classifier.** Every other classifier in this file
+ * reads a reason out of the error body. Some OpenAI-compatible providers
+ * reject a request feature with a bare 400 and no usable body at all: no
+ * `code`, no `param`, no `type`, nothing to match on. ADW's probe of
+ * 2026-06-18 recorded exactly that shape from Cerebras on a strict-schema
+ * request, which meant the existing rescue never fired and every call
+ * re-discovered the same rejection.
+ *
+ * **What this is not.** It is not a claim that `response_format` caused the
+ * 400, because the provider did not say. It marks the error as unexplained,
+ * and the caller treats that as grounds for one experiment rather than as a
+ * learned fact: the request is retried with the feature removed, and the
+ * constraint is remembered only if that retry succeeds. A 400 caused by
+ * something else (an oversized context, an unknown model) fails the retry
+ * identically, nothing is learned, and the model is marked as not worth
+ * probing again.
+ *
+ * A provider that does explain itself never reaches here, since the
+ * classifiers above match first on a body they can read.
+ *
+ * Added in `0.1.0-alpha.35`.
+ */
+export function isOpaqueBadRequest(err: unknown): boolean {
+  const fields = getErrorFields(err);
+  if (!fields || fields.status !== 400) return false;
+  const absent = (v: unknown): boolean => v === undefined || v === null;
+  // Unexplained means nothing names a field or a reason: no `code`, no `param`.
+  //
+  // `type` is deliberately not part of this test. Every OpenAI-shaped 400
+  // carries a coarse one (`invalid_request_error` and its siblings) that says
+  // which family the error is in and nothing about what was wrong, so
+  // requiring it to be absent would make this check almost never fire, and
+  // never in the case it exists for. A `message` is likewise not required to
+  // be absent: the classifiers above read messages and have already declined
+  // by the time this runs.
+  return absent(fields.code) && absent(fields.param);
 }

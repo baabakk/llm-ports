@@ -72,10 +72,13 @@ import type {
 import {
   getEffectiveCapabilities,
   isJsonModeRejection,
+  isOpaqueBadRequest,
   isSystemMessageRejection,
   isTemperatureRejection,
   normalizeModelId,
+  opaqueProbeExhaustedFor,
   rememberConstraint,
+  rememberOpaqueProbeExhausted,
   seedKnownConstraints,
 } from "./capabilities.js";
 import {
@@ -1861,9 +1864,24 @@ async function executeChatRequest(
   pricing: ModelPricing | undefined,
   req: LogicalChatRequest,
 ): Promise<{ response: unknown; modelId: string }> {
+  // Alpha.35: an unexplained 400 buys one experiment, not a learned fact.
+  //
+  // While this is set, the request goes out with `response_format` removed,
+  // exactly as a learned `jsonMode: false` would do it, but nothing has been
+  // written to the learner yet. If the downgraded request succeeds, that is
+  // the proof the feature was the problem and the constraint is remembered
+  // for the rest of the process. If it fails, the 400 was about something
+  // else: nothing is learned, and the model is marked so no later call
+  // repeats the experiment.
+  let probingWithoutResponseFormat = false;
+
+  const capsFor = (modelId: string): ModelCapsCompact => {
+    const caps = readCaps(modelId, pricing);
+    return probingWithoutResponseFormat ? { ...caps, jsonModeUnsupported: true } : caps;
+  };
+
   const attempt = async (): Promise<unknown> => {
-    const caps = readCaps(req.modelId, pricing);
-    const sdkReq = materializeRequest(req, caps);
+    const sdkReq = materializeRequest(req, capsFor(req.modelId));
     // Thread the AbortSignal as the SDK's 2nd-arg request options; the OpenAI
     // SDK uses this to cancel the in-flight fetch on abort.
     const reqOpts = req.signal ? { signal: req.signal } : undefined;
@@ -1877,6 +1895,13 @@ async function executeChatRequest(
   while (true) {
     try {
       const response = await attempt();
+      // The experiment worked, so the unexplained 400 was about
+      // `response_format` after all. Remember it now that it is proven, and
+      // every later call in this process omits the field up front.
+      if (probingWithoutResponseFormat) {
+        rememberConstraint(req.modelId, { jsonMode: false });
+        probingWithoutResponseFormat = false;
+      }
       ctx.hasSucceeded.value = true;
       learnFromResponse(req.modelId, response);
       // Behavioral fingerprint write (alpha.24+): inspect every successful
@@ -1937,8 +1962,7 @@ async function executeChatRequest(
             messages: [...req.messages, correctiveMessage],
           };
           const retryAttempt = async (): Promise<unknown> => {
-            const caps = readCaps(retryReq.modelId, pricing);
-            const sdkReq = materializeRequest(retryReq, caps);
+            const sdkReq = materializeRequest(retryReq, capsFor(retryReq.modelId));
             const reqOpts = retryReq.signal ? { signal: retryReq.signal } : undefined;
             return await client.chat.completions.create(sdkReq as never, reqOpts);
           };
@@ -1982,6 +2006,36 @@ async function executeChatRequest(
         });
         triedCapabilityFallback = true;
         continue;
+      }
+      // Nothing in the body explained the 400, and we sent a `response_format`
+      // the provider may simply not accept. Try once without it. This runs
+      // only after the classifiers above have declined, so a provider that
+      // states its reason is never second-guessed.
+      if (
+        !triedCapabilityFallback &&
+        (req.jsonMode || req.strictResponseSchema) &&
+        isOpaqueBadRequest(err) &&
+        !opaqueProbeExhaustedFor(req.modelId)
+      ) {
+        emitRetry(ctx, {
+          reason: "capability-fallback",
+          attempt: 0,
+          modelId: req.modelId,
+          providerAlias: alias,
+          delayMs: 0,
+          cause: err,
+        });
+        triedCapabilityFallback = true;
+        probingWithoutResponseFormat = true;
+        continue;
+      }
+      if (probingWithoutResponseFormat) {
+        // The downgraded request failed too, so `response_format` was not the
+        // cause and nothing is learned about it. Recording the exhausted probe
+        // is the point: without it every structured call against this model
+        // would spend a wasted request rediscovering the same dead end.
+        rememberOpaqueProbeExhausted(req.modelId);
+        probingWithoutResponseFormat = false;
       }
       throw wrapProviderError(alias, err, req.modelId);
     }
