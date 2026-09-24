@@ -49,6 +49,7 @@ import {
   type ToolDefinition,
   type TokenUsage,
   type ValidationStrategy,
+  resolveStructuredSchema,
 } from "@llm-ports/core";
 import { ANTHROPIC_PRICING } from "./pricing.js";
 import { applyAnthropicCacheControl } from "./cache-control.js";
@@ -452,6 +453,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      // Alpha.35: exactly one of `schema` or `jsonSchema`. Resolved once here
+      // so neither-and-both mean the same thing in every adapter.
+      const shape = resolveStructuredSchema(options);
       // Build the structured-output prompt by appending the schema instructions
       // to the user content. Many production users would use Anthropic's "tool"
       // pattern for structured output; for v0.1 we use the simpler prompted JSON
@@ -513,12 +517,26 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
           lastModelId = response.model ?? modelId;
           const raw = extractAssistantText(response.content as never);
           const decoded = extractJSON(raw);
-          let parsed = options.schema.safeParse(decoded);
+          // Alpha.35: a JSON Schema cannot be validated locally, so that path
+          // returns the decoded value and reports one attempt, which is the
+          // truth: no validation round ran.
+          if (shape.kind === "json-schema") {
+            return {
+              data: decoded as T,
+              usage: lastUsage,
+              cost: computeChatCostOptional(lastUsage, pricing),
+              modelId: lastModelId,
+              providerAlias: alias,
+              latencyMs: Date.now() - start,
+              validationAttempts: 1,
+            };
+          }
+          let parsed = shape.zod.safeParse(decoded);
           if (!parsed.success) {
             // Programmatic repair pass — catches the 6 common LLM output
             // quirks before paying for a retry-with-feedback round-trip.
             const repaired = attemptValidationRepair(decoded, parsed.error);
-            const reparsed = options.schema.safeParse(repaired);
+            const reparsed = shape.zod.safeParse(repaired);
             if (reparsed.success) parsed = reparsed;
           }
           if (parsed.success) {

@@ -58,6 +58,7 @@ import {
   type StreamTextOptions,
   type TokenUsage,
   type ValidationStrategy,
+  resolveStructuredSchema,
 } from "@llm-ports/core";
 
 /** Multiplier applied to maxOutputTokens when retrying a reasoning-starved call. */
@@ -356,6 +357,9 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
     async generateStructured<T>(
       options: GenerateStructuredOptions<T>,
     ): Promise<GenerateStructuredResult<T>> {
+      // Alpha.35: exactly one of `schema` or `jsonSchema`. Resolved once here
+      // so neither-and-both mean the same thing in every adapter.
+      const shape = resolveStructuredSchema(options);
       throwIfAborted(options.signal);
       validateMessages(options.messages!);
       const start = Date.now();
@@ -409,12 +413,26 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
             );
           }
           const decoded = extractJSON(result.text);
-          let parsed = options.schema.safeParse(decoded);
+          // Alpha.35: a JSON Schema cannot be validated locally, so that path
+          // returns the decoded value and reports one attempt, which is the
+          // truth: no validation round ran.
+          if (shape.kind === "json-schema") {
+            return {
+              data: decoded as T,
+              usage: lastUsage,
+              cost: computeChatCostOptional(lastUsage, pricing),
+              modelId: lastModelId,
+              providerAlias: alias,
+              latencyMs: Date.now() - start,
+              validationAttempts: 1,
+            };
+          }
+          let parsed = shape.zod.safeParse(decoded);
           if (!parsed.success) {
             // Programmatic repair pass — catches the 6 common LLM output
             // quirks before paying for a retry-with-feedback round-trip.
             const repaired = attemptValidationRepair(decoded, parsed.error);
-            const reparsed = options.schema.safeParse(repaired);
+            const reparsed = shape.zod.safeParse(repaired);
             if (reparsed.success) parsed = reparsed;
           }
           if (parsed.success) {

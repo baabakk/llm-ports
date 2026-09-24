@@ -364,7 +364,37 @@ export interface GenerateStructuredOptions<T> {
   priority?: LLMPriority;
   /** Canonical alpha.26+ input. See `GenerateTextOptions.messages`. */
   messages: LLMMessage[];
-  schema: z.ZodType<T>;
+  /**
+   * The shape to enforce, as a Zod schema. **Optional since alpha.35**, where
+   * `jsonSchema` became the alternative. Exactly one of the two is required;
+   * supplying neither or both throws.
+   *
+   * Prefer this one. It is the only form that can be validated locally, so it
+   * is the only form that gets retry-with-feedback when a model returns the
+   * wrong shape, and the only one from which `T` is inferred.
+   */
+  schema?: z.ZodType<T>;
+  /**
+   * The shape to enforce, as a JSON Schema object, for a caller who already
+   * holds one. Added in alpha.35.
+   *
+   * **Why this exists.** Adapters convert a Zod schema to JSON Schema before
+   * sending it, so a consumer holding a wire-delivered schema previously had
+   * to convert it backwards into Zod for this library to convert it forwards
+   * again. An OpenAI-compatible HTTP surface receives exactly that shape from
+   * its clients.
+   *
+   * **What you give up, stated plainly.** This library carries no JSON Schema
+   * validator, so a response cannot be checked locally against it. The schema
+   * is sent to the provider, whose strict mode enforces it where the provider
+   * supports that, and the decoded JSON is returned as `T` without local
+   * validation. That means **no retry-with-feedback on a wrong shape**, and
+   * `validationAttempts` is always 1. `T` is yours to assert rather than
+   * inferred, since a JSON Schema object carries no TypeScript type.
+   *
+   * Use `schema` unless you genuinely hold a JSON Schema already.
+   */
+  jsonSchema?: Record<string, unknown>;
   /** Hint for the model about what the schema represents. */
   schemaName?: string;
   maxOutputTokens?: number;
