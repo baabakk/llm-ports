@@ -9,6 +9,7 @@
  * the `?? Infinity` pattern works.
  */
 
+import type { z } from "zod";
 import type {
   BudgetGate,
   BudgetLimit,
@@ -69,10 +70,19 @@ async function callEvery(): Promise<void> {
     messages: [{ role: "user", content: "hi" }],
     budgetScope: ref,
   };
+  // Alpha.35 made `GenerateStructuredOptions.schema` optional, because
+  // `jsonSchema` became the alternative form. Under exactOptionalPropertyTypes
+  // that changes what the field reads as, so the schema is held in its own
+  // non-optional binding here rather than being indexed off the options type.
+  // `StreamStructuredOptions.schema` is still required, and a consumer that
+  // forwarded `structOpts.schema` straight into a streamed call would now be
+  // passing `ZodType<T> | undefined` into a `ZodType<T>`. That break is what
+  // this package exists to catch; the strict-mode-friendly pattern is below.
+  const schema = { _output: { ok: true } } as unknown as z.ZodType<{ ok: boolean }>;
   const structOpts: GenerateStructuredOptions<{ ok: boolean }> = {
     taskType: "triage",
     messages: [{ role: "user", content: "hi" }],
-    schema: { _output: { ok: true } } as unknown as GenerateStructuredOptions<{ ok: boolean }>["schema"],
+    schema,
     budgetScope: { scope: "session", scopeId: "cs-001" },
   };
   const streamTextOpts: StreamTextOptions = {
@@ -83,7 +93,7 @@ async function callEvery(): Promise<void> {
   const streamStructOpts: StreamStructuredOptions<{ ok: boolean }> = {
     taskType: "x",
     messages: [{ role: "user", content: "hi" }],
-    schema: structOpts.schema,
+    schema,
     budgetScope: { scope: "customer", scopeId: "cust-42" },
   };
   const agentOpts: RunAgentOptions = {
