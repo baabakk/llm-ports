@@ -4,6 +4,7 @@
  * register the conformance assertions.
  */
 
+import { ValidationError } from "@llm-ports/core";
 import type { LLMPort, OnRetry, RetryEvent, TokenUsage } from "@llm-ports/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -208,6 +209,53 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         // counter MUST be exactly 2 (initial attempt + 1 retry), not just >=2.
         // Catches re-introduction of the "overwrites instead of accumulates" bug.
         expect(result.validationAttempts).toBe(2);
+      });
+
+      /**
+       * Alpha.35, alpha.28 item 15 (BEPA): every adapter must surface the same
+       * error for a schema that never validates, carrying the field-level
+       * issues, so one error handler works across providers.
+       *
+       * A bare message is the failure this pins. A consumer that gets only
+       * "validation failed" has to parse prose to learn which field was wrong,
+       * and the shape of that prose is per-adapter, which is how a handler
+       * ends up written twice.
+       *
+       * This is a beta-gate item: cross-adapter behaviour is frozen at the
+       * freeze whether or not a test pins it, so it gets pinned first.
+       */
+      it("surfaces a ValidationError carrying the Zod issues when no attempt validates", async () => {
+        const ctx = await setup();
+        // Both queued responses are invalid, so the retry cannot rescue it.
+        ctx.setupGenerateStructured({
+          invalidFirstAttempt: { intent: "NOT_AN_INTENT", urgency: "high" },
+          data: { intent: "STILL_NOT", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        const error = await ctx.port
+          .generateStructured({
+            taskType: "test-classify",
+            messages: [{ role: "user" as const, content: "classify this" }],
+            schema: Schema,
+            schemaName: "TestSchema",
+          })
+          .then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+
+        expect(error).toBeInstanceOf(ValidationError);
+        const validation = error as ValidationError;
+        expect(Array.isArray(validation.issues)).toBe(true);
+        expect(validation.issues.length).toBeGreaterThan(0);
+        // The issue must name the field, not merely describe the failure.
+        expect(validation.issues[0]).toHaveProperty("path");
+        expect(validation.issues[0]).toHaveProperty("message");
+        expect(validation.issues.some((issue) => issue.path.includes("intent"))).toBe(true);
+        // And the attempt count must be reported, so a caller can tell one
+        // bad response from a model that cannot produce the shape at all.
+        expect(validation.attempts).toBeGreaterThanOrEqual(1);
       });
     });
 
