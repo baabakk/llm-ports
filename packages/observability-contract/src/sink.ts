@@ -73,3 +73,49 @@ export function createCollectingSink(): ObservabilitySink & {
     },
   };
 }
+
+/**
+ * One sink that forwards every event to several, isolating failures.
+ *
+ * `Instrumentation` accepts a single sink, so a consumer wanting two, such as
+ * an incident logger beside the OpenTelemetry bridge, has to write the fan-out
+ * themselves. BEPA did, and wrote it correctly: **a sink that throws must not
+ * stop the sinks after it.** The obvious version, a `for` loop calling `emit`,
+ * does exactly that, and the failure is invisible because the events simply
+ * stop arriving at the later sinks.
+ *
+ * This library already promises that observability never breaks inference, so
+ * a swallowed sink failure is consistent with the rest of the contract rather
+ * than an exception to it.
+ *
+ * Errors are swallowed per sink, including a rejected promise from an
+ * asynchronous `emit`. Nothing is retried: a sink that cannot take an event is
+ * not made more likely to take it by being asked twice.
+ *
+ * Added in `0.1.0-alpha.35` from `TD-LLMPORTS-NO-SINK-COMPOSITION`.
+ *
+ * @example
+ * const sink = combineSinks(otelSink, incidentLoggerSink);
+ */
+export function combineSinks(...sinks: readonly ObservabilitySink[]): ObservabilitySink {
+  const members = sinks.filter((sink): sink is ObservabilitySink => sink !== undefined);
+  if (members.length === 1) return members[0]!;
+  return {
+    emit(event: AnyObservabilityEvent): void {
+      for (const sink of members) {
+        try {
+          const result = sink.emit(event);
+          if (result instanceof Promise) {
+            // A rejected promise from one sink must not surface as an unhandled
+            // rejection, which would take down a process that is only trying
+            // to record what happened.
+            void result.catch(() => undefined);
+          }
+        } catch {
+          // Deliberately silent: the next sink still gets the event, and
+          // observability is not allowed to break the call it observes.
+        }
+      }
+    },
+  };
+}

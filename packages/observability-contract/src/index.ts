@@ -38,7 +38,7 @@ export {
 
 // ─── Sink interface (§4.12) ─────────────────────────────────────────
 export type { ObservabilitySink } from "./sink.js";
-export { createCollectingSink, noopSink } from "./sink.js";
+export { combineSinks, createCollectingSink, noopSink } from "./sink.js";
 
 // ─── ID helpers ─────────────────────────────────────────────────────
 export {
