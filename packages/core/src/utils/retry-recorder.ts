@@ -35,7 +35,7 @@
  * Added in `0.1.0-alpha.35`.
  */
 
-import type { RetryEvent } from "../observability.js";
+import type { RetryEvent } from "../retry.js";
 
 /** One recorded retry, with the time it was observed. */
 export interface RecordedRetry {

@@ -6,6 +6,7 @@
  * OTel Collector, custom OTLP exporters) can map them onto spans + metrics
  * without re-deriving fields.
  *
+ *   - onComplete        : fires once per call, success or failure, with the aggregate
  *   - onCost            : fires after every billable call with a cost breakdown
  *   - onTokenUsage      : fires after every billable call with token counts
  *   - onFallback        : fires when the Registry chain advances to the next provider
@@ -174,6 +175,73 @@ export interface CacheHitEvent {
 // ─── Hook function types ─────────────────────────────────────────────
 
 /** Fired after every billable call with cost breakdown. Fire-and-forget. */
+/**
+ * One completed call, in one event.
+ *
+ * Asked for by ADW and SalesCoach as alpha.28 item 2, and owed since July. The
+ * question it answers is "what did this call cost and how many attempts did it
+ * take", which was previously assembled by correlating `onCost` and
+ * `onTokenUsage` with whatever the caller counted itself.
+ *
+ * **Fires once per call, including when the call fails.** A consumer measuring
+ * reliability needs the failures most, and a hook that only fired on success
+ * would quietly report a system healthier than it is.
+ *
+ * Added in `0.1.0-alpha.35`.
+ */
+export interface CompletionEvent {
+  /** Which port method ran. */
+  operation:
+    | "generateText"
+    | "generateStructured"
+    | "streamText"
+    | "streamStructured"
+    | "streamChat"
+    | "generateChat"
+    | "runAgent"
+    | "embed"
+    | "rerank";
+  /** `true` when the call produced a result, `false` when it threw. */
+  ok: boolean;
+  /**
+   * How many providers were attempted, counting the one that answered. `1`
+   * means the first choice served it; more means the chain walked.
+   */
+  providerAttempts: number;
+  /**
+   * The provider that answered, or the last one attempted when the call
+   * failed.
+   */
+  providerAlias: string;
+  modelId: string;
+  /** Wall-clock milliseconds for the whole call, including every attempt. */
+  latencyMs: number;
+  /**
+   * Total spend, or `undefined` when the price is unknown. Never zero as a
+   * stand-in: a zero here would make a spend total look complete when it is
+   * not, which is the defect alpha.34 removed elsewhere.
+   */
+  totalUsd?: number;
+  /** Token totals across every attempt, absent when the call produced none. */
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  /**
+   * Validation rounds, for the structured methods only. `1` means the first
+   * response validated.
+   */
+  validationAttempts?: number;
+  taskType?: string;
+  budgetScope?: BudgetScopeRef;
+  refs?: Record<string, ArtifactRef>;
+  /** The error, when `ok` is false. */
+  error?: Error;
+}
+
+/**
+ * Fires exactly once per call, after success or failure. Fire-and-forget:
+ * anything this throws is swallowed, like every other hook here.
+ */
+export type OnComplete = (event: CompletionEvent) => void | Promise<void>;
+
 export type OnCost = (event: CostEvent) => void | Promise<void>;
 
 /** Fired after every billable call with raw token counts. Fire-and-forget. */
@@ -194,6 +262,7 @@ export type OnCacheHit = (event: CacheHitEvent) => void | Promise<void>;
  * downstream pipeline needs.
  */
 export interface ObservabilityHooks {
+  onComplete?: OnComplete;
   onCost?: OnCost;
   onTokenUsage?: OnTokenUsage;
   onFallback?: OnFallback;
@@ -219,6 +288,10 @@ function safeEmit<T>(hook: ((event: T) => void | Promise<void>) | undefined, eve
   } catch {
     // Swallow sync hook errors.
   }
+}
+
+export function emitComplete(hook: OnComplete | undefined, event: CompletionEvent): void {
+  safeEmit(hook, event);
 }
 
 export function emitCost(hook: OnCost | undefined, event: CostEvent): void {

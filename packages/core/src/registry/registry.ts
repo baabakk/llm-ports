@@ -39,7 +39,9 @@ import {
   type ObservabilityHooks,
   type StreamCompleteCallback,
   type StreamCompleteMetadata,
+  emitComplete,
 } from "../observability.js";
+import type { CompletionEvent } from "../observability.js";
 import type {
   BatchEmbeddingOptions,
   BatchEmbeddingResult,
@@ -1351,6 +1353,14 @@ async function walkChain<R>(
    * viable provider, which is every other caller.
    */
   onlyAliases?: readonly string[],
+  /**
+   * Alpha.35+: a holder the walk fills in as it goes, so a caller can report
+   * how many providers were attempted and which one answered even when the
+   * call ends in a throw. Mutable on purpose: the walk returns the result, and
+   * threading a tuple through every caller to carry a counter would be worse
+   * than one small out-parameter.
+   */
+  progress?: { attempts: number; lastAlias?: string },
 ): Promise<R> {
   // ─── Helper: run one attempt, optionally wrapped in withAttempt ────
   const runAttempt = async (sel: ModelSelection, isFallback: boolean): Promise<R> => {
@@ -1388,6 +1398,10 @@ async function walkChain<R>(
   // for this provider; falling back would defeat the point.
   if (forceProviderAlias !== undefined) {
     const sel = await registry.selectByAlias(forceProviderAlias, priority, budgetScope);
+    if (progress) {
+      progress.attempts++;
+      progress.lastAlias = sel.alias;
+    }
     if (!sel.port) {
       throw new NoProvidersAvailableError(`forced:${forceProviderAlias}`, [sel.alias], {
         [sel.alias]: `adapter "${sel.adapter.name}" does not implement LLMPort`,
@@ -1411,6 +1425,10 @@ async function walkChain<R>(
   let lastErr: unknown;
   let prevSelForFallback: ModelSelection | undefined;
   for (const sel of chain) {
+    if (progress) {
+      progress.attempts++;
+      progress.lastAlias = sel.alias;
+    }
     if (!sel.port) {
       reasons[sel.alias] = `adapter "${sel.adapter.name}" does not implement LLMPort`;
       continue;
@@ -1565,6 +1583,53 @@ class RegistryPort implements LLMPort {
    * returns the successful result. Stream methods do not call this — streamed
    * cost surfacing is the alpha.22 follow-up. (alpha.21+)
    */
+  /**
+   * Fire `onComplete` once for a call, whether it succeeded or threw.
+   *
+   * Separate from `emitResultEvents` on purpose: that one only runs on the
+   * success path, and a completion hook that skipped failures would report a
+   * system healthier than it is, which is the opposite of what a consumer
+   * asking "how many attempts did this take" wants to know. (alpha.35+)
+   */
+  private emitCompletion(params: {
+    operation: CompletionEvent["operation"];
+    ok: boolean;
+    progress: { attempts: number; lastAlias?: string };
+    startedAt: number;
+    taskType?: string;
+    budgetScope?: BudgetScopeRef;
+    refs?: Record<string, ArtifactRef>;
+    result?: {
+      usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+      cost?: { totalUSD: number };
+      modelId?: string;
+      providerAlias?: string;
+      validationAttempts?: number;
+    };
+    error?: unknown;
+  }): void {
+    const hook = this.registry.observability.onComplete;
+    if (!hook) return;
+    const r = params.result;
+    emitComplete(hook, {
+      operation: params.operation,
+      ok: params.ok,
+      providerAttempts: params.progress.attempts,
+      providerAlias: r?.providerAlias ?? params.progress.lastAlias ?? "(none)",
+      modelId: r?.modelId ?? "(unknown)",
+      latencyMs: Date.now() - params.startedAt,
+      // Absent rather than zero when the price is unknown, for the reason
+      // alpha.34 established: a zero is indistinguishable from a free call.
+      ...(r?.cost ? { totalUsd: r.cost.totalUSD } : {}),
+      ...(r?.usage ? { usage: r.usage } : {}),
+      ...(r?.validationAttempts !== undefined ? { validationAttempts: r.validationAttempts } : {}),
+      ...(params.taskType ? { taskType: params.taskType } : {}),
+      ...(params.budgetScope ? { budgetScope: params.budgetScope } : {}),
+      ...(params.refs ? { refs: params.refs } : {}),
+      ...(params.error instanceof Error ? { error: params.error } : {}),
+    });
+  }
+
   private emitResultEvents(
     result: { cost?: { inputUSD: number; outputUSD: number; totalUSD: number; cacheSavingsUSD?: number }; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }; modelId: string; providerAlias: string },
     operation: "generateText" | "generateStructured" | "streamText" | "streamStructured" | "streamChat" | "generateChat" | "runAgent" | "embed" | "rerank",
@@ -1629,6 +1694,8 @@ class RegistryPort implements LLMPort {
     const messages = normalizeMessagesOnOptions("generateText", options);
     const normalizedOptions = { ...options, messages };
     const taskType = normalizedOptions.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const providerChain = normalizedOptions.forceProviderAlias
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -1662,7 +1729,24 @@ class RegistryPort implements LLMPort {
           normalizedOptions.refs,
           opCtx,
           toContractMetricsForText,
-        );
+          undefined,
+          progress,
+        ).catch((error: unknown) => {
+          // The completion hook reports failures too: a consumer measuring
+          // reliability needs those most, and a hook that only fired on
+          // success would describe a healthier system than the real one.
+          this.emitCompletion({
+            operation: "generateText",
+            ok: false,
+            progress,
+            startedAt,
+            ...(normalizedOptions.taskType ? { taskType: normalizedOptions.taskType } : {}),
+            ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+            ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+            error,
+          });
+          throw error;
+        });
         this.emitResultEvents(
           result,
           "generateText",
@@ -1670,6 +1754,16 @@ class RegistryPort implements LLMPort {
           normalizedOptions.budgetScope,
           normalizedOptions.refs,
         );
+        this.emitCompletion({
+          operation: "generateText",
+          ok: true,
+          progress,
+          startedAt,
+          result,
+          ...(normalizedOptions.taskType ? { taskType: normalizedOptions.taskType } : {}),
+          ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+          ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        });
         return result;
       },
       // Alpha.31+: honor a caller-supplied per-call operation_id. When a
@@ -1695,6 +1789,8 @@ class RegistryPort implements LLMPort {
     const messages = normalizeMessagesOnOptions("generateChat", options);
     const normalizedOptions = { ...options, messages };
     const taskType = normalizedOptions.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const fullChain = normalizedOptions.forceProviderAlias
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -1744,7 +1840,20 @@ class RegistryPort implements LLMPort {
           opCtx,
           toContractMetricsForText,
           providerChain,
-        );
+          progress,
+        ).catch((error: unknown) => {
+          this.emitCompletion({
+            operation: "generateChat",
+            ok: false,
+            progress,
+            startedAt,
+            ...(normalizedOptions.taskType ? { taskType: normalizedOptions.taskType } : {}),
+            ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+            ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+            error,
+          });
+          throw error;
+        });
         this.emitResultEvents(
           result,
           "generateChat",
@@ -1752,6 +1861,16 @@ class RegistryPort implements LLMPort {
           normalizedOptions.budgetScope,
           normalizedOptions.refs,
         );
+        this.emitCompletion({
+          operation: "generateChat",
+          ok: true,
+          progress,
+          startedAt,
+          result,
+          ...(normalizedOptions.taskType ? { taskType: normalizedOptions.taskType } : {}),
+          ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+          ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        });
         return result;
       },
       getObservabilityContext(this),
