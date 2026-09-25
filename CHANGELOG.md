@@ -1,6 +1,8 @@
 # Changelog
 
-`llm-ports` uses [Changesets](https://github.com/changesets/changesets) to manage releases. Each published package keeps its own per-version changelog beside the source:
+`llm-ports` uses [Changesets](https://github.com/changesets/changesets) to manage releases.
+
+**This root file is the maintained record.** Read it for what changed in any release. Each published package also has a per-version changelog beside its source, listed below, but **those stop at `0.1.0-alpha.31`**: the four releases since were versioned by hand and did not regenerate them. They are accurate for what they cover and simply end early. Backfilling them is tracked as `TD-LLMPORTS-PER-PACKAGE-CHANGELOGS-STOPPED-AT-ALPHA-31`.
 
 | Package | Per-package changelog |
 |---|---|
@@ -18,6 +20,49 @@
 | `@llm-ports/telemetry-otel` | [`packages/telemetry-otel/CHANGELOG.md`](packages/telemetry-otel/CHANGELOG.md) |
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
+
+## v0.1.0-alpha.35 (unreleased)
+
+**Contract corrections, the missing chat method, and the close of the observability work.** The last release numbered `0.1.0-alpha`. The next one is a candidate for `1.0.0` carrying every remaining breaking change at once; see [the status page](docs/v0-1-status.md).
+
+**Title marker: `TS-BREAKING: GenerateStructuredOptions.schema`.** See [the migration page](docs/migration/alpha-34-to-alpha-35.md).
+
+**Versions in this release.** Eleven packages move to `0.1.0-alpha.35`: the eight whose source changed, plus `eval`, `adapter-aider` and `adapter-codex`, which pin `observability-contract` exactly and would otherwise demand a version that no longer matches core's. `capabilities` and `integration-livekit` stay at `0.1.0-alpha.34` deliberately, because they reach core through a caret range that already accepts this release, so republishing them would change nothing but the number.
+
+### Fixed
+
+- **Streamed calls through OpenAI-compatible providers report their tokens again.** Usage was read only from a chunk carrying no choices, which is the shape OpenAI itself sends. Together AI and Cerebras attach usage to the final chunk *with* choices, so for those providers a streamed call reported no usage and therefore no cost, and every spend total and budget gate silently under-counted. Usage is now taken from whichever chunk carries it, in all three streaming paths, so `streamChat` was affected too and is covered. **A consumer was carrying a patch against our published package for this.** From `TD-LLMPORTS-STREAMED-USAGE-LOST-ON-COMPAT-PROVIDERS`.
+- **A conversation whose system messages are not adjacent no longer fails.** The Anthropic and Google adapters threw when a system message appeared after the first user turn. They now fold the system content the way each provider's protocol expects, warn once per process rather than once per call, and keep throwing only for the case they genuinely cannot express, which is non-text content in a late system block. The error class is still exported, so code that caught it still compiles. From alpha.29 item 20.
+
+### Added
+
+- **`generateChat`: the assistant's turn, with tool calls surfaced and not executed.** `runAgent` runs the whole loop for you and `streamChat` gives you the turn as it arrives; there was no way to take one complete turn with its tool calls and decide what to do yourself. Tool-call arguments are parsed where they parse and left as raw text where they do not, rather than failing the call. The registry knows which aliases implement it and filters a chain accordingly, so an alias that cannot serve the call is skipped rather than attempted. From `TD-LLMPORTS-NO-NONSTREAMING-CHAT-WITH-TOOLS`.
+- **Structured output from a JSON Schema, not only a Zod schema.** A consumer holding a wire-delivered schema had to convert it into Zod so that the adapter could convert it back. **What you give up is stated plainly**, because it is not obvious: this library carries no JSON Schema validator, so the response is returned without local validation, there is no retry-with-feedback, and `T` is yours to assert. Prefer `schema` unless you genuinely hold a JSON Schema already. From `TD-LLMPORTS-STRUCTURED-OUTPUT-IS-ZOD-ONLY`, raised by a gateway serving an OpenAI-compatible HTTP surface.
+- **`onComplete`: one event per call, on success and on failure**, carrying the usage, the dollar cost where known, how many providers were attempted and which one answered. Previously that meant correlating two hooks with a count you kept yourself. The failure case fires too, because a completion hook that only fired on success would describe a healthier system than the real one.
+- **`createRetryRecorder`: a bounded view of what recently retried**, for a dashboard or a health check, without subscribing to every event. Bounded by construction, because an unbounded log of every retry a long-running worker ever performed is a leak wearing a feature's clothes. Note that it is not a registry method: retries happen inside adapters and the registry never sees them, so the recorder is handed to the adapters as their `onRetry`.
+- **`combineSinks`: two observability sinks that coexist**, with a failing sink isolated so it cannot silence the others, including one that rejects a promise.
+- **Dollar cost on OpenTelemetry spans**, per attempt and for the operation, plus the cache-read saving where a provider reports one. Nothing is ever written as zero: an unpriced model produces no cost attributes at all, because a zero in a spend dashboard reads as "this call was free", which is a confident answer to a question nobody had the data for.
+- **An unexplained provider 400 is learned once rather than rediscovered on every call.** Every other capability signal is read out of the error body, and some providers reject a request feature with a bare 400 carrying nothing to read. Such an error now buys one retry with the feature removed, and the result of that retry decides what is remembered: a success records the constraint, a second failure records nothing and marks the model so the experiment is not repeated. Recording on the guess instead would silently disable strict schemas for a model that supports them. From alpha.28 item 5.
+- **A contract test pinning that every adapter surfaces a validation failure the same way**, carrying the issues that name the offending field and the number of attempts, rather than a bare message. From alpha.28 item 15.
+
+### Changed
+
+- **`GenerateStructuredOptions.schema` is now optional**, since `jsonSchema` became the alternative, and exactly one of the two is required. Supplying neither throws, and so does supplying both. **This breaks code that reads the field rather than code that sets it**, under TypeScript's `exactOptionalPropertyTypes`: forwarding one call's schema into `streamStructured`, which still requires a Zod schema, now passes `ZodType<T> | undefined` into a `ZodType<T>`. Hold the schema in its own binding and pass it to both. The migration page carries the failing shape and the fix.
+- **Eleven documentation claims corrected against the source**, most of them understating what ships. The Vercel adapter page said its agent loop was single-turn, that multimodal content degraded to placeholder strings, that all pricing was yours to supply, and that a typed empty-response error was still to come; all four shipped in `alpha.8` or since. The Google adapter's file header claimed prompted-JSON structured output and a single-turn agent shim, where native `responseSchema` and a real bounded loop both ship. The homepage advertised seventeen capability factories where seven ship, contradicting its own detail line one row below, and four adapters where seven exist. The status page listed the `pricing: "free"` sentinel as withdrawn on the same page that recorded it shipping in `alpha.34`.
+- **The status page now describes the sequence actually being built**, replacing a forward-looking section that still described a two-release path to beta since merged into one.
+- **The cost-gating guide says plainly that persistent budget counters need nothing from us.** `BudgetBackend` and `CostBackend` are public interfaces the registry accepts; the package still to come adds a tested implementation, not the ability to supply one. Two consumers had recorded the seam itself as missing and written that limitation into their own notes.
+
+### Documentation
+
+- **New page: [Configuration](docs/concepts/configuration.md).** Where a provider alias comes from in each of the two configuration forms, why an alias derived from an environment variable name cannot hold the slashes and dots that real model ids carry, what the object form requires that the environment form fills in for you, and what the registry does when a route names a provider that does not exist.
+- The Vercel adapter page now states its real limits instead of its former ones: reasoning budgets rescued after a starved call rather than anticipated, audio by URL refused because that provider routes audio as file data, and tool-role messages flattened to user text.
+
+### Known and recorded, not fixed here
+
+- **The operation aggregate in a completion event still reports zero when no price was ever known**, because that contract field is required and cannot say "unknown". The OpenTelemetry bridge guards against writing it, which also means a genuinely free operation reports no cost attributes. The real fix makes the field optional and is queued for `1.0.0`. `TD-LLMPORTS-OPERATION-AGGREGATE-COST-SUBSTITUTES-ZERO`.
+- **A per-call cap on attempts is not shipped**, because the ask has two readings that produce different options in different layers, and the wrong one is worse than neither once it is public. Blocked on the asker. `TD-LLMPORTS-MAXATTEMPTS-SEMANTICS-UNRESOLVED`.
+- **Versions in this release were set by hand**, as in the previous three. The release command still produces a `1.0.0` line, for a reason now proven: no changeset declares a major bump, and the jump comes from every package that peer-depends on a released workspace package being escalated to major, then spread across the linked-version group. The repair happens once at the `1.0.0` cut, where the shared version number retires anyway. `TD-LLMPORTS-CHANGESET-VERSION-PRODUCES-1-0-0`.
+- **The per-package changelogs stop at `alpha.31`.** This root file is the maintained record and covers every release since. `TD-LLMPORTS-PER-PACKAGE-CHANGELOGS-STOPPED-AT-ALPHA-31`.
 
 ## v0.1.0-alpha.34 (2026-09-17)
 

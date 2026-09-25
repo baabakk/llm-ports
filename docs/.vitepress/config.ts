@@ -142,6 +142,7 @@ export default defineConfig({
             { text: "alpha.29 → alpha.30 (additive)", link: "/migration/alpha-29-to-alpha-30" },
             { text: "alpha.32 → alpha.33 (TS-BREAKING: ContentBlock)", link: "/migration/alpha-32-to-alpha-33" },
             { text: "alpha.33 → alpha.34 (TS-BREAKING: cost, pricing)", link: "/migration/alpha-33-to-alpha-34" },
+            { text: "alpha.34 → alpha.35 (TS-BREAKING: schema)", link: "/migration/alpha-34-to-alpha-35" },
           ],
         },
         {
