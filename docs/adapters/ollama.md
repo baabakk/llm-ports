@@ -154,6 +154,16 @@ This makes cost gating meaningful for local models. Otherwise leave the defaults
 
 Entry-time abort support shipped in `0.1.0-alpha.6` — if `options.signal.aborted` is already true at entry, the call throws without invoking the daemon. **Mid-flight cancellation is NOT supported** because `ollama-js` v0.5 doesn't expose a per-call signal; its `client.abort()` method cancels ALL in-flight requests on the client, which is too coarse for per-call use. Will land when ollama-js v0.7+ exposes per-call signal. See the [Cancellation guide](/guides/cancellation).
 
+## Structured output from a JSON Schema
+
+Since `0.1.0-alpha.35`, `generateStructured` accepts `jsonSchema` in place of `schema`, for a caller that already holds a JSON Schema rather than a Zod one:
+
+```ts
+await llm.generateStructured<Triage>({ taskType: "classify", messages, jsonSchema });
+```
+
+Exactly one of the two is required. **What the JSON Schema path gives up** is local validation, because this library carries no JSON Schema validator: the response comes back unvalidated, there is no retry-with-feedback when a model returns the wrong shape, `validationAttempts` is always 1, and `T` is yours to assert. Prefer `schema` unless you genuinely hold a JSON Schema already. `streamStructured` is unchanged and still requires Zod.
+
 ## Reading next
 
 - [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper

@@ -4,7 +4,7 @@
  * register the conformance assertions.
  */
 
-import { ValidationError } from "@llm-ports/core";
+import { ConfigError, ValidationError } from "@llm-ports/core";
 import type { LLMPort, OnRetry, RetryEvent, TokenUsage } from "@llm-ports/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -187,6 +187,83 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         // Regression pin for TD-LLMPORTS-VALIDATION-ATTEMPTS (resolved alpha.11):
         // first-try success MUST report exactly 1 attempt (not 0, not 2+).
         expect(result.validationAttempts).toBe(1);
+      });
+
+      // ── The JSON Schema input form (alpha.35) ───────────────────────
+      //
+      // `jsonSchema` is an alternative to `schema`, and it shipped in all five
+      // adapters that serve generateStructured while being tested in one of
+      // them. That is the gap these three close: the decision about neither
+      // and both lives in one shared resolver in core, but each adapter wires
+      // it up itself, and the wiring is the part that can be wrong.
+      //
+      // Deliberately NOT asserted here: that the schema reaches the provider
+      // in any particular wire shape. That is per-provider and belongs in each
+      // adapter's own quirk tests. What every adapter must agree on is the
+      // behaviour a caller sees.
+      it("accepts a JSON Schema in place of a Zod schema, reporting one attempt", async () => {
+        const ctx = await setup();
+        ctx.setupGenerateStructured({
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        const result = await ctx.port.generateStructured<{ intent: string; urgency: string }>({
+          taskType: "test-classify",
+          messages: [{ role: "user" as const, content: "classify this" }],
+          jsonSchema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["intent", "urgency"],
+            properties: {
+              intent: { type: "string", enum: ["question", "request"] },
+              urgency: { type: "string", enum: ["low", "high"] },
+            },
+          },
+          schemaName: "TestSchema",
+        });
+
+        expect(result.data).toEqual({ intent: "request", urgency: "high" });
+        expect(result.usage.totalTokens).toBe(70);
+        // One attempt is the honest number on this path: no local validation
+        // round ran, because the library carries no JSON Schema validator, so
+        // reporting more would overstate what was checked.
+        expect(result.validationAttempts).toBe(1);
+      });
+
+      it("refuses a call carrying both schema forms", async () => {
+        const ctx = await setup();
+        ctx.setupGenerateStructured({
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        // Rejected rather than resolved by precedence: a call with both
+        // carries two intentions, and honouring one silently makes the other a
+        // bug nobody can see.
+        await expect(
+          ctx.port.generateStructured({
+            taskType: "test-classify",
+            messages: [{ role: "user" as const, content: "classify this" }],
+            schema: Schema,
+            jsonSchema: { type: "object", properties: {} },
+          }),
+        ).rejects.toBeInstanceOf(ConfigError);
+      });
+
+      it("refuses a call carrying neither schema form", async () => {
+        const ctx = await setup();
+        ctx.setupGenerateStructured({
+          data: { intent: "request", urgency: "high" },
+          usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
+        });
+
+        await expect(
+          ctx.port.generateStructured({
+            taskType: "test-classify",
+            messages: [{ role: "user" as const, content: "classify this" }],
+          } as never),
+        ).rejects.toBeInstanceOf(ConfigError);
       });
 
       it("retries with feedback when first attempt fails validation", async () => {

@@ -72,6 +72,16 @@ interface VercelAdapterOptions {
 | `generateEmbedding` / `generateEmbeddings` | ✓ |
 | Multimodal content blocks | ✓ images, audio and documents as base64; images also by URL |
 
+## Structured output from a JSON Schema
+
+Since `0.1.0-alpha.35`, `generateStructured` accepts `jsonSchema` in place of `schema`, for a caller that already holds a JSON Schema rather than a Zod one:
+
+```ts
+await llm.generateStructured<Triage>({ taskType: "classify", messages, jsonSchema });
+```
+
+Exactly one of the two is required. **What the JSON Schema path gives up** is local validation, because this library carries no JSON Schema validator: the response comes back unvalidated, there is no retry-with-feedback when a model returns the wrong shape, `validationAttempts` is always 1, and `T` is yours to assert. Prefer `schema` unless you genuinely hold a JSON Schema already. `streamStructured` is unchanged and still requires Zod.
+
 ## Limitations to know
 
 Current as of `0.1.0-alpha.35`, checked against the adapter source rather than against earlier release notes. Four entries that stood here through v0.1 are gone because the features shipped: the multi-turn agent loop, multimodal content, bundled pricing, and a typed empty-response error, all in `0.1.0-alpha.8` or since.

@@ -4,7 +4,7 @@
 
 - **The observability contract surface (alpha.28+, primary).** Structured, versioned event stream defined by [`@llm-ports/observability-contract`](../../packages/observability-contract/README.md). Events flow through an `ObservabilitySink { emit(event) }` interface. Every event carries a full envelope (`spec_version`, `event_id`, timestamps, `source`, `operation_id`, `attempt_id`, correlation, W3C Trace Context). Lifecycle events at operation and attempt granularity, plus `retry_scheduled` / `fallback.selected` / `evaluation.recorded`. Registry-driven emission lives at `RegistryOptions.instrumentation`.
 
-- **The alpha.21 fire-and-forget hooks surface (still supported).** Five typed callbacks on `RegistryOptions.observability` — `onCost`, `onTokenUsage`, `onFallback`, `onValidationRetry`, `onCacheHit`. Simple, low-ceremony, aligned with OpenTelemetry `gen_ai.*` semconv naming where applicable. Suitable when you only need "did the call succeed and what did it cost."
+- **The alpha.21 fire-and-forget hooks surface (still supported).** Six typed callbacks on `RegistryOptions.observability`: `onComplete`, `onCost`, `onTokenUsage`, `onFallback`, `onValidationRetry` and `onCacheHit`. Simple, low-ceremony, aligned with OpenTelemetry `gen_ai.*` semconv naming where applicable. Suitable when you only need "did the call succeed and what did it cost."
 
 If you're new, start with the contract surface — it's the direction the library is heading, and the contract package can also be used by non-port callers (e.g. your own retry loops, subprocess-driven agents). The alpha.21 hooks stay stable for existing consumers and receive no deprecation timeline in this alpha line.
 
@@ -234,6 +234,7 @@ const registry = createRegistryFromEnv({
   env: process.env,
   adapters: { /* ... */ },
   observability: {
+    onComplete:    (e) => myMetrics.calls.observe({ ok: e.ok, attempts: e.providerAttempts }),
     onCost:        (e) => myMetrics.cost.observe(e.totalUsd, { model: e.modelId }),
     onTokenUsage:  (e) => myMetrics.tokens.observe(e.totalTokens, { model: e.modelId }),
     onFallback:    (e) => myLogger.warn(`fallback ${e.fromAlias} -> ${e.toAlias} (${e.cause})`),
@@ -243,9 +244,41 @@ const registry = createRegistryFromEnv({
 });
 ```
 
-All five fields are independently optional. Pass only the hooks the downstream pipeline needs.
+All six fields are independently optional. Pass only the hooks the downstream pipeline needs.
 
 ## Hook reference
+
+### `onComplete`
+
+Added in `0.1.0-alpha.35`. **Fires exactly once per call, on success and on failure**, which is what makes it different from every other hook here: the rest describe something that happened during a call, and this one describes the call.
+
+```ts
+observability: {
+  onComplete: (e) => {
+    myMetrics.calls.inc({ ok: String(e.ok), task: e.taskType });
+    myMetrics.latency.observe(e.latencyMs);
+    if (e.totalUsd !== undefined) myMetrics.spend.observe(e.totalUsd);
+    if (!e.ok) myLogger.warn({ err: e.error, attempts: e.providerAttempts }, "llm call failed");
+  },
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `ok` | Whether the call returned a result. `false` means every provider in the chain failed. |
+| `operation` | Which port method ran: `generateText`, `generateStructured`, `generateChat`, `runAgent`, and so on. |
+| `taskType` | The task the caller asked for, which is what a route was chosen by. |
+| `providerAttempts` | **How many providers were tried, not how many answered.** A value of 3 on a successful call means two failed over before one worked. |
+| `providerAlias` / `modelId` | The provider and model that answered, or the last one attempted when the call failed. Always present. |
+| `latencyMs` | Wall-clock time for the whole call, failover included. |
+| `usage` / `totalUsd` | Absent rather than zero when the call produced neither, so a spend total cannot be inflated by failures or by a model with no known price. |
+| `validationAttempts` | Validation rounds, on the structured methods only. `1` means the first response validated. |
+| `taskType` / `budgetScope` / `refs` | The task a route was chosen by, the scope any spend was counted against, and any artifact references attached to the call. |
+| `error` | The error that ended the call, present only when `ok` is `false`. |
+
+**Why the failure case matters.** A completion hook that fired only on success would describe a healthier system than the real one, and reliability is usually the reason to switch it on. It fires for both.
+
+**Why `providerAttempts` is the interesting field.** Answering "what did this call cost and how many attempts did it take" previously meant correlating `onCost` with `onFallback` and keeping a count yourself. This is that answer in one event.
 
 ### `onCost`
 
@@ -487,6 +520,42 @@ Each event field maps to a `gen_ai.*` semantic convention or a vendor-neutral ex
 | `fromAlias` / `toAlias` (`onFallback`) | span attributes on the fallback event span |
 
 The hooks deliberately stay vendor-neutral on the field names. Map to the conventions your tracing layer expects at the hook callback boundary.
+
+## Two related tools that are not hooks
+
+### `combineSinks`: more than one sink on one registry
+
+Added in `0.1.0-alpha.35`, exported from `@llm-ports/observability-contract`. The contract surface takes one sink, and sending events to both a tracing backend and your own logger previously meant writing the fan-out yourself.
+
+```ts
+import { combineSinks } from "@llm-ports/observability-contract";
+import { createOtelSink } from "@llm-ports/telemetry-otel";
+
+const sink = combineSinks(createOtelSink({ tracer }), myAuditSink);
+```
+
+**Failures are isolated per sink.** A sink that throws, or that returns a rejected promise, does not stop the others receiving the event and does not affect the call. That is the same promise every hook here makes, extended to composition: observability never breaks inference.
+
+### `createRetryRecorder`: a bounded view of recent retries
+
+Added in `0.1.0-alpha.35`, exported from `@llm-ports/core`. For a dashboard or a health check that wants to show recent instability without subscribing to every event.
+
+```ts
+import { createRetryRecorder } from "@llm-ports/core";
+
+const retries = createRetryRecorder();          // retains 50 by default
+const adapters = {
+  openai: createOpenAIAdapter({ apiKey, onRetry: retries.onRetry }),
+  google: createGoogleAdapter({ apiKey, onRetry: retries.onRetry }),
+};
+
+retries.recent(10);   // newest first
+retries.total;        // every retry seen, including evicted ones
+```
+
+**Note where it attaches, because it is deliberately not a registry method.** Retries happen *inside* adapters: provider backoff, and the retry-with-feedback round when a model returns the wrong shape. What the registry does when a provider fails is walk to the next one, which is a fallback rather than a retry and is already reported by `onFallback`. A `registry.recentRetries()` could therefore only have returned fallbacks under a name that says retries, so the recorder is handed to the adapters instead. One recorder is safe across all of them, since every event carries its own provider alias.
+
+It is bounded by construction because the reason to want it is recent instability, and an unbounded log of every retry a long-running worker ever performed is a memory leak wearing a feature's clothes. `total` survives eviction, so "three retries" stays distinguishable from "three retained out of two hundred".
 
 ## See also
 

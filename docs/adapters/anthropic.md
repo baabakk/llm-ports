@@ -118,6 +118,16 @@ createAnthropicAdapter({
 
 Full `AbortSignal` support shipped in `0.1.0-alpha.6`. The signal is threaded into both `client.messages.create` (non-streaming) and `client.messages.stream`, so `controller.abort()` cancels the in-flight HTTP request. `runAgent` also re-checks the signal between steps so cancellation propagates mid-loop. See the [Cancellation guide](/guides/cancellation).
 
+## Structured output from a JSON Schema
+
+Since `0.1.0-alpha.35`, `generateStructured` accepts `jsonSchema` in place of `schema`, for a caller that already holds a JSON Schema rather than a Zod one:
+
+```ts
+await llm.generateStructured<Triage>({ taskType: "classify", messages, jsonSchema });
+```
+
+Exactly one of the two is required. **What the JSON Schema path gives up** is local validation, because this library carries no JSON Schema validator: the response comes back unvalidated, there is no retry-with-feedback when a model returns the wrong shape, `validationAttempts` is always 1, and `T` is yours to assert. Prefer `schema` unless you genuinely hold a JSON Schema already. `streamStructured` is unchanged and still requires Zod.
+
 ## Reading next
 
 - [Tool-use security guide](/guides/security) — `runAgent` code patterns, the destructive / requiresConfirmation / maxOutputBytes flags, the approval-gate wrapper

@@ -57,6 +57,12 @@ This root file aggregates the **release-level** notes — the user-facing summar
 - **New page: [Configuration](docs/concepts/configuration.md).** Where a provider alias comes from in each of the two configuration forms, why an alias derived from an environment variable name cannot hold the slashes and dots that real model ids carry, what the object form requires that the environment form fills in for you, and what the registry does when a route names a provider that does not exist.
 - The Vercel adapter page now states its real limits instead of its former ones: reasoning budgets rescued after a starved call rather than anticipated, audio by URL refused because that provider routes audio as file data, and tool-role messages flattened to user text.
 
+### Test and example coverage
+
+- **The JSON Schema input form is now pinned by the shared adapter contract**, so all five adapters that serve `generateStructured` are covered rather than the one that had a test. Three assertions: the form works and honestly reports one validation attempt, and a call carrying both schema forms or neither is refused. Verified to execute in each of the five adapters rather than silently skip, which is a real failure mode here because adapters consume the contract suite from its build output.
+- **The shared resolver behind that decision has its own tests.** It is where five adapters agree on what "neither" and "both" mean, and it had none, which is how a shared rule came close to shipping verified in one of its five consumers.
+- **`examples/streaming-chat` gains a fourth route** using `generateChat`, the mirror image of its `runAgent` route: same request, same tool declared, and nothing executed. It also shows the narrowing an optional port method requires.
+
 ### Known and recorded, not fixed here
 
 - **The operation aggregate in a completion event still reports zero when no price was ever known**, because that contract field is required and cannot say "unknown". The OpenTelemetry bridge guards against writing it, which also means a genuinely free operation reports no cost attributes. The real fix makes the field optional and is queued for `1.0.0`. `TD-LLMPORTS-OPERATION-AGGREGATE-COST-SUBSTITUTES-ZERO`.

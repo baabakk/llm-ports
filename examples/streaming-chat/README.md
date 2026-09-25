@@ -6,7 +6,7 @@ Three Express routes that cover the most common LLM UX patterns: one-shot chat, 
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-# Optional fallback: export OPENAI_API_KEY=sk-...
+# Optional fallback, and required by POST /chat/tools: export OPENAI_API_KEY=sk-...
 
 pnpm --filter @llm-ports/example-streaming-chat start
 # → Streaming chat example listening on http://localhost:3000
@@ -112,8 +112,23 @@ while (true) {
 | `POST /chat` | `generateText` | Fastest path. Use when you don't need real-time output. |
 | `POST /chat/stream` | `streamText` | Real-time UX for chat UIs. The `for await (const chunk of ...)` loop is the same shape regardless of provider. |
 | `POST /chat/agent` | `runAgent` | When the assistant might need to call tools (DB lookups, API calls). Multi-turn loop terminates on `completed` / `max_steps` / `stopped_by_user`. |
+| `POST /chat/tools` | `generateChat` | When the **caller** owns the tool loop rather than this server. Returns the assistant's turn with its tool calls attached and runs nothing. The shape an OpenAI-compatible surface needs. |
 
-All three share the same registry, the same fallback chain (Anthropic primary → OpenAI backup), and the same USD cost gating.
+All four share the same registry, the same fallback chain, and the same USD cost gating.
+
+### The last two routes are mirror images, and that is the point
+
+`/chat/agent` and `/chat/tools` receive the same request and declare the same tool. The difference is who runs it.
+
+- **`/chat/agent`** executes `lookupOrder` itself, feeds the result back to the model, and loops until the model answers in words. You get prose.
+- **`/chat/tools`** returns `{ toolCalls: [...] }` and stops. Nothing ran. You decide whether to ask a human first, check a permission, execute on another machine, or hand the calls to your own client.
+
+Two details worth copying rather than rediscovering:
+
+1. **The tool has no `execute` function on that route** because nothing is going to run it. Only the name and the input schema go to the model.
+2. **`generateChat` is an optional port method, so the code narrows before calling it** (`if (!llm.generateChat)`). The compiler insists, and it is the first of two checks: the method may be absent from the port, and separately no alias in the chain may implement it. The registry handles the second and throws `NoProvidersAvailableError` naming each alias.
+
+**Only `@llm-ports/adapter-openai` implements `generateChat` today**, so `/chat/tools` needs `OPENAI_API_KEY` set. With only an Anthropic key it fails with that named error rather than a confusing one mid-call, which is the behaviour the route deliberately surfaces instead of hiding.
 
 ## Production-shape extensions
 

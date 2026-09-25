@@ -3,9 +3,10 @@
  *
  * Three Express routes that cover the most common LLM UX patterns:
  *
- *   POST /chat                — one-shot generateText
- *   POST /chat/stream         — Server-Sent Events streamText
- *   POST /chat/agent          — tool-augmented runAgent
+ *   POST /chat                one-shot generateText
+ *   POST /chat/stream         Server-Sent Events streamText
+ *   POST /chat/agent          tool-augmented runAgent
+ *   POST /chat/tools          generateChat, returning tool calls without running them
  *
  * Each route accepts:
  *   { messages: [{ role: "user" | "assistant", content: string }, ...] }
@@ -76,7 +77,7 @@ const llm = registry.getPort();
 // ─── Tools for the agent route ───────────────────────────────────
 
 // Fake order lookup. In production this would hit your DB. Read-only,
-// so no `destructive` flag and no `requiresConfirmation` flag — the
+// so no `destructive` flag and no `requiresConfirmation` flag, so the
 // agent can call it freely.
 const lookupOrder: ToolDefinition = {
   name: "lookupOrder",
@@ -222,10 +223,80 @@ app.post("/chat/agent", async (req: Request, res: Response) => {
   }
 });
 
+// Route 4: tool calls returned, NOT executed (generateChat, alpha.35+)
+//
+// The mirror image of /chat/agent. There, the library runs the tool loop and
+// you get the final answer. Here, you get the assistant's turn with its tool
+// calls attached and decide yourself: ask a human, check a permission, run it
+// on another machine, or hand the calls to your own API client. This is the
+// shape an OpenAI-compatible HTTP surface needs, since its caller owns the
+// loop, not the server.
+//
+// Note there are no `execute` functions below. The tool is declared by name
+// and schema only, because nothing here is going to run it.
+app.post("/chat/tools", async (req: Request, res: Response) => {
+  const parsed = ChatRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+  }
+  const messages: LLMMessage[] = [
+    { role: "system", content: SYSTEM },
+    ...parsed.data.messages.map((m) => ({ role: m.role, content: m.content })),
+  ];
+
+  // Optional port methods are optional in the TYPE too, so narrow before
+  // calling. This is the first of two checks a caller needs, and the compiler
+  // insists on it: the method may be absent from the port entirely. The second
+  // check is whether any alias in the chain implements it, which the registry
+  // does for you when the call runs.
+  if (!llm.generateChat) {
+    return res.status(501).json({
+      error: "This build of the port does not offer generateChat.",
+    });
+  }
+
+  try {
+    const turn = await llm.generateChat({
+      taskType: "chat",
+      messages,
+      tools: { lookupOrder },
+      maxOutputTokens: 1000,
+    });
+
+    return res.json({
+      content: turn.text,
+      stopReason: turn.stopReason,
+      // `args` is the parsed object, and it is absent when the model emitted
+      // arguments that are not valid JSON. `rawArguments` always carries what
+      // the model actually sent, so a caller can salvage a malformed call
+      // instead of losing the turn.
+      toolCalls: turn.toolCalls.map((c) => ({
+        id: c.toolCallId,
+        name: c.toolName,
+        args: c.args,
+        raw: c.rawArguments,
+      })),
+      usage: turn.usage,
+      cost: turn.cost?.totalUSD,
+      provider: turn.providerAlias,
+    });
+  } catch (err) {
+    // `generateChat` is an OPTIONAL port method, and today only
+    // @llm-ports/adapter-openai implements it. The registry knows which
+    // aliases do and filters the chain to those, so with no OPENAI_API_KEY set
+    // this route fails with a NoProvidersAvailableError naming each alias,
+    // rather than a confusing type error mid-call. That is the failure worth
+    // seeing, so it is passed through rather than dressed up.
+    console.error("[/chat/tools] error:", err);
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 const PORT = Number(process.env["PORT"] ?? 3000);
 app.listen(PORT, () => {
   console.log(`Streaming chat example listening on http://localhost:${PORT}`);
-  console.log(`  POST /chat            — one-shot text`);
-  console.log(`  POST /chat/stream     — Server-Sent Events`);
-  console.log(`  POST /chat/agent      — tool-augmented agent`);
+  console.log(`  POST /chat            one-shot text`);
+  console.log(`  POST /chat/stream     Server-Sent Events`);
+  console.log(`  POST /chat/agent      tool-augmented agent (we run the loop)`);
+  console.log(`  POST /chat/tools      tool calls returned, not executed (you run the loop)`);
 });

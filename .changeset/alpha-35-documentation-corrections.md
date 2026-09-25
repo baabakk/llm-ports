@@ -15,4 +15,11 @@ A reconciliation of every published page against the code found eleven claims de
 
 **New: [Configuration](/concepts/configuration).** Where a provider alias comes from in each of the two configuration forms, why an alias derived from an environment variable name cannot contain the slashes and dots that real model ids carry, what the object form requires that the environment form fills in for you, and what the registry does when a route names a provider that does not exist.
 
+**Also: the release's new APIs are now in the reference pages, not only in the release notes.** A check found five of them documented on the migration page alone, which is a point-in-time record rather than somewhere a reader looks things up:
+
+- **[Observability](/concepts/observability)** gains `onComplete` with its full field table, plus `combineSinks` and `createRetryRecorder`, and its "five typed callbacks" count is now six.
+- **[Tool use](/guides/tool-use)** gains `generateChat` beside `streamChat`, replacing the claim that returning tool calls without executing them was "streaming-only today". It also shows the narrowing an optional port method requires, which the compiler insists on.
+- **The [adapter matrix](/adapters/)** gains rows for the two caller-owns-the-loop methods and for JSON Schema input, with a footnote stating that only `adapter-openai` implements the first two and that every other adapter offers the capability through `runAgent`.
+- **The Anthropic, Google, Ollama and Vercel adapter pages** each gain the JSON Schema section they were missing, including what that path gives up.
+
 No runtime change in any package. The version bump exists to carry the adapter header correction.

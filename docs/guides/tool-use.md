@@ -99,7 +99,44 @@ One consequence worth knowing: a provider that rejects your schema outright reje
 
 ## When you want the calls but not the execution
 
-`streamChat` surfaces tool calls as they arrive and **never executes them**, which is what you want when the caller owns the loop, as an OpenAI-compatible HTTP surface does. It is streaming-only today.
+Sometimes the loop is not ours to run. An OpenAI-compatible HTTP surface, for instance, has to hand the tool calls to whoever called it and let them decide. Two methods do that, and **neither executes anything**:
+
+| Method | Shape | Use it when |
+|---|---|---|
+| `streamChat` | Yields text as it arrives, then the assembled tool calls | The caller is streaming to a user or a socket |
+| `generateChat` | Returns one complete assistant turn | The caller wants the whole turn before deciding, or is not streaming at all |
+
+`generateChat` was added in `0.1.0-alpha.35`, because until then the only non-streaming option was `runAgent`, which runs the loop for you.
+
+```ts
+const turn = await llm.generateChat({ taskType: "assist", messages, tools });
+
+if (turn.toolCalls.length > 0) {
+  for (const call of turn.toolCalls) {
+    // call.toolName, call.toolCallId,
+    // call.args (parsed) and call.rawArguments (as the model sent them)
+  }
+} else {
+  console.log(turn.text);
+}
+```
+
+**Tool arguments are parsed where they parse.** Where a model emits arguments that are not valid JSON, `args` is left undefined and `rawArguments` keeps the original text, rather than the call failing. A caller owning the loop is better placed to decide what a malformed argument means than we are.
+
+**Both methods are optional on the port**, unlike `generateText` and the rest. Not every adapter implements them, so the registry checks which aliases do and filters the chain to those. A chain mixing adapters that do and do not support the method still works, and one where none do throws `NoProvidersAvailableError` naming each alias, rather than failing on the first attempt with a confusing type error.
+
+```ts
+registry.aliasSupportsGenerateChat("fast");   // ask before routing, if you need to
+```
+
+**Optional in the type as well as at runtime**, which means two checks rather than one. The compiler requires the first:
+
+```ts
+if (!llm.generateChat) throw new Error("this port does not offer generateChat");
+const turn = await llm.generateChat({ taskType, messages, tools });
+```
+
+The second is whether any alias in the chain implements it, and the registry does that one for you: it filters the chain and throws `NoProvidersAvailableError` naming each alias when none qualify.
 
 ## A worked, runnable example
 

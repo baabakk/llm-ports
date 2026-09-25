@@ -215,6 +215,16 @@ See the [Cancellation guide](/guides/cancellation) for the full pattern.
 
 Gemini does not have a separate cost-vs-fidelity knob equivalent to OpenAI's `image_url.detail`. Image cost is determined by the model's automatic tiling — typically ~258 tokens per image for `gemini-2.5-flash`, ~1,290 for high-resolution inputs to `gemini-2.5-pro`. If you set `ImageSource.detail` on a call routed to a Gemini model, the adapter ignores the field (consistent with adapter-anthropic).
 
+## Structured output from a JSON Schema
+
+Since `0.1.0-alpha.35`, `generateStructured` accepts `jsonSchema` in place of `schema`, for a caller that already holds a JSON Schema rather than a Zod one:
+
+```ts
+await llm.generateStructured<Triage>({ taskType: "classify", messages, jsonSchema });
+```
+
+Exactly one of the two is required. **What the JSON Schema path gives up** is local validation, because this library carries no JSON Schema validator: the response comes back unvalidated, there is no retry-with-feedback when a model returns the wrong shape, `validationAttempts` is always 1, and `T` is yours to assert. Prefer `schema` unless you genuinely hold a JSON Schema already. `streamStructured` is unchanged and still requires Zod.
+
 ## Reading next
 
 - [`@llm-ports/adapter-openai`](/adapters/openai) — comparison if you're choosing between native Gemini and the OpenAI-compat path

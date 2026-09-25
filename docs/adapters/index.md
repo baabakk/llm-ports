@@ -19,6 +19,8 @@ alpha.30 adds two subprocess-driven agent adapters — `@llm-ports/adapter-codex
 
 `✓` = supported, `✗` = not supported, `✓*` = model-dependent, `n/a` = doesn't apply.
 
+**On the two chat methods.** `generateChat` and `streamChat` hand tool calls back to the caller instead of executing them, for a caller that owns the loop. They are **optional port methods** and only `adapter-openai` implements them today, which covers the OpenAI-compatible surfaces that mostly want this. The registry knows which aliases implement them and filters a fallback chain accordingly, so a mixed chain works and a chain with no support throws a named error rather than failing mid-call. Every other adapter offers the same capability through `runAgent`, which runs the loop for you. See [Tool use](/guides/tool-use#when-you-want-the-calls-but-not-the-execution).
+
 | Feature | Anthropic | OpenAI | Ollama | Vercel |
 |---------|:---------:|:------:|:------:|:------:|
 | Text generation | ✓ | ✓ | ✓ | ✓ |
@@ -26,6 +28,8 @@ alpha.30 adds two subprocess-driven agent adapters — `@llm-ports/adapter-codex
 | Streaming text | ✓ | ✓ | ✓ | ✓ |
 | Streaming structured (partial JSON) | ✓ | ✓ | ✓ | ✓ |
 | Tool use | ✓ | ✓ | ✓\* | ✓ (multi-turn via Vercel's own loop) |
+| `generateChat` / `streamChat` (tool calls returned, not executed) | ✗ | ✓ | ✗ | ✗ |
+| `generateStructured` from a JSON Schema (`jsonSchema`) | ✓ | ✓ | ✓ | ✓ |
 | Tool parameter schemas advertised to model | stub\*\* | stub\*\* | stub\*\* | via Vercel SDK |
 | Vision input (base64) | ✓ | ✓ (data URI) | ✓\* | ✓ (data URI) |
 | Vision input (URL) | ✓ | ✓ | ✗ (Ollama doesn't fetch URLs) | ✓ |
