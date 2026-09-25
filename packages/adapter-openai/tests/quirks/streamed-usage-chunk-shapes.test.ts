@@ -38,6 +38,21 @@ const USAGE_ON_FINISH = [
   { id: "c1", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: USAGE },
 ];
 
+/**
+ * The shape that catches an over-eager fix: usage **and** a last content delta
+ * on the same chunk.
+ *
+ * Reading usage from any chunk and then skipping that chunk loses the "lo",
+ * which is a worse defect than the missing usage the fix was for. Found by
+ * reading a consumer's own patch against the published adapter: theirs
+ * recorded usage and then skipped only a chunk with no choices, which is
+ * correct, and the first upstream fix skipped on usage alone, which was not.
+ */
+const USAGE_WITH_TRAILING_CONTENT = [
+  { id: "c1", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta: { role: "assistant", content: "Hel" } }] },
+  { id: "c1", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta: { content: "lo" }, finish_reason: "stop" }], usage: USAGE },
+];
+
 /** OpenAI: a trailing chunk with no choices carries the usage. */
 const USAGE_ONLY_TRAILER = [
   ...textDeltas,
@@ -81,6 +96,7 @@ function registryFor(baseURL: string, seen: TokenUsageEvent[]) {
 const shapes: Array<[string, readonly unknown[]]> = [
   ["usage on the finishing chunk, as Together AI and Cerebras send it", USAGE_ON_FINISH],
   ["usage in a trailing chunk with no choices, as OpenAI sends it", USAGE_ONLY_TRAILER],
+  ["usage on the same chunk as the last content delta", USAGE_WITH_TRAILING_CONTENT],
 ];
 
 for (const [label, chunks] of shapes) {

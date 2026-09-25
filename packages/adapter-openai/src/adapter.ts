@@ -860,14 +860,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         // those providers was silently discarded and their streamed calls
         // reported no tokens and no cost. Found in the RLM gateway, which
         // carried a patch for it (TD-LLMPORTS-STREAMED-USAGE-LOST-ON-COMPAT-PROVIDERS).
-        // Alpha.25+: watch for the final usage chunk (choices=[] + usage
-        // populated) that `stream_options: { include_usage: true }` produces.
-        // The final chunk usually has no delta, so we intercept and stash it
-        // for post-loop cost emission instead of yielding.
-        if (chunk.usage) {
-          finalUsageChunk = chunk;
-          continue;
-        }
+        // Record usage from whichever chunk carries it, then skip only a chunk
+        // that has nothing else in it. Providers differ on both halves: OpenAI
+        // sends a usage-only trailer with no choices, while Together AI and
+        // Cerebras attach usage to the chunk that finishes the stream. A
+        // provider that puts a last content delta on that same finishing chunk
+        // would lose it if this returned early on usage alone, which is a
+        // worse defect than the missing usage this replaced.
+        if (chunk.usage) finalUsageChunk = chunk;
+        if (!chunk.choices || chunk.choices.length === 0) continue;
         const delta = chunk.choices[0]?.delta?.content;
         if (typeof delta === "string" && delta.length > 0) {
           yield delta;
@@ -952,10 +953,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         // Usage from any chunk that carries it; see the note in streamText.
         // Alpha.25+: the final usage chunk (choices=[] + usage) that
         // `stream_options: { include_usage: true }` produces.
-        if (chunk.usage) {
-          finalUsageChunk = chunk;
-          continue;
-        }
+        // Record usage from whichever chunk carries it, then skip only a chunk
+        // that has nothing else in it. Providers differ on both halves: OpenAI
+        // sends a usage-only trailer with no choices, while Together AI and
+        // Cerebras attach usage to the chunk that finishes the stream. A
+        // provider that puts a last content delta on that same finishing chunk
+        // would lose it if this returned early on usage alone, which is a
+        // worse defect than the missing usage this replaced.
+        if (chunk.usage) finalUsageChunk = chunk;
+        if (!chunk.choices || chunk.choices.length === 0) continue;
 
         const choice = chunk.choices[0];
         const delta = choice?.delta;
@@ -1059,10 +1065,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
       let finalUsageChunk: OpenAIStreamChunk | undefined;
       for await (const chunk of stream) {
         // Alpha.25+: intercept the final usage-only chunk (see streamText).
-        if (chunk.usage) {
-          finalUsageChunk = chunk;
-          continue;
-        }
+        // Record usage from whichever chunk carries it, then skip only a chunk
+        // that has nothing else in it. Providers differ on both halves: OpenAI
+        // sends a usage-only trailer with no choices, while Together AI and
+        // Cerebras attach usage to the chunk that finishes the stream. A
+        // provider that puts a last content delta on that same finishing chunk
+        // would lose it if this returned early on usage alone, which is a
+        // worse defect than the missing usage this replaced.
+        if (chunk.usage) finalUsageChunk = chunk;
+        if (!chunk.choices || chunk.choices.length === 0) continue;
         const delta = chunk.choices[0]?.delta?.content;
         if (typeof delta !== "string") continue;
         buffer += delta;
