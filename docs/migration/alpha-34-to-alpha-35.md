@@ -116,7 +116,7 @@ Such an error now buys one retry with `response_format` removed. If that retry s
 
 ## New observability pieces
 
-- **`onComplete`** fires once per call, on success **and on failure**, with usage, dollar cost where known, how many providers were attempted and which answered.
+- **`onComplete`** fires once per call, on success **and on failure**, with usage, dollar cost where known, how many providers were attempted and which answered. **Incomplete in this version:** it covers `generateText` and `generateChat` only, so do not make it your only spend event yet if you stream or use structured output. See `TD-LLMPORTS-ONCOMPLETE-FIRES-FOR-TWO-OF-NINE-OPERATIONS`.
 - **`createRetryRecorder`** gives a bounded, newest-first view of recent retries for a dashboard or health check. Pass `recorder.onRetry` as each adapter's `onRetry`; it is not a registry method, because retries happen inside adapters and the registry never sees them.
 - **`combineSinks`** lets two observability sinks coexist, isolating a failing sink so it cannot silence the others.
 

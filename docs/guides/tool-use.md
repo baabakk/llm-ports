@@ -1,6 +1,6 @@
 # Tool use: letting a model call your functions
 
-A tool is a named function you hand the model, with a schema describing its input. The model decides when to call it, the library executes it, feeds the result back, and loops until the model answers in words. That loop is `runAgent`.
+A tool is a named function you hand the model, with a **Zod** schema describing its input. Zod is currently the only accepted form: if you hold tool definitions as JSON Schema, which is what an OpenAI-compatible HTTP surface receives from its clients, there is no way to pass them through today, and supplying a permissive Zod schema instead is worse than refusing, because the conversion tells the model the tool takes no arguments. Tracked as `TD-LLMPORTS-TOOLS-ARE-ZOD-ONLY`, and the fix follows the same shape `generateStructured` took in `0.1.0-alpha.35`. The model decides when to call it, the library executes it, feeds the result back, and loops until the model answers in words. That loop is `runAgent`.
 
 This page is the registration reference. For gating which tools may run without a human saying yes, read [Tool-Use Security](/guides/security) afterwards.
 

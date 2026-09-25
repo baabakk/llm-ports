@@ -4,7 +4,7 @@
 
 - **The observability contract surface (alpha.28+, primary).** Structured, versioned event stream defined by [`@llm-ports/observability-contract`](../../packages/observability-contract/README.md). Events flow through an `ObservabilitySink { emit(event) }` interface. Every event carries a full envelope (`spec_version`, `event_id`, timestamps, `source`, `operation_id`, `attempt_id`, correlation, W3C Trace Context). Lifecycle events at operation and attempt granularity, plus `retry_scheduled` / `fallback.selected` / `evaluation.recorded`. Registry-driven emission lives at `RegistryOptions.instrumentation`.
 
-- **The alpha.21 fire-and-forget hooks surface (still supported).** Six typed callbacks on `RegistryOptions.observability`: `onComplete`, `onCost`, `onTokenUsage`, `onFallback`, `onValidationRetry` and `onCacheHit`. Simple, low-ceremony, aligned with OpenTelemetry `gen_ai.*` semconv naming where applicable. Suitable when you only need "did the call succeed and what did it cost."
+- **The alpha.21 fire-and-forget hooks surface (still supported).** Six typed callbacks on `RegistryOptions.observability`: `onComplete`, `onCost`, `onTokenUsage`, `onFallback`, `onValidationRetry` and `onCacheHit`. Note that `onComplete` is incomplete as of `0.1.0-alpha.35` and covers two operations rather than all of them; see its own section below before relying on it. Simple, low-ceremony, aligned with OpenTelemetry `gen_ai.*` semconv naming where applicable. Suitable when you only need "did the call succeed and what did it cost."
 
 If you're new, start with the contract surface — it's the direction the library is heading, and the contract package can also be used by non-port callers (e.g. your own retry loops, subprocess-driven agents). The alpha.21 hooks stay stable for existing consumers and receive no deprecation timeline in this alpha line.
 
@@ -250,7 +250,17 @@ All six fields are independently optional. Pass only the hooks the downstream pi
 
 ### `onComplete`
 
-Added in `0.1.0-alpha.35`. **Fires exactly once per call, on success and on failure**, which is what makes it different from every other hook here: the rest describe something that happened during a call, and this one describes the call.
+Added in `0.1.0-alpha.35`.
+
+::: warning Incomplete in `0.1.0-alpha.35`: two operations only
+As shipped, this fires for **`generateText` and `generateChat`** and for nothing else. It does **not** fire for `generateStructured`, `runAgent`, `streamText`, `streamStructured` or `streamChat`, even though the `operation` field's type names all of them.
+
+**Do not adopt it as your single per-call spend event yet.** A codebase that streams or uses structured output would lose those calls from its totals silently, with no error and no warning. Keep your existing cost tap until this is complete. Reported by a consumer who caught it before adopting; tracked as `TD-LLMPORTS-ONCOMPLETE-FIRES-FOR-TWO-OF-NINE-OPERATIONS` and being fixed.
+
+The description below is the intended behaviour and is accurate for the two operations that do fire.
+:::
+
+**Fires once per call, on success and on failure**, which is what makes it different from every other hook here: the rest describe something that happened during a call, and this one describes the call.
 
 ```ts
 observability: {
