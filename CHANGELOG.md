@@ -21,7 +21,7 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
-## v0.1.0-alpha.35 (unreleased)
+## v0.1.0-alpha.35 (2026-09-25)
 
 **Contract corrections, the missing chat method, and the close of the observability work.** The last release numbered `0.1.0-alpha`. The next one is a candidate for `1.0.0` carrying every remaining breaking change at once; see [the status page](docs/v0-1-status.md).
 
