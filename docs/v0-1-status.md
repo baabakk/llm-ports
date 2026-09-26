@@ -4,7 +4,7 @@ A single canonical inventory of what is stable in `llm-ports` today, what is sti
 
 This is the page to share when someone asks "what works in alpha?" or "what should I expect to break?"
 
-**Where this is heading, since it changes how to read the rest of the page.** The alpha line was to end at `0.1.0-alpha.35`, published 2026-09-25. **One more alpha follows it**, a `0.1.0-alpha.35.1` dot-release repaying two defects a consumer reported against `alpha.35`, the sharper of which is that `onComplete` covers two of the nine operations its type names. After that, the next release is a candidate for `1.0.0` carrying every remaining breaking change at once. Everything below described as deferred to "v0.2" belongs to the additive line after that, which is `1.1.0`. The [sequence is set out further down](#what-ships-next).
+**Where this is heading, since it changes how to read the rest of the page.** The alpha line was to end at `0.1.0-alpha.35`, published 2026-09-25. **One more alpha followed it and has shipped**: `0.1.0-alpha.35.1`, published 2026-09-25, repaying the sharper of two defects a consumer reported against `alpha.35`. `onComplete` now fires for every operation the port routes rather than two of them, so **take `core@0.1.0-alpha.35.1` if you use that hook**. The next release is a candidate for `1.0.0` carrying every remaining breaking change at once. Everything below described as deferred to "v0.2" belongs to the additive line after that, which is `1.1.0`. The [sequence is set out further down](#what-ships-next).
 
 ---
 
