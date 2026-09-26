@@ -1883,6 +1883,8 @@ class RegistryPort implements LLMPort {
     const messages = normalizeMessagesOnOptions("generateStructured", options);
     const normalizedOptions = { ...options, messages };
     const taskType = normalizedOptions.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const providerChain = normalizedOptions.forceProviderAlias
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -1916,7 +1918,21 @@ class RegistryPort implements LLMPort {
           normalizedOptions.refs,
           opCtx,
           toContractMetricsForStructured,
-        );
+          undefined,
+          progress,
+        ).catch((error: unknown) => {
+          this.emitCompletion({
+            operation: "generateStructured",
+            ok: false,
+            progress,
+            startedAt,
+            ...(normalizedOptions.taskType ? { taskType: normalizedOptions.taskType } : {}),
+            ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+            ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+            error,
+          });
+          throw error;
+        });
         this.emitResultEvents(
           result,
           "generateStructured",
@@ -1924,6 +1940,16 @@ class RegistryPort implements LLMPort {
           normalizedOptions.budgetScope,
           normalizedOptions.refs,
         );
+        this.emitCompletion({
+          operation: "generateStructured",
+          ok: true,
+          progress,
+          startedAt,
+          result,
+          ...(normalizedOptions.taskType ? { taskType: normalizedOptions.taskType } : {}),
+          ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+          ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        });
         return result;
       },
       getObservabilityContext(this),
@@ -2016,11 +2042,19 @@ class RegistryPort implements LLMPort {
      * never attempted rather than being attempted and failing.
      */
     restrictChain?: readonly string[],
+    /**
+     * Out-parameter, filled as the chain is walked, so a caller that outlives
+     * the walk can report how many providers were tried. The streamed methods
+     * need that count *after* the walk, including on the failure path where
+     * there is no return value to carry it.
+     */
+    progress?: { attempts: number; lastAlias?: string },
   ): Promise<{
     stream: S;
     sel: ModelSelection;
     attemptHandle: ManualAttemptHandle | undefined;
   }> {
+    const prog = progress;
     const { forceProviderAlias, priority, budgetScope, refs, taskType } = normalizedOptions;
 
     const openAttempt = (
@@ -2100,6 +2134,10 @@ class RegistryPort implements LLMPort {
       }
       const isFallback = prevSel !== undefined;
       const handle = openAttempt(sel, isFallback);
+      if (prog) {
+        prog.attempts += 1;
+        prog.lastAlias = sel.alias;
+      }
       try {
         const stream = await openStream(sel);
         const key = this.registry.scopedKey(sel.alias, budgetScope);
@@ -2129,6 +2167,8 @@ class RegistryPort implements LLMPort {
     const messages = normalizeMessagesOnOptions("streamText", options);
     const normalizedOptions = { ...options, messages };
     const taskType = normalizedOptions.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const providerChain = normalizedOptions.forceProviderAlias
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -2190,6 +2230,8 @@ class RegistryPort implements LLMPort {
         // TD-LLMPORTS-STREAM-FALLBACK-NEEDS-PRIMING.
         async (sel) =>
           primeStream(scopedPortForAdapter(sel.port!, opCtx).streamText(optionsWithCallback)),
+        undefined,
+        progress,
       );
       raw = replayPrimed(walked.stream);
       winningSel = walked.sel;
@@ -2199,6 +2241,19 @@ class RegistryPort implements LLMPort {
         if (isAbortError(err)) cancelOperation(opHandle);
         else failOperation(opHandle, err);
       }
+      this.emitCompletion({
+        operation: "streamText",
+        ok: false,
+        progress,
+        startedAt,
+        ...(streamMeta
+          ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+          : {}),
+        ...(taskType ? { taskType } : {}),
+        ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+        ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        error: err,
+      });
       throw err;
     }
 
@@ -2215,8 +2270,33 @@ class RegistryPort implements LLMPort {
         if (isAbortError(err)) cancelOperation(opHandle);
         else failOperation(opHandle, err);
       }
+      this.emitCompletion({
+        operation: "streamText",
+        ok: false,
+        progress,
+        startedAt,
+        ...(streamMeta
+          ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+          : {}),
+        ...(taskType ? { taskType } : {}),
+        ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+        ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        error: err,
+      });
       throw err;
     }
+    this.emitCompletion({
+      operation: "streamText",
+      ok: true,
+      progress,
+      startedAt,
+      ...(streamMeta
+        ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+        : {}),
+      ...(taskType ? { taskType } : {}),
+      ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+      ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+    });
     if (opHandle) completeOperation(opHandle);
   }
 
@@ -2243,6 +2323,8 @@ class RegistryPort implements LLMPort {
     const messages = normalizeMessagesOnOptions("streamChat", options);
     const normalizedOptions = { ...options, messages };
     const taskType = normalizedOptions.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const fullChain = normalizedOptions.forceProviderAlias
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -2303,6 +2385,7 @@ class RegistryPort implements LLMPort {
         async (sel) =>
           primeStream(scopedPortForAdapter(sel.port!, opCtx).streamChat!(optionsWithCallback)),
         providerChain,
+        progress,
       );
       raw = replayPrimed(walked.stream);
       attemptHandle = walked.attemptHandle;
@@ -2311,6 +2394,19 @@ class RegistryPort implements LLMPort {
         if (isAbortError(err)) cancelOperation(opHandle);
         else failOperation(opHandle, err);
       }
+      this.emitCompletion({
+        operation: "streamChat",
+        ok: false,
+        progress,
+        startedAt,
+        ...(streamMeta
+          ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+          : {}),
+        ...(taskType ? { taskType } : {}),
+        ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+        ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        error: err,
+      });
       throw err;
     }
 
@@ -2327,6 +2423,19 @@ class RegistryPort implements LLMPort {
       // The terminal `error` event is emitted here rather than by the
       // adapter, so a consumer iterating the stream sees one consistent
       // shape whether the failure came from the provider or the chain.
+      this.emitCompletion({
+        operation: "streamChat",
+        ok: false,
+        progress,
+        startedAt,
+        ...(streamMeta
+          ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+          : {}),
+        ...(taskType ? { taskType } : {}),
+        ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+        ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        error: err,
+      });
       yield { type: "error", error: err instanceof Error ? err : new Error(String(err)) };
       return;
     }
@@ -2342,6 +2451,18 @@ class RegistryPort implements LLMPort {
         ...(streamMeta?.modelId ? { modelId: streamMeta.modelId } : {}),
       });
     }
+    this.emitCompletion({
+      operation: "streamChat",
+      ok: true,
+      progress,
+      startedAt,
+      ...(streamMeta
+        ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+        : {}),
+      ...(taskType ? { taskType } : {}),
+      ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+      ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+    });
     if (opHandle) completeOperation(opHandle);
   }
 
@@ -2351,6 +2472,8 @@ class RegistryPort implements LLMPort {
     const messages = normalizeMessagesOnOptions("streamStructured", options);
     const normalizedOptions = { ...options, messages };
     const taskType = normalizedOptions.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const providerChain = normalizedOptions.forceProviderAlias
       ? [normalizedOptions.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -2397,6 +2520,8 @@ class RegistryPort implements LLMPort {
           primeStream(
             scopedPortForAdapter(sel.port!, opCtx).streamStructured<T>(optionsWithCallback),
           ),
+        undefined,
+        progress,
       );
       raw = replayPrimed(walked.stream);
       winningSel = walked.sel;
@@ -2406,6 +2531,19 @@ class RegistryPort implements LLMPort {
         if (isAbortError(err)) cancelOperation(opHandle);
         else failOperation(opHandle, err);
       }
+      this.emitCompletion({
+        operation: "streamStructured",
+        ok: false,
+        progress,
+        startedAt,
+        ...(streamMeta
+          ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+          : {}),
+        ...(taskType ? { taskType } : {}),
+        ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+        ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        error: err,
+      });
       throw err;
     }
 
@@ -2422,13 +2560,40 @@ class RegistryPort implements LLMPort {
         if (isAbortError(err)) cancelOperation(opHandle);
         else failOperation(opHandle, err);
       }
+      this.emitCompletion({
+        operation: "streamStructured",
+        ok: false,
+        progress,
+        startedAt,
+        ...(streamMeta
+          ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+          : {}),
+        ...(taskType ? { taskType } : {}),
+        ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+        ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+        error: err,
+      });
       throw err;
     }
+    this.emitCompletion({
+      operation: "streamStructured",
+      ok: true,
+      progress,
+      startedAt,
+      ...(streamMeta
+        ? { result: { usage: streamMeta.usage, cost: streamMeta.cost, modelId: streamMeta.modelId, providerAlias: streamMeta.providerAlias } }
+        : {}),
+      ...(taskType ? { taskType } : {}),
+      ...(normalizedOptions.budgetScope ? { budgetScope: normalizedOptions.budgetScope } : {}),
+      ...(normalizedOptions.refs ? { refs: normalizedOptions.refs } : {}),
+    });
     if (opHandle) completeOperation(opHandle);
   }
 
   async runAgent(options: RunAgentOptions): Promise<AgentResult> {
     const taskType = options.taskType ?? "general";
+    const progress: { attempts: number; lastAlias?: string } = { attempts: 0 };
+    const startedAt = Date.now();
     const providerChain = options.forceProviderAlias
       ? [options.forceProviderAlias]
       : this.registry.resolveTaskChain(taskType);
@@ -2462,7 +2627,21 @@ class RegistryPort implements LLMPort {
           options.refs,
           opCtx,
           toContractMetricsForAgent,
-        );
+          undefined,
+          progress,
+        ).catch((error: unknown) => {
+          this.emitCompletion({
+            operation: "runAgent",
+            ok: false,
+            progress,
+            startedAt,
+            ...(options.taskType ? { taskType: options.taskType } : {}),
+            ...(options.budgetScope ? { budgetScope: options.budgetScope } : {}),
+            ...(options.refs ? { refs: options.refs } : {}),
+            error,
+          });
+          throw error;
+        });
         this.emitResultEvents(
           result,
           "runAgent",
@@ -2470,6 +2649,16 @@ class RegistryPort implements LLMPort {
           options.budgetScope,
           options.refs,
         );
+        this.emitCompletion({
+          operation: "runAgent",
+          ok: true,
+          progress,
+          startedAt,
+          result,
+          ...(options.taskType ? { taskType: options.taskType } : {}),
+          ...(options.budgetScope ? { budgetScope: options.budgetScope } : {}),
+          ...(options.refs ? { refs: options.refs } : {}),
+        });
         return result;
       },
       getObservabilityContext(this),

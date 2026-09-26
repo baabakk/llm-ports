@@ -21,6 +21,29 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v0.1.0-alpha.35.1 (2026-09-25)
+
+**`onComplete` fires for every operation, which is what `alpha.35` said it did.** A dot-release repaying that release rather than adding to it. `@llm-ports/core` only; no other package changed.
+
+### Fixed
+
+- **The hook was emitted from two of the nine operations its event type names.** `alpha.35` shipped it from `generateText` and `generateChat`, documented as firing exactly once per call. A consumer adopting it as their single per-call spend event, which is what it was built for, silently lost every streamed and structured call from their totals. It now fires from `generateText`, `generateStructured`, `generateChat`, `runAgent`, `streamText`, `streamStructured` and `streamChat`, on success and on failure.
+
+  **What "once per call" means for a stream**, since a stream has no single completion instant: the event fires when the stream is exhausted, and on the failure side for an abort or an error whether it happens before the first chunk or midway through after chunks were delivered. Usage and cost carry whatever accumulated, absent rather than zero when nothing did. This is deliberately unlike `onStreamComplete`, which fires only on natural completion and stays that way.
+
+  **If you adopted it in `alpha.35`**, your missing calls will now appear, so expect totals to rise rather than change shape.
+
+  Reported by a consumer who checked the hook's coverage before adopting it rather than after. `TD-LLMPORTS-ONCOMPLETE-FIRES-FOR-TWO-OF-NINE-OPERATIONS`.
+
+### How it got through, recorded because the gap was in the testing rather than the code
+
+The `alpha.35` test file referenced `generateText` nine times and `streamText`, `generateStructured` and `runAgent` zero times. Every test passed because every test exercised a path that worked. This release adds a case per operation plus a guard that fails if an operation joins the union without an emission, and the new file was verified to fail against `alpha.35` (11 of its 15 cases) before being kept.
+
+### Not in this release
+
+- **Tool definitions still accept only Zod**, so a gateway cannot pass its clients' JSON Schema tools through. That changes a public type the `1.0.0` freeze settles, so it belongs in the candidate rather than a patch release. `TD-LLMPORTS-TOOLS-ARE-ZOD-ONLY`.
+- **No content or response cache seam.** Raised by a consumer whose own cache works and whose motivating defect was fixed in June, so the live question is whether the seam is still wanted rather than how to build it. `TD-LLMPORTS-CONTENT-CACHE-TRACKED-PRIVATELY-AND-DELETED-FROM-THE-PUBLIC-PAGE`.
+
 ## v0.1.0-alpha.35 (2026-09-25)
 
 **Contract corrections, the missing chat method, and the close of the observability work.** The last release numbered `0.1.0-alpha`. The next one is a candidate for `1.0.0` carrying every remaining breaking change at once; see [the status page](docs/v0-1-status.md).
