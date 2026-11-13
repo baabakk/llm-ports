@@ -14,6 +14,7 @@ export {
   runContractTests,
   type ContractTestContext,
   type ContractTestSetup,
+  type RunAgentTransmission,
   type MockedGenerateText,
   type MockedGenerateStructured,
   type MockedRunAgent,

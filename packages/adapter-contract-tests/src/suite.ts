@@ -105,6 +105,36 @@ export interface ContractTestContext {
    * shapes valid.
    */
   signalSupport?: "none" | "entry-only" | "entry+inflight";
+
+  /**
+   * Optional. Report what the adapter transmitted on the most recent
+   * `runAgent` call, so the suite can check that required inputs were not
+   * silently dropped.
+   *
+   * Gated the same way as {@link imageContentSupport}: an adapter that cannot
+   * observe its own outbound request leaves this unset and the
+   * honoured-or-refused tests skip, rather than failing every adapter that
+   * predates the field.
+   *
+   * Added for `1.0.0-rc.36`. See
+   * `TD-LLMPORTS-CLI-ADAPTERS-DISCARD-REQUIRED-INPUTS-AND-SIT-OUTSIDE-THE-CONTRACT-SUITE`.
+   */
+  inspectLastRunAgentRequest?: () => RunAgentTransmission;
+}
+
+/**
+ * What an adapter actually transmitted on the last `runAgent` call.
+ *
+ * Reported by the adapter's test harness, not inferred by the suite, because
+ * only the adapter knows what its provider protocol looked like on the wire.
+ */
+export interface RunAgentTransmission {
+  /** The system/developer instruction text as transmitted, if any. */
+  instructions: string | undefined;
+  /** Names of the tools made available to the model. */
+  toolNames: readonly string[];
+  /** Message roles in transmitted order, e.g. `["user","assistant","user"]`. */
+  messageRoles: readonly string[];
 }
 
 /** A factory for the test context. Called fresh for each test. */
@@ -665,6 +695,108 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         // silently stopped computing cost at all.
         expect(result.cost).toBeDefined();
         expect(result.cost?.totalUSD).toBeGreaterThanOrEqual(0);
+      });
+    });
+
+    // ─── Inputs are honoured or refused, never ignored ──────────────────
+    //
+    // An adapter may refuse an input it cannot serve. It may not accept one
+    // and quietly drop it. The difference is the whole rule: a dropped input
+    // yields a well-formed, successful-looking result from a call that did
+    // not do what the caller asked, and nothing in the result says so.
+    //
+    // `instructions` and `tools` are REQUIRED on RunAgentOptions, so an
+    // adapter reading neither still satisfies the type. Two subprocess
+    // adapters did exactly that for five releases, and nothing caught it
+    // because they were the only publishable adapters outside this suite.
+    describe("inputs are honoured or refused, never ignored", () => {
+      const BASE = { taskType: "test-agent", maxSteps: 3 } as const;
+
+      async function attempt(
+        ctx: ContractTestContext,
+        options: Parameters<LLMPort["runAgent"]>[0],
+      ): Promise<{ sent?: RunAgentTransmission; error?: Error }> {
+        ctx.setupRunAgent({
+          text: "ack",
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        });
+        try {
+          await ctx.port.runAgent(options);
+        } catch (err) {
+          return { error: err as Error };
+        }
+        return { sent: ctx.inspectLastRunAgentRequest!() };
+      }
+
+      it("carries `instructions`, or refuses and says so", async () => {
+        const ctx = await setup();
+        if (!ctx.inspectLastRunAgentRequest) return;
+
+        const marker = "SYSTEM-MARKER-7f3a";
+        const { sent, error } = await attempt(ctx, {
+          ...BASE,
+          instructions: marker,
+          messages: [{ role: "user", content: "hello" }],
+          tools: {},
+        });
+
+        // Refusing is allowed. Refusing without naming what was refused is
+        // not, because the caller cannot act on it.
+        if (error) {
+          expect(error.message.toLowerCase()).toContain("instruction");
+          return;
+        }
+        expect(sent?.instructions ?? "").toContain(marker);
+      });
+
+      it("carries `tools`, or refuses and says so", async () => {
+        const ctx = await setup();
+        if (!ctx.inspectLastRunAgentRequest) return;
+
+        const { sent, error } = await attempt(ctx, {
+          ...BASE,
+          instructions: "be helpful",
+          messages: [{ role: "user", content: "look it up" }],
+          tools: {
+            lookup_invoice: {
+              name: "lookup_invoice",
+              description: "Look up an invoice by id",
+              inputSchema: z.object({ id: z.string() }),
+              execute: async () => ({ ok: true }),
+            },
+          },
+        });
+
+        if (error) {
+          expect(error.message.toLowerCase()).toContain("tool");
+          return;
+        }
+        expect(sent?.toolNames ?? []).toContain("lookup_invoice");
+      });
+
+      it("carries assistant turns, or refuses rather than dropping them", async () => {
+        const ctx = await setup();
+        if (!ctx.inspectLastRunAgentRequest) return;
+
+        const { sent, error } = await attempt(ctx, {
+          ...BASE,
+          instructions: "be helpful",
+          messages: [
+            { role: "user", content: "what is 2+2?" },
+            { role: "assistant", content: "4" },
+            { role: "user", content: "and times 3?" },
+          ],
+          tools: {},
+        });
+
+        // A silent drop here is the worst of the three: the model is asked to
+        // continue a conversation whose own previous answers it cannot see,
+        // and the only symptom is that it appears to have forgotten.
+        if (error) {
+          expect(error.message.length).toBeGreaterThan(0);
+          return;
+        }
+        expect(sent?.messageRoles ?? []).toContain("assistant");
       });
     });
   });
