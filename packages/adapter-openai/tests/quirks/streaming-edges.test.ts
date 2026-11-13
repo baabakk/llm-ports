@@ -11,6 +11,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { TRANSIENT_AUTH_BACKOFF_SEAM } from "../../src/test-seam.js";
 import { z } from "zod";
 import {
   buildOpenAIChatStream,
@@ -112,7 +113,7 @@ describe("Group E: streaming edges", () => {
   it("transient 401 at stream-creation (after prior success) → retried, succeeds", async () => {
     const adapter = createOpenAIAdapter({
       apiKey: "test",
-      transientAuthBackoffMs: () => 0,
+      [TRANSIENT_AUTH_BACKOFF_SEAM]: () => 0,
     });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
@@ -154,7 +155,7 @@ describe("Group E: streaming edges", () => {
   it("transient 401 at stream-creation BEFORE any success → propagates immediately", async () => {
     const adapter = createOpenAIAdapter({
       apiKey: "test",
-      transientAuthBackoffMs: () => 0,
+      [TRANSIENT_AUTH_BACKOFF_SEAM]: () => 0,
     });
     const port = adapter.createLLMPort("gpt-4o", "live");
 

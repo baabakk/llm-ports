@@ -12,6 +12,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { TRANSIENT_AUTH_BACKOFF_SEAM } from "../../src/test-seam.js";
 import { z } from "zod";
 import type { RetryEvent } from "@llm-ports/core";
 import {
@@ -29,7 +30,7 @@ beforeEach(() => {
   _resetLearnedConstraints();
 });
 
-const NO_BACKOFF = { transientAuthBackoffMs: () => 0 };
+const NO_BACKOFF = { [TRANSIENT_AUTH_BACKOFF_SEAM]: () => 0 };
 
 describe("#3 — onRetry observability hook", () => {
   it("fires for transient-auth retry with the right shape", async () => {

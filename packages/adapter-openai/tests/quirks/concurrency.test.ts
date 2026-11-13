@@ -10,6 +10,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { TRANSIENT_AUTH_BACKOFF_SEAM } from "../../src/test-seam.js";
 import {
   buildOpenAIChatResponse,
   buildOpenAIError,
@@ -108,7 +109,7 @@ describe("Group I: concurrency / shared-state", () => {
   it("hasSucceeded race: parallel first calls (one success, one 401) — second's retry sees hasSucceeded after winner", async () => {
     const adapter = createOpenAIAdapter({
       apiKey: "test",
-      transientAuthBackoffMs: () => 50, // small delay so the success has time to flip the flag
+      [TRANSIENT_AUTH_BACKOFF_SEAM]: () => 50, // small delay so the success has time to flip the flag
     });
     const port = adapter.createLLMPort("gpt-4o", "live");
 
