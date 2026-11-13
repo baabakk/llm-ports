@@ -893,6 +893,41 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         expect(sent?.messageRoles ?? []).toContain("assistant");
       });
 
+      it("accepts a tool described by JSON Schema, or refuses it as it would a Zod one", async () => {
+        const ctx = await setup();
+        if (!ctx.inspectLastRunAgentRequest) return;
+
+        // A gateway forwarding its own clients' tools holds JSON Schema and
+        // cannot convert to Zod and back without losing what it was given.
+        // Added in 1.0.0-rc.36 from TD-LLMPORTS-TOOLS-ARE-ZOD-ONLY.
+        const { sent, error } = await attempt(ctx, {
+          ...BASE,
+          instructions: "be helpful",
+          messages: [{ role: "user", content: "look it up" }],
+          tools: {
+            lookup_invoice: {
+              name: "lookup_invoice",
+              description: "Look up an invoice by id",
+              inputJsonSchema: {
+                type: "object",
+                required: ["id"],
+                properties: { id: { type: "string" } },
+              },
+              execute: async () => ({ ok: true }),
+            },
+          },
+        });
+
+        // An adapter with no tool channel refuses either form, which is
+        // consistent rather than a gap. What must not happen is accepting the
+        // Zod form and dropping this one.
+        if (error) {
+          expect(error.message.toLowerCase()).toContain("tool");
+          return;
+        }
+        expect(sent?.toolNames ?? []).toContain("lookup_invoice");
+      });
+
       it("throws for every method it declares unsupported", async () => {
         const ctx = await setup();
         const declared = ctx.unsupportedMethods ?? [];

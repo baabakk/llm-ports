@@ -236,6 +236,7 @@ export {
 // ─── Shared adapter utilities ────────────────────────────────────────
 export { wrapProviderError } from "./utils/wrap-provider-error.js";
 export { resolveStructuredSchema } from "./utils/resolve-structured-schema.js";
+export { resolveToolSchema, type ResolvedToolSchema } from "./utils/resolve-tool-schema.js";
 export { createRetryRecorder } from "./utils/retry-recorder.js";
 export type { RetryRecorder, RecordedRetry } from "./utils/retry-recorder.js";
 export type { ResolvedStructuredSchema } from "./utils/resolve-structured-schema.js";

@@ -54,6 +54,7 @@ import {
   type TokenUsage,
   type ValidationStrategy,
   resolveStructuredSchema,
+  resolveToolSchema,
 } from "@llm-ports/core";
 import { OPENAI_PRICING } from "./pricing.js";
 import { readTransientAuthBackoffSeam } from "./test-seam.js";
@@ -2282,7 +2283,15 @@ function toOpenAITools(
     function: {
       name,
       description: def.description,
-      parameters: zodToParameters(def.inputSchema),
+      parameters: ((): OpenAITool["function"]["parameters"] => {
+        const resolved = resolveToolSchema(def, def.name);
+        if (resolved.kind === "zod") return zodToParameters(resolved.zod);
+        // A JSON Schema the caller already holds reaches the provider as
+        // given. The cast states the trade rather than hiding it: this
+        // library carries no JSON Schema validator, so the object is the
+        // caller's assertion about their own tool.
+        return resolved.jsonSchema as unknown as OpenAITool["function"]["parameters"];
+      })(),
     },
   }));
 }

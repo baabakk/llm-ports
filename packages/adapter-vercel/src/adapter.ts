@@ -16,6 +16,7 @@ import {
   embed,
   embedMany,
   tool,
+  jsonSchema,
   type LanguageModel,
   type EmbeddingModel,
   type CoreMessage,
@@ -59,6 +60,7 @@ import {
   type TokenUsage,
   type ValidationStrategy,
   resolveStructuredSchema,
+  resolveToolSchema,
 } from "@llm-ports/core";
 
 /** Multiplier applied to maxOutputTokens when retrying a reasoning-starved call. */
@@ -568,7 +570,15 @@ function createPort(ctx: AdapterContext, modelId: string, alias: string): LLMPor
         for (const [name, def] of Object.entries(options.tools ?? {})) {
           tools[name] = tool({
             description: def.description,
-            parameters: def.inputSchema,
+            // The AI SDK takes a Zod schema directly. A JSON Schema the
+            // caller holds is passed through as-is; the SDK forwards it.
+            parameters: ((): Parameters<typeof tool>[0]["parameters"] => {
+              const resolved = resolveToolSchema(def, def.name);
+              // The SDK takes a Zod schema directly, and wraps a JSON Schema
+              // through its own `jsonSchema()` helper rather than needing a
+              // cast. Using the wrapper keeps the SDK's own validation path.
+              return resolved.kind === "zod" ? resolved.zod : jsonSchema(resolved.jsonSchema);
+            })(),
             execute: async (input: unknown) => def.execute(input as never),
           });
         }

@@ -50,6 +50,7 @@ import {
   type TokenUsage,
   type ValidationStrategy,
   resolveStructuredSchema,
+  resolveToolSchema,
 } from "@llm-ports/core";
 import { ANTHROPIC_PRICING } from "./pricing.js";
 import { applyAnthropicCacheControl } from "./cache-control.js";
@@ -901,7 +902,16 @@ function toAnthropicTools(tools: Record<string, ToolDefinition>): Array<{
   return Object.entries(tools).map(([name, def]) => ({
     name,
     description: def.description,
-    input_schema: zodToInputSchema(def.inputSchema),
+    input_schema: ((): AnthropicToolInputSchema => {
+      const resolved = resolveToolSchema(def, def.name);
+      // A JSON Schema the caller already holds reaches the provider as given.
+      // The cast is the honest shape of the trade: this library carries no
+      // JSON Schema validator, so an object supplied here is the caller's
+      // assertion about its own tool, not something we checked.
+      return resolved.kind === "zod"
+        ? zodToInputSchema(resolved.zod)
+        : (resolved.jsonSchema as unknown as AnthropicToolInputSchema);
+    })(),
   }));
 }
 

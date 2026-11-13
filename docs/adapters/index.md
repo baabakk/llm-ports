@@ -11,8 +11,8 @@ alpha.30 adds two subprocess-driven agent adapters — `@llm-ports/adapter-codex
 | [`@llm-ports/adapter-google`](/adapters/google) | Google Gemini (Pro, Flash) | `LLMPort` |
 | [`@llm-ports/adapter-ollama`](/adapters/ollama) | Local LLMs via the Ollama daemon | `LLMPort`, `EmbeddingsPort`, model management |
 | [`@llm-ports/adapter-vercel`](/adapters/vercel) | Migration from `@ai-sdk/*` | `LLMPort`, `EmbeddingsPort` (limited multimodal in v0.1) |
-| `@llm-ports/adapter-codex` | OpenAI Codex CLI (subprocess) | `LLMPort` (`runAgent` only) |
-| `@llm-ports/adapter-aider` | Aider CLI (subprocess) | `LLMPort` (`runAgent` only) |
+| [`@llm-ports/adapter-codex`](/adapters/codex) | OpenAI Codex CLI (subprocess) | `LLMPort` (`runAgent` only). Read-only sandbox by default |
+| [`@llm-ports/adapter-aider`](/adapters/aider) | Aider CLI (subprocess) | `LLMPort` (`runAgent` only). **A call can modify files and commit** |
 | [`@llm-ports/telemetry-otel`](/adapters/telemetry-otel) | OpenTelemetry gen_ai semconv bridge (companion) | `ObservabilitySink` factory |
 
 ## Feature matrix
