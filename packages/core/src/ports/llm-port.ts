@@ -74,7 +74,32 @@ export interface LLMMessage {
 export interface ToolDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
   description: string;
-  inputSchema: TParams;
+  /**
+   * The tool's parameters as a Zod schema. **Exactly one of this or
+   * {@link inputJsonSchema} is required**; supplying both is refused.
+   *
+   * **TS-BREAKING in `1.0.0-rc.36`:** this became optional, so a read of it is
+   * now `TParams | undefined`. Code that builds a tool and passes
+   * `inputSchema` is unaffected; code that reads `def.inputSchema` and hands
+   * it somewhere expecting a Zod schema needs a narrow. Use
+   * `resolveToolSchema(def, name)` rather than narrowing by hand, so the
+   * both-and-neither rules stay in one place.
+   */
+  inputSchema?: TParams;
+  /**
+   * The tool's parameters as a JSON Schema object, for callers holding one
+   * already. **Exactly one of this or {@link inputSchema} is required.**
+   *
+   * The object reaches the provider as given. This library carries no JSON
+   * Schema validator, so nothing checks the model's arguments against it
+   * locally, exactly as with `generateStructured`'s `jsonSchema`.
+   *
+   * Prefer `inputSchema` unless the schema genuinely arrived from elsewhere,
+   * which is the case this exists for: a gateway forwarding its own clients'
+   * tools cannot convert them to Zod and back without losing what it was
+   * given.
+   */
+  inputJsonSchema?: Record<string, unknown>;
   execute: (input: z.infer<TParams>) => Promise<unknown>;
   /** Signals "this writes/deletes state". Used by createAgent to gate execution. */
   destructive?: boolean;

@@ -26,6 +26,7 @@ import {
   type LLMMessage,
   type MessageContent,
   type ToolDefinition,
+  resolveToolSchema,
 } from "@llm-ports/core";
 
 const ADAPTER_NAME = "google";
@@ -297,7 +298,15 @@ export function toGeminiTools(tools: Record<string, ToolDefinition>): GeminiTool
     ([name, def]) => ({
       name,
       description: def.description,
-      parameters: zodToGeminiSchema(def.inputSchema),
+      parameters: ((): GeminiFunctionDeclaration["parameters"] => {
+        const resolved = resolveToolSchema(def, def.name);
+        if (resolved.kind === "zod") return zodToGeminiSchema(resolved.zod);
+        // A JSON Schema the caller already holds reaches the provider as
+        // given. Gemini's own schema dialect is a subset of JSON Schema, so
+        // the cast states a trade rather than hiding a conversion: nothing
+        // here checks the object, because this library carries no validator.
+        return resolved.jsonSchema as unknown as GeminiFunctionDeclaration["parameters"];
+      })(),
     }),
   );
   return [{ functionDeclarations: declarations }];

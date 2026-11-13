@@ -15,9 +15,11 @@ The example runs three representative scenarios:
 
 1. **Read-only lookup.** "What's the status of order ORD-1234, and who placed it?" The agent calls `lookupOrder` and `lookupCustomer` autonomously. No approval needed.
 
-2. **Destructive but auto-approved.** "Cancel order ORD-5678 — customer changed their mind." The agent calls `cancelOrder` directly. The destructive flag is metadata for audit/observability; this example doesn't require human approval for cancels (you might tighten that in your environment).
+2. **A tool whose shape came from elsewhere.** "Where is shipment DE123456?" The agent calls `trackShipment`, which is defined with `inputJsonSchema` rather than a Zod schema. That is the form to use when the parameters genuinely arrived from outside your process, such as a service forwarding tools its own clients registered. Nothing validates the arguments locally, so its `execute` narrows `unknown` before trusting it. Available since `1.0.0-rc.36`.
 
-3. **Destructive + requires confirmation.** "Issue a full $49.99 refund for order ORD-1234." The agent calls `issueRefund`, but the call is intercepted by the approval gate. The example auto-approves for demo purposes; in production this would surface to a UI / Slack bot / CLI prompt.
+3. **Destructive but auto-approved.** "Cancel order ORD-5678, the customer changed their mind." The agent calls `cancelOrder` directly. The destructive flag is metadata for audit/observability; this example doesn't require human approval for cancels (you might tighten that in your environment).
+
+4. **Destructive + requires confirmation.** "Issue a full $49.99 refund for order ORD-1234." The agent calls `issueRefund`, but the call is intercepted by the approval gate. The example auto-approves for demo purposes; in production this would surface to a UI / Slack bot / CLI prompt.
 
 You'll see something like:
 

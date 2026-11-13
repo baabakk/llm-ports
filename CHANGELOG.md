@@ -21,6 +21,56 @@
 
 This root file aggregates the **release-level** notes — the user-facing summary of what changed across all packages in a given version, breaking changes, and migration guidance.
 
+## v1.0.0-rc.36 (unreleased)
+
+**The freeze.** After this release the shapes you build against stop moving, and a breaking change announces itself as a major version your dependency range refuses automatically.
+
+**The candidate got smaller than it was scoped.** It was planned as nine remaining breaking changes. Five are built, two moved to the first minor after `1.0.0`, and two were withdrawn after checking who had asked for them and finding nobody. The [status page](https://baabakk.github.io/llm-ports/v0-1-status) says which is which.
+
+### Changed
+
+- **`ToolDefinition.inputSchema` is optional, and `inputJsonSchema` is accepted instead.** Exactly one of the two is required; both is refused rather than resolved by precedence, and neither is refused too, because a tool that really takes no arguments says so with an empty object schema. **This is a compile-time break at the read site** under `exactOptionalPropertyTypes`, since the field now reads as `TParams | undefined`. Use the exported `resolveToolSchema(def, name)` rather than narrowing by hand.
+
+  The case it exists for is a service forwarding tools its own clients registered: those arrive as JSON Schema and converting them to Zod and back loses what was handed over. **What you give up** is local validation, so the model's arguments reach your `execute` unchecked. Prefer `inputSchema` unless the shape genuinely came from elsewhere. `TD-LLMPORTS-TOOLS-ARE-ZOD-ONLY`.
+
+- **The Codex and aider adapters stop discarding three of their inputs.** Both accepted a `runAgent` call's `instructions`, its `tools` and every assistant turn in `messages`, and dropped all three without raising anything. A system with several agent roles differing only by system prompt and tool set therefore ran the same generic model for every role, with a well-formed result and no error.
+
+  They now compose the instructions and the full labelled transcript into the prompt, and **refuse tools with an error naming them**, since neither CLI exposes a channel for caller-supplied tools. If you were passing tools to these adapters they were never reaching the model, and the call now tells you so.
+
+- **The Codex adapter's sandbox defaults to `read-only`**, where it was `workspace-write`. A call whose output is a proposal should not be able to write files unless you ask. Pass `defaultSandbox` to opt out. **The aider adapter is different and cannot be made the same:** it is a code editor with no read-only mode, so a call through it can modify files and commit. Stated on its [adapter page](https://baabakk.github.io/llm-ports/adapters/aider) because the two now differ in a way that matters.
+
+- **Both subprocess adapters gained `cliArgsPrefix` and `defaultWorkingDirectory`.** Neither could previously be invoked except as a bare executable on `PATH`, which excluded `npx`, any wrapper script, and on Windows every `.cmd`. The working directory was also reachable only through a provider-specific options bag rather than the port's own options.
+
+### Removed
+
+- **`transientAuthBackoffMs` from `OpenAIAdapterOptions`.** It existed so this project's own tests could skip a retry wait and had no documented production use case. The capability is unchanged and the default backoff still runs at 500ms, 1500ms, 4500ms. **If you were setting it, please open an issue** and it returns as a supported option with a stated purpose. `TD-LLMP-10`.
+
+### Fixed
+
+- **Both subprocess adapters stop reporting a stale emitter version.** `library_version` on every observability event they emitted was the literal `0.1.0-alpha.30`, five releases behind. A test now compares the constant against `package.json` and fails on the next bump, because the constant alone is what went wrong the first time.
+
+- **The Codex adapter's `stepsTaken` is no longer the count of parsed output lines**, which moved with how talkative the CLI happened to be and read as a measurement.
+
+- **A flaky test, named and fixed rather than carried.** `FileFingerprintCache > delete removes entries` timed out against vitest's 5s default, failing roughly one full workspace run in three. It does three real filesystem round trips per case on purpose, so the default was the wrong assumption rather than the test being wrong. Caught by reproducing the load deliberately after a dozen runs failed to reproduce it while being watched.
+
+### Verified, not changed
+
+- **Tool schemas are converted per attempt and never reused across a failover.** This was listed as a defect and is not one: the registry never converts tools, each adapter converts inside its own call, and no adapter caches a conversion. A regression test now pins it by identity across both schema forms, because the property held by omission and an omission is what a later optimisation removes.
+
+### Moved to the first minor after `1.0.0`
+
+- **One model record carrying what a model can do, what it costs and how much context it has.** Deferred to adopt an existing design rather than invent a second one, including the hard part: a per-fact state separating a measured value, a published one, one a probe looked for and did not find, and one nobody checked. The last two mean opposite things when choosing a model and a bare empty field cannot tell them apart.
+- **Spend caps that survive a restart or a second replica.** Moved because `BudgetBackend` and `CostBackend` are already public interfaces the registry accepts, so anyone who needs durable counters can supply them today rather than waiting for the freeze.
+
+### Withdrawn, with the reason rather than quietly
+
+- **Sharing login state across processes.** The defect actually reported, several registry instances in one process disagreeing, shipped in `alpha.31.1`. The cross-process half that remained has no requester. It returns on evidence from someone running more than one process.
+- **The undefined half of "harden the Vercel adapter."** Verification was real and is done; hardening had no stated acceptance, no named provider set and no definition of finished.
+
+### Still open, and no longer in this release
+
+- **A Cohere adapter for the rerank port.** `RerankPort` has shipped since `alpha.17` with nothing implementing it, which is a real inconsistency and why this stays open. It left the candidate because no adopter uses reranking: the release note promising an adapter was ours, so the promise was to ourselves. **If you want reranking, say so and it moves back up.**
+
 ## v0.1.0-alpha.35.1 (2026-09-25)
 
 **`onComplete` fires for every operation, which is what `alpha.35` said it did.** A dot-release repaying that release rather than adding to it. `@llm-ports/core` only; no other package changed.

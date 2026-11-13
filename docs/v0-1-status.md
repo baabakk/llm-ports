@@ -154,21 +154,38 @@ The corrections are the load-bearing part: streamed calls through OpenAI-compati
 
 New in the same release: `generateChat`, which returns the assistant's turn with any tool calls surfaced and not executed, for callers who want the loop themselves; structured output from a JSON Schema rather than only a Zod schema; dollar cost on OpenTelemetry spans; a once-per-call completion hook; a bounded record of recent retries; and an unexplained provider 400 learned once rather than rediscovered on every call.
 
-### `1.0.0-rc.36`: one release candidate, carrying every remaining break
+### `1.0.0-rc.36`: the release candidate
 
-Everything that changes an existing shape travels together, so it can be baked once rather than trickled out:
+**Reviewed item by item on 2026-11-13, and it got smaller.** The candidate was scoped as nine remaining breaking changes. Five are built or closed, two moved to the first minor after `1.0.0`, and two were withdrawn because checking who had asked for them found nobody. The list below says which is which, rather than quietly shipping a shorter one.
 
-- A total spend ceiling per budget scope, with shared storage behind it, designed so that replacing a registry's configuration no longer resets spend counters.
-- Login state that works across processes, which turns the current synchronous interface asynchronous.
-- Removal of a setting that exists only to serve our own tests.
-- **One model record carrying both what a model can do and what it costs**, supplied as data. Including the context window, which this library models nowhere today: a prompt being too long is currently discovered only when a provider rejects it.
-- The Vercel adapter verified, hardened and settled rather than held back.
-- A Cohere adapter, the rerank port documented as consumer-implementable, and a reranker capability.
-- Tool schemas converted per attempt, never hoisted above failover.
+**Built:**
 
-Also carried: the migration pages owed for `alpha.31` and `alpha.32`, test depth against compatible providers beyond the single call currently covered, and the withdrawals below stated where they were announced.
+- **Tool definitions accept a JSON Schema**, not only a Zod schema, so a service can pass through tools it received from its own clients. `ToolDefinition.inputSchema` became optional as a result, which is a compile-time break at the read site; see the [migration page](/migration/alpha-35-to-rc-36).
+- **The two subprocess adapters, for the Codex and aider CLIs, joined the shared contract suite.** They had been accepting an agent call's system instructions, its tool set and every assistant turn and discarding all three without raising anything. They now carry them, or refuse the call and say what they refused. The Codex adapter's sandbox also defaults to read-only.
+- **A test-only option left the OpenAI adapter's public surface.** `transientAuthBackoffMs` existed so our own tests could skip a retry wait and had no documented use case. If you were setting it, please open an issue and it returns as a supported option.
+- **Tool schemas are confirmed to be converted per attempt**, never reused across a failover. This was listed as a defect and turned out not to be one: the registry never converts tools and no adapter caches a conversion. A regression test now pins it, because the property held by omission and an omission is what a later optimisation removes.
+- **The Vercel adapter verified and re-documented**, and moved into the settled tier. Its feature table had omitted two methods it deliberately does not implement, which read as an oversight.
+
+**Moved to the first minor after `1.0.0`, both wanted, neither blocking:**
+
+- **One model record carrying what a model can do, what it costs, and how much context it has.** Deferred to adopt an existing design rather than invent a second one. The record this library needs already exists in a production system, including the part that is hard: a per-fact state distinguishing a value that was measured, one the provider published, one a probe looked for and did not find, and one nobody has checked. Those last two mean opposite things when choosing a model, and a bare empty field cannot tell them apart.
+- **Spend caps that survive a restart or a second replica.** The counters are in memory today, so a cap is really a cap per process per restart. It moved because `BudgetBackend` and `CostBackend` are already public interfaces the registry accepts, so anyone who needs this can supply durable counters now rather than waiting for the freeze.
+
+**Withdrawn, with the reason stated rather than dropped quietly:**
+
+- **Sharing login state across processes.** The defect actually reported, several registry instances in one process disagreeing, shipped in `alpha.31.1`. What remained was the cross-process half, which nobody has asked for. It returns if someone running more than one process can show what it costs them.
+- **The undefined half of "harden the Vercel adapter."** Verification was real and is done. Hardening had no stated acceptance, no named provider set and no definition of finished, and an open-ended task in a release that has to close is worse than a named one postponed.
+
+**Still open, and no longer in this release:**
+
+- **A Cohere adapter for the rerank port.** `RerankPort` has shipped since `alpha.17` with nothing implementing it, which is a real inconsistency and is why this stays open. It left the candidate because no adopter uses reranking: the release note promising an adapter was ours, so the promise was to ourselves. **If you want reranking, say so and it moves back up.**
+
+**Also carried:** the migration pages owed for `alpha.31` and `alpha.32`, test depth against compatible providers beyond the single call currently covered, and the withdrawals above stated where they were announced.
+
+**And this release is published from continuous integration rather than by hand.** Every release so far was cut from a maintainer's workstation. From this one the publish runs in CI with provenance attached, which is the part that affects you: provenance is a verifiable record of which commit and which workflow produced a package, and you can check it rather than take the version number on trust.
 
 **What gates the candidate:** a migration page covering every break it carries, a live sweep across the adapters against real APIs, and sign-off from an adopter running it against production.
+
 
 ### `1.0.0`: settled
 
@@ -202,7 +219,9 @@ A work queue rather than a set of promises, and the order is approximate: what s
 | `createAgent` capability factory | The same configure-once ergonomics the seven existing factories have, bundling the approval-gate wrapper and the tool plumbing. Calling `runAgent` directly keeps working. |
 | `@llm-ports/observability` | Quality-tracking hooks, sinks and deterministic edit-diff helpers: the parts of a consumer that learn from production traffic, extracted so they are opt-in. |
 | More capabilities | `redact`, `route`, `decide`, `answer` and `rerank`, prioritized by the [capability-request issues](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Acapability). The reranker arrives earlier, alongside the Cohere adapter in the release candidate. |
-| Conversation history, if it is offered | Optional, holding nothing by default. See the reopened question above. |
+| Agent-CLI capability axes | Session resume and fork, caller-supplied tools over MCP, structured output, and permission control, declared per adapter instead of assumed. The three agent CLIs differ widely in which of these they support, so each declares against the model record from the release candidate rather than the port pretending they are uniform. |
+| `@llm-ports/adapter-claude-code` | An adapter for the Claude Code CLI, which has the widest surface of the three agent CLIs and no adapter today. |
+| Conversation history, if it is offered | Optional, holding nothing by default, and shaped as a store the consumer supplies rather than state the library owns. Two cases have to be served: a transcript the store holds, and an opaque session identifier for a provider that keeps the transcript itself. Transcript reduction follows it, and waits on the context window from the release candidate, since there is no token budget to reduce against without one. See the reopened question above. |
 
 ---
 

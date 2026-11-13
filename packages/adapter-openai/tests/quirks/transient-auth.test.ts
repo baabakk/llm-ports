@@ -14,6 +14,10 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  TRANSIENT_AUTH_BACKOFF_SEAM,
+  type WithTransientAuthBackoffSeam,
+} from "../../src/test-seam.js";
+import {
   buildOpenAIChatResponse,
   buildOpenAIError,
   mockChatCompletionsCreate,
@@ -30,8 +34,8 @@ beforeEach(() => {
 
 // Tests don't want to wait the production 500ms/1500ms backoff. Inject a
 // no-wait backoff function so retries fire immediately.
-const NO_BACKOFF: Pick<OpenAIAdapterOptions, "transientAuthBackoffMs"> = {
-  transientAuthBackoffMs: () => 0,
+const NO_BACKOFF: WithTransientAuthBackoffSeam = {
+  [TRANSIENT_AUTH_BACKOFF_SEAM]: () => 0,
 };
 
 const burstError = () =>

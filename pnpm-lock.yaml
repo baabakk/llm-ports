@@ -314,6 +314,9 @@ importers:
 
   packages/adapter-aider:
     devDependencies:
+      '@llm-ports/adapter-contract-tests':
+        specifier: workspace:*
+        version: link:../adapter-contract-tests
       '@llm-ports/core':
         specifier: workspace:*
         version: link:../core
@@ -351,6 +354,9 @@ importers:
 
   packages/adapter-codex:
     devDependencies:
+      '@llm-ports/adapter-contract-tests':
+        specifier: workspace:*
+        version: link:../adapter-contract-tests
       '@llm-ports/core':
         specifier: workspace:*
         version: link:../core

@@ -28,6 +28,7 @@
     "@llm-ports/observability-contract": "workspace:*"
   },
   "devDependencies": {
+    "@llm-ports/adapter-contract-tests": "workspace:*",
     "@llm-ports/core": "workspace:*",
     "@llm-ports/observability-contract": "workspace:*"
   },

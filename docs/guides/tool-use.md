@@ -95,7 +95,39 @@ One consequence worth knowing: a provider that rejects your schema outright reje
 |---|---|
 | `adapter-openai`, `adapter-anthropic`, `adapter-google`, `adapter-ollama` | Multi-turn, native tool calling |
 | `adapter-vercel` | Multi-turn through the Vercel AI SDK's own loop, since `0.1.0-alpha.8` |
-| `adapter-codex`, `adapter-aider` | `runAgent` only. These drive a coding-agent command line, which owns its own tools; the other port methods throw |
+| [`adapter-codex`](/adapters/codex), [`adapter-aider`](/adapters/aider) | `runAgent` only. These drive a coding-agent command line, which owns its own tools, so a tool passed to them is **refused with an error naming it**. Before `1.0.0-rc.36` it was accepted and silently dropped. The other port methods throw |
+
+## Describing parameters with a JSON Schema
+
+A tool normally describes its parameters with a Zod schema, which is validated locally and gives `execute` a typed argument. Since `1.0.0-rc.36` it can carry a JSON Schema instead, for the case that motivated it: **a service forwarding tools it received from its own clients.** Those arrive as JSON Schema, and converting them to Zod and back loses what was given.
+
+```ts
+tools: {
+  lookup_invoice: {
+    name: "lookup_invoice",
+    description: "Look up an invoice by id",
+    inputJsonSchema: schemaFromTheWire,
+    execute: async (input) => findInvoice(input),
+  },
+}
+```
+
+**Exactly one of `inputSchema` and `inputJsonSchema` is required.** Supplying both is refused rather than resolved by precedence, because a tool carrying both describes two different shapes and honouring one would make the other a bug nobody can see. Supplying neither is refused too: a tool that genuinely takes no arguments says so with an empty object schema, since omitting both is indistinguishable from forgetting.
+
+**What you give up.** This library carries no JSON Schema validator. The schema reaches the provider, whose tool-calling enforces it where supported, and the model's arguments reach your `execute` **without local validation**. Prefer `inputSchema` unless the schema genuinely came from elsewhere.
+
+If you read a tool's schema yourself, use the resolver rather than narrowing by hand, so the rules above stay in one place:
+
+```ts
+import { resolveToolSchema } from "@llm-ports/core";
+
+const resolved = resolveToolSchema(def, def.name);
+if (resolved.kind === "zod") {
+  // resolved.zod
+} else {
+  // resolved.jsonSchema
+}
+```
 
 ## When you want the calls but not the execution
 

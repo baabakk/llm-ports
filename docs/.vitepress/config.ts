@@ -118,6 +118,8 @@ export default defineConfig({
             { text: "Google Gemini", link: "/adapters/google" },
             { text: "Ollama (local)", link: "/adapters/ollama" },
             { text: "Vercel AI SDK", link: "/adapters/vercel" },
+            { text: "Codex CLI", link: "/adapters/codex" },
+            { text: "aider CLI", link: "/adapters/aider" },
             { text: "OpenTelemetry sink (telemetry-otel)", link: "/adapters/telemetry-otel" },
           ],
         },
@@ -143,6 +145,10 @@ export default defineConfig({
             { text: "alpha.32 → alpha.33 (TS-BREAKING: ContentBlock)", link: "/migration/alpha-32-to-alpha-33" },
             { text: "alpha.33 → alpha.34 (TS-BREAKING: cost, pricing)", link: "/migration/alpha-33-to-alpha-34" },
             { text: "alpha.34 → alpha.35 (TS-BREAKING: schema)", link: "/migration/alpha-34-to-alpha-35" },
+            {
+              text: "alpha.35 → 1.0.0-rc.36 (the freeze)",
+              link: "/migration/alpha-35-to-rc-36",
+            },
           ],
         },
         {

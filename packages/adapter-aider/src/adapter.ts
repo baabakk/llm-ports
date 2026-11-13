@@ -58,6 +58,27 @@ export interface AiderAdapterOptions {
   cliPath?: string;
 
   /**
+   * Arguments placed before the generated aider arguments.
+   *
+   * `cliPath` alone assumes the CLI is a single executable on PATH, which
+   * excludes `node ./aider.mjs`, `npx`, a wrapper script, a shim inside a
+   * container, and on Windows every `.cmd`, because Node refuses to spawn one
+   * without a shell. It also makes the adapter untestable, which is how it
+   * stayed outside the shared contract suite.
+   */
+  cliArgsPrefix?: readonly string[];
+
+  /**
+   * Default working directory, used when a call supplies no
+   * `providerExtras.aider.workingDirectory`.
+   *
+   * Without this the adapter cannot serve a plain contract-shaped call, because
+   * the working directory is the one genuinely required field and the only way
+   * to supply it was a provider-specific bag the caller had to know about.
+   */
+  defaultWorkingDirectory?: string;
+
+  /**
    * Default model to pass to aider via `--model`. Optional; aider has
    * its own default when omitted.
    */
@@ -120,8 +141,18 @@ export interface AiderRunAgentOptions {
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * Reported on every observability event as the emitting library's version.
+ * Guarded by a test against `package.json`, because the literal this replaces
+ * was five releases stale, and so is the one in the contract package under a
+ * comment claiming a sync script that was never written.
+ */
+export const ADAPTER_VERSION = "0.1.0-alpha.35";
+
 export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdapter {
   const cliPath = options.cliPath ?? "aider";
+  const cliArgsPrefix = options.cliArgsPrefix ?? [];
+  const defaultWorkingDirectory = options.defaultWorkingDirectory;
   const defaultModel = options.defaultModel;
   const defaultEditFormat = options.defaultEditFormat;
   const envOverrides = options.env ?? {};
@@ -164,6 +195,8 @@ export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdap
         async runAgent(callOptions: RunAgentOptions): Promise<AgentResult> {
           return runAiderAgent(callOptions, {
             cliPath,
+            cliArgsPrefix,
+            defaultWorkingDirectory,
             defaultModel,
             defaultEditFormat,
             envOverrides,
@@ -180,6 +213,8 @@ export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdap
 
 interface AdapterConfig {
   cliPath: string;
+  cliArgsPrefix: readonly string[];
+  defaultWorkingDirectory?: string;
   defaultModel?: string;
   defaultEditFormat?: string;
   envOverrides: Record<string, string>;
@@ -192,7 +227,8 @@ async function runAiderAgent(
   config: AdapterConfig,
 ): Promise<AgentResult> {
   const alias = "aider";
-  const aiderOpts = extractAiderOptions(options);
+  const aiderOpts = extractAiderOptions(options, config.defaultWorkingDirectory);
+  assertToolsUnsupported(options);
   const prompt = extractPromptFromMessages(options);
   const model = aiderOpts.model ?? config.defaultModel;
   const editFormat = aiderOpts.editFormat ?? config.defaultEditFormat;
@@ -202,6 +238,17 @@ async function runAiderAgent(
     files: aiderOpts.files ?? [],
     model,
     editFormat,
+    // Stays true, unlike the Codex adapter's sandbox default, and the
+    // difference is a capability fact rather than a looser choice. Aider is a
+    // code editor with no read-only mode: it edits files and commits to git,
+    // and without --yes-always it waits for an interactive confirmation a
+    // subprocess will never supply, so the call hangs rather than being safe.
+    //
+    // So this adapter cannot be made side-effect-free. That is something a
+    // caller needs declared rather than defaulted, which is the requirement
+    // recorded in
+    // TD-LLMPORTS-CONSUMER-REQUIREMENTS-FOR-THE-SUBPROCESS-ADAPTER-FAMILY:
+    // an explicit statement of whether a call may write.
     yesAlways: aiderOpts.yesAlways ?? true,
     verbose: aiderOpts.verbose ?? false,
     mapTokens: aiderOpts.mapTokens,
@@ -209,7 +256,7 @@ async function runAiderAgent(
 
   const instrumentation = buildAdapterInstrumentation(config.observability, {
     library: "@llm-ports/adapter-aider",
-    library_version: "0.1.0-alpha.30",
+    library_version: ADAPTER_VERSION,
   });
 
   try {
@@ -230,7 +277,7 @@ async function runAiderAgent(
             try {
               outcome = await spawnAider({
                 cliPath: config.cliPath,
-                args,
+                args: [...config.cliArgsPrefix, ...args],
                 cwd: aiderOpts.workingDirectory,
                 env: { ...process.env, ...config.envOverrides } as NodeJS.ProcessEnv,
                 timeoutMs: config.timeoutMs,
@@ -382,30 +429,86 @@ async function spawnAider(req: SpawnRequest): Promise<SpawnOutcome> {
 // ─── Option extraction + arg building ───────────────────────────────
 
 /** @internal exported for tests, not part of the public API surface. */
-export function extractAiderOptions(options: RunAgentOptions): AiderRunAgentOptions {
+export function extractAiderOptions(
+  options: RunAgentOptions,
+  defaultWorkingDirectory?: string,
+): AiderRunAgentOptions {
   const bag = (options as unknown as { providerExtras?: { aider?: AiderRunAgentOptions } })
     .providerExtras?.aider;
-  if (!bag || typeof bag.workingDirectory !== "string" || bag.workingDirectory.length === 0) {
+  const workingDirectory =
+    bag && typeof bag.workingDirectory === "string" && bag.workingDirectory.length > 0
+      ? bag.workingDirectory
+      : defaultWorkingDirectory;
+  if (!workingDirectory) {
     throw new AdapterInternalError(
       "aider",
-      "runAgent requires providerExtras.aider.workingDirectory (the git repo the CLI operates in).",
+      "runAgent requires providerExtras.aider.workingDirectory (the git repo the CLI operates in), " +
+        "or a defaultWorkingDirectory on the adapter.",
     );
   }
-  return bag;
+  return { ...(bag ?? {}), workingDirectory };
 }
 
 /** @internal exported for tests, not part of the public API surface. */
+function renderContent(content: unknown): string {
+  return typeof content === "string" ? content : JSON.stringify(content);
+}
+
+/**
+ * Compose the single `--message` argument from the whole call.
+ *
+ * **Every part of the call reaches the prompt or the call is refused.** The
+ * earlier version kept user messages only, silently dropping the role prompt
+ * and every assistant turn, and its own tests pinned that as the requirement
+ * under the name "ignores non-user roles entirely". The Codex adapter had the
+ * identical defect and the identically named test.
+ *
+ * Aider has no system-prompt flag, so the instructions go into the message
+ * ahead of the transcript. That is the only channel available, which makes it
+ * the honest one rather than merely the convenient one.
+ *
+ * **Duplicated from the Codex adapter deliberately, not extracted.** The two
+ * are identical today, which argues for sharing, and the next member of this
+ * family argues against doing it yet: the Claude Code CLI has a real
+ * `--append-system-prompt`, so its composition will not look like this one. A
+ * helper extracted from two identical copies would be the wrong shape for the
+ * third.
+ */
 export function extractPromptFromMessages(options: RunAgentOptions): string {
-  // Concatenate every user message (in order) into a single prompt.
-  // Aider takes one --message argument; multi-turn context flows via
-  // aider's own chat history, not through our messages array.
-  const userMessages = options.messages.filter((m) => m.role === "user");
-  if (userMessages.length === 0) {
-    throw new AdapterInternalError("aider", "runAgent requires at least one user message.");
+  if (options.messages.length === 0) {
+    throw new AdapterInternalError("aider", "runAgent requires at least one message.");
   }
-  return userMessages
-    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
-    .join("\n\n");
+
+  const sections: string[] = [];
+  const instructions = options.instructions?.trim();
+  if (instructions) sections.push(instructions);
+
+  sections.push(
+    options.messages.map((m) => `${m.role}: ${renderContent(m.content)}`).join("\n\n"),
+  );
+
+  return sections.join("\n\n---\n\n");
+}
+
+/**
+ * Refuse a call carrying tools, because this adapter has no channel for them.
+ *
+ * Verified 2026-11-12 against the installed aider 0.86.2: zero MCP flags and
+ * zero schema flags in its help output, and its own documentation site
+ * surfaces no MCP page. Native MCP support in the CLI is an open request
+ * upstream rather than a shipped feature, so unlike the Codex adapter this
+ * refusal is not waiting on a tool definition format. It is waiting on the
+ * tool itself.
+ */
+export function assertToolsUnsupported(options: RunAgentOptions): void {
+  const names = Object.keys(options.tools ?? {});
+  if (names.length === 0) return;
+  throw new AdapterInternalError(
+    "aider",
+    `runAgent cannot forward tools: aider exposes no tool channel, so the ${names.length} ` +
+      `supplied tool(s) (${names.join(", ")}) would be silently dropped. Route tool-using agent ` +
+      `traffic to an in-process adapter, or call without tools.`,
+  );
 }
 
 /** @internal exported for tests. */

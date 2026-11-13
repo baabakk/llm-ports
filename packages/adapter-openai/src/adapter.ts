@@ -54,8 +54,10 @@ import {
   type TokenUsage,
   type ValidationStrategy,
   resolveStructuredSchema,
+  resolveToolSchema,
 } from "@llm-ports/core";
 import { OPENAI_PRICING } from "./pricing.js";
+import { readTransientAuthBackoffSeam } from "./test-seam.js";
 import {
   fromOpenAIAssistantMessage,
   parseHarmonyToolCalls,
@@ -136,13 +138,6 @@ export interface OpenAIAdapterOptions {
    * Set to 0 to disable.
    */
   transientAuthRetries?: number;
-  /**
-   * Override the backoff delay between transient-401 retries. Receives the
-   * 0-indexed retry attempt (0 = first retry) and returns the delay in
-   * milliseconds. Default is `(attempt) => 500 * Math.pow(3, attempt)` —
-   * 500ms, 1500ms, 4500ms... Tests inject `() => 0` to skip the wait.
-   */
-  transientAuthBackoffMs?: (attempt: number) => number;
   /**
    * Maximum bytes per base64 image. Defaults to 20MB (OpenAI's per-image
    * limit). Set to 0 or a negative number to disable size validation.
@@ -371,8 +366,11 @@ export function createOpenAIAdapter(opts: OpenAIAdapterOptions): OpenAIAdapter {
     pricingOverrides: opts.pricingOverrides ?? {},
     hasSucceeded: { value: false },
     transientAuthRetries: opts.transientAuthRetries ?? 2,
+    // Not a public option. The override is a test seam read off the options
+    // object by symbol, so it never reaches the published type surface.
+    // See TD-LLMP-10 and `src/test-seam.ts`.
     transientAuthBackoffMs:
-      opts.transientAuthBackoffMs ?? ((attempt) => 500 * Math.pow(3, attempt)),
+      readTransientAuthBackoffSeam(opts) ?? ((attempt) => 500 * Math.pow(3, attempt)),
     imageSizeLimitBytes: opts.imageSizeLimitBytes ?? 20 * 1024 * 1024,
     useStrictResponseFormat:
       opts.useStrictResponseFormat ?? autoDetectStrictResponseFormat(opts.baseURL),
@@ -2285,7 +2283,15 @@ function toOpenAITools(
     function: {
       name,
       description: def.description,
-      parameters: zodToParameters(def.inputSchema),
+      parameters: ((): OpenAITool["function"]["parameters"] => {
+        const resolved = resolveToolSchema(def, def.name);
+        if (resolved.kind === "zod") return zodToParameters(resolved.zod);
+        // A JSON Schema the caller already holds reaches the provider as
+        // given. The cast states the trade rather than hiding it: this
+        // library carries no JSON Schema validator, so the object is the
+        // caller's assertion about their own tool.
+        return resolved.jsonSchema as unknown as OpenAITool["function"]["parameters"];
+      })(),
     },
   }));
 }

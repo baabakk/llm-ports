@@ -12,6 +12,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { TRANSIENT_AUTH_BACKOFF_SEAM } from "../../src/test-seam.js";
 import { z } from "zod";
 import {
   buildOpenAIChatResponse,
@@ -28,7 +29,7 @@ beforeEach(() => {
   _resetLearnedConstraints();
 });
 
-const NO_BACKOFF = { transientAuthBackoffMs: () => 0 };
+const NO_BACKOFF = { [TRANSIENT_AUTH_BACKOFF_SEAM]: () => 0 };
 
 describe("onRetry timing — hook MUST fire BEFORE the retried sdk call", () => {
   it("transient-auth: hook fires before the retry sdk-call", async () => {
