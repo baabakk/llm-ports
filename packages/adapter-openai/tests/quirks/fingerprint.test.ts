@@ -174,6 +174,24 @@ describe("InMemoryFingerprintCache", () => {
   });
 });
 
+/**
+ * These tests do real filesystem round trips, which is the point of them:
+ * `FileFingerprintCache` exists to persist across processes and a mocked
+ * filesystem would test nothing. One `set` reads then writes, `delete` reads
+ * then writes, and `get` reads again, so a single case is three round trips.
+ *
+ * Vitest's 5s default is not enough for that under load. **Measured 2026-11-13:**
+ * `delete removes entries` timed out at 5024ms during a full workspace run with
+ * the machine loaded, and passed in fifteen consecutive runs on an idle one. It
+ * had been failing roughly one full run in three and was reported as an
+ * unidentified flake because it never reproduced while being watched.
+ *
+ * The timeout is the wrong assumption here, not the test. Raising it for this
+ * block only, rather than for the package, keeps every other test honest about
+ * being fast. See `TD-LLMPORTS-AN-OPENAI-TEST-FAILS-ONLY-UNDER-FULL-PARALLEL-LOAD-AND-WAS-NEVER-NAMED`.
+ */
+const FILE_IO_TIMEOUT_MS = 30_000;
+
 describe("FileFingerprintCache", () => {
   let tmpPath: string;
 
@@ -188,7 +206,7 @@ describe("FileFingerprintCache", () => {
   it("returns null when the file doesn't exist (first run)", async () => {
     const cache = new FileFingerprintCache(tmpPath);
     expect(await cache.get("missing")).toBeNull();
-  });
+  }, FILE_IO_TIMEOUT_MS);
 
   it("persists writes across instances", async () => {
     const fp: ModelFingerprint = {
@@ -206,7 +224,7 @@ describe("FileFingerprintCache", () => {
     const reader = new FileFingerprintCache(tmpPath);
     const read = await reader.get("k1");
     expect(read).toEqual(fp);
-  });
+  }, FILE_IO_TIMEOUT_MS);
 
   it("survives malformed JSON gracefully (treats as empty)", async () => {
     await fs.writeFile(tmpPath, "{this is not valid JSON", "utf8");
@@ -222,7 +240,7 @@ describe("FileFingerprintCache", () => {
     });
     const persisted = JSON.parse(await fs.readFile(tmpPath, "utf8"));
     expect(persisted.k1).toBeDefined();
-  });
+  }, FILE_IO_TIMEOUT_MS);
 
   it("invalidates entries with mismatched schemaVersion", async () => {
     // Write a fake-old-schema entry directly.
@@ -241,7 +259,7 @@ describe("FileFingerprintCache", () => {
     );
     const cache = new FileFingerprintCache(tmpPath);
     expect(await cache.get("oldEntry")).toBeNull();
-  });
+  }, FILE_IO_TIMEOUT_MS);
 
   it("delete removes entries", async () => {
     const cache = new FileFingerprintCache(tmpPath);
@@ -254,7 +272,7 @@ describe("FileFingerprintCache", () => {
     });
     await cache.delete("k1");
     expect(await cache.get("k1")).toBeNull();
-  });
+  }, FILE_IO_TIMEOUT_MS);
 
   it("creates parent directory on first write", async () => {
     const nestedPath = join(tmpdir(), `fingerprint-nested-${Date.now()}`, "subdir", "fp.json");
@@ -274,7 +292,7 @@ describe("FileFingerprintCache", () => {
     // Cleanup
     await fs.unlink(nestedPath).catch(() => {});
     await fs.rmdir(join(tmpdir(), `fingerprint-nested-${Date.now()}`, "subdir")).catch(() => {});
-  });
+  }, FILE_IO_TIMEOUT_MS);
 });
 
 describe("Adapter integration: fingerprint cache writes on successful responses", () => {
