@@ -161,10 +161,12 @@ Everything that changes an existing shape travels together, so it can be baked o
 - A total spend ceiling per budget scope, with shared storage behind it, designed so that replacing a registry's configuration no longer resets spend counters.
 - Login state that works across processes, which turns the current synchronous interface asynchronous.
 - Removal of a setting that exists only to serve our own tests.
-- **One model record carrying both what a model can do and what it costs**, supplied as data. Including the context window, which this library models nowhere today: a prompt being too long is currently discovered only when a provider rejects it.
+- **One model record carrying both what a model can do and what it costs**, supplied as data. Including the context window, which this library models nowhere today: a prompt being too long is currently discovered only when a provider rejects it. The capability half has to express a feature a provider genuinely lacks, distinguishably from one nobody has stated yet, so it is designed against the subprocess adapters as well as the in-process ones: those vary far more widely in what they can do, and a vocabulary that is never asked to say no tends not to be able to.
 - The Vercel adapter verified, hardened and settled rather than held back.
 - A Cohere adapter, the rerank port documented as consumer-implementable, and a reranker capability.
 - Tool schemas converted per attempt, never hoisted above failover.
+- **Tool definitions accepting a JSON Schema**, not only a Zod schema, so a service can pass through tools it received from its own clients. The workaround available today is worse than refusing: converting an unknown schema into a permissive one tells the model the tool takes no arguments, so the model calls it wrongly and the failure reads as a model problem.
+- **The two subprocess adapters, for the Codex and aider CLIs, brought inside the shared contract suite** that the other five adapters already run. Today they accept an agent call's system instructions, its tool set and its assistant turns and then discard all three without raising anything, so the call returns a well-formed result from a model that never received its role or its tools. The suite gains the rule that turns this into a failure: **an adapter may refuse an input it cannot serve, and may not ignore one.** Their default sandbox becomes read-only in the same change, because a call whose output is a proposal should not be able to write files unless the caller asked for that.
 
 Also carried: the migration pages owed for `alpha.31` and `alpha.32`, test depth against compatible providers beyond the single call currently covered, and the withdrawals below stated where they were announced.
 
@@ -202,7 +204,9 @@ A work queue rather than a set of promises, and the order is approximate: what s
 | `createAgent` capability factory | The same configure-once ergonomics the seven existing factories have, bundling the approval-gate wrapper and the tool plumbing. Calling `runAgent` directly keeps working. |
 | `@llm-ports/observability` | Quality-tracking hooks, sinks and deterministic edit-diff helpers: the parts of a consumer that learn from production traffic, extracted so they are opt-in. |
 | More capabilities | `redact`, `route`, `decide`, `answer` and `rerank`, prioritized by the [capability-request issues](https://github.com/baabakk/llm-ports/issues?q=is%3Aissue+is%3Aopen+label%3Acapability). The reranker arrives earlier, alongside the Cohere adapter in the release candidate. |
-| Conversation history, if it is offered | Optional, holding nothing by default. See the reopened question above. |
+| Agent-CLI capability axes | Session resume and fork, caller-supplied tools over MCP, structured output, and permission control, declared per adapter instead of assumed. The three agent CLIs differ widely in which of these they support, so each declares against the model record from the release candidate rather than the port pretending they are uniform. |
+| `@llm-ports/adapter-claude-code` | An adapter for the Claude Code CLI, which has the widest surface of the three agent CLIs and no adapter today. |
+| Conversation history, if it is offered | Optional, holding nothing by default, and shaped as a store the consumer supplies rather than state the library owns. Two cases have to be served: a transcript the store holds, and an opaque session identifier for a provider that keeps the transcript itself. Transcript reduction follows it, and waits on the context window from the release candidate, since there is no token budget to reduce against without one. See the reopened question above. |
 
 ---
 
