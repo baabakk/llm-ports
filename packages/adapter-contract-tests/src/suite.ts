@@ -945,21 +945,22 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
                 schema: z.object({ ok: z.boolean() }),
               });
             } else if (method === "streamText") {
-              // Prime the generator without binding a value: a streaming
-              // adapter throws on the first `next()`, not at call time.
-              await ctx.port
-                .streamText({ taskType: "t", messages: [{ role: "user", content: "x" }] })
-                [Symbol.asyncIterator]()
-                .next();
+              // Prime the generator: a streaming adapter throws on the first
+              // `next()`, not at call time. Held in a binding so the iterator
+              // access is not a newline-separated property access, which the
+              // linter reads as a possible ASI hazard.
+              const textStream = ctx.port.streamText({
+                taskType: "t",
+                messages: [{ role: "user", content: "x" }],
+              });
+              await textStream[Symbol.asyncIterator]().next();
             } else {
-              await ctx.port
-                .streamStructured({
-                  taskType: "t",
-                  messages: [{ role: "user", content: "x" }],
-                  schema: z.object({ ok: z.boolean() }),
-                })
-                [Symbol.asyncIterator]()
-                .next();
+              const structuredStream = ctx.port.streamStructured({
+                taskType: "t",
+                messages: [{ role: "user", content: "x" }],
+                schema: z.object({ ok: z.boolean() }),
+              });
+              await structuredStream[Symbol.asyncIterator]().next();
             }
           } catch {
             threw = true;

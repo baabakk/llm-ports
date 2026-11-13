@@ -71,6 +71,8 @@ interface VercelAdapterOptions {
 | `runAgent` | ✓ multi-turn, through Vercel's own tool loop (`maxSteps`, default 10) |
 | `generateEmbedding` / `generateEmbeddings` | ✓ |
 | Multimodal content blocks | ✓ images, audio and documents as base64; images also by URL |
+| `generateChat` / `streamChat` | ✗ **Not implemented, deliberately.** These hand tool calls back instead of executing them, for a caller that owns the loop. Only `adapter-openai` implements them. Use `runAgent`, which runs the loop for you through Vercel's own tool handling |
+| Tool parameters as a JSON Schema | ✓ since `1.0.0-rc.36`, through the SDK's own `jsonSchema()` wrapper rather than a cast |
 
 ## Structured output from a JSON Schema
 
