@@ -170,6 +170,8 @@ Everything that changes an existing shape travels together, so it can be baked o
 
 Also carried: the migration pages owed for `alpha.31` and `alpha.32`, test depth against compatible providers beyond the single call currently covered, and the withdrawals below stated where they were announced.
 
+**And this release is published from continuous integration rather than by hand.** Every release so far was cut from a maintainer's workstation. From this one the publish runs in CI with provenance attached, which is the part that affects you: provenance is a verifiable record of which commit and which workflow produced a package, and you can check it rather than take the version number on trust. It matters most at this release, because this is the one asked to be trusted and the one where a wrong version cannot be taken back.
+
 **What gates the candidate:** a migration page covering every break it carries, a live sweep across the adapters against real APIs, and sign-off from an adopter running it against production.
 
 ### `1.0.0`: settled
