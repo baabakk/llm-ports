@@ -147,17 +147,48 @@ export interface ContractTestContext {
    * per-call price to report, and inventing a zero is the lie `alpha.34`
    * removed everywhere else.
    *
-   * `"flat_rate"` relaxes the cost assertion and keeps the token assertion,
-   * because tokens are the only way to compare a flat-rate provider against a
-   * metered one. Defaults to `"metered"`, so every existing adapter is
-   * unaffected.
+   * Three values, because two collapsed a distinction that matters.
+   *
+   * - `"metered"` (the default): a per-call price exists and the adapter can
+   *   report it. The cost assertion applies.
+   * - `"flat_rate"`: no per-call price exists at all, which is a subscription.
+   *   A cost gate configured against such a provider can never fire, so it
+   *   should be refused at construction rather than enforce nothing silently.
+   * - `"unknown"`: a price exists at the provider and this adapter cannot
+   *   observe it, which is a CLI that does not report what a run cost. A cost
+   *   gate here is not meaningless, it is unenforceable, and that is a
+   *   different thing to tell an operator.
+   *
+   * Both non-metered values relax the cost assertion and keep the token one,
+   * because tokens are the only way to compare them against a metered
+   * provider.
    *
    * Added for `1.0.0-rc.36`, from a consumer requirement: a cost gate
    * configured against a flat-rate provider enforces nothing, silently and
    * forever. See
    * `TD-LLMPORTS-CONSUMER-REQUIREMENTS-FOR-THE-SUBPROCESS-ADAPTER-FAMILY`.
    */
-  billing?: "metered" | "flat_rate";
+  billing?: "metered" | "flat_rate" | "unknown";
+
+  /**
+   * Optional. Whether this adapter can observe token usage at all.
+   *
+   * `"observed"` (the default) means the provider reports usage and the suite
+   * asserts the adapter passes it through faithfully. `"unavailable"` means the
+   * provider's protocol carries no usage, which is true of a CLI emitting plain
+   * text, and the suite then only requires the field be present and
+   * non-negative.
+   *
+   * **This exists because the honest value is `undefined` and the contract has
+   * no way to say it.** `TokenUsage` requires numbers, so an adapter that
+   * cannot observe usage reports zeros, and a zero is indistinguishable from a
+   * genuinely free call: the same substitution `alpha.34` removed for cost and
+   * left in place for tokens. Declaring it here does not fix that; it stops the
+   * suite asserting a number the adapter was never able to know, and marks
+   * where the real fix belongs. A consumer requirement names it directly: see
+   * `TD-LLMPORTS-CONSUMER-REQUIREMENTS-FOR-THE-SUBPROCESS-ADAPTER-FAMILY`.
+   */
+  usageReporting?: "observed" | "unavailable";
 }
 
 /**
@@ -735,7 +766,14 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         expect(["completed", "max_steps", "stopped_by_user"]).toContain(
           result.terminationReason,
         );
-        expect(result.usage.totalTokens).toBe(250);
+        if ((ctx.usageReporting ?? "observed") === "unavailable") {
+          // The provider's protocol carries no usage, so there is nothing to
+          // pass through. Zero is what gets reported and undefined is what
+          // would be true, which is the gap this declaration marks.
+          expect(result.usage.totalTokens).toBeGreaterThanOrEqual(0);
+        } else {
+          expect(result.usage.totalTokens).toBe(250);
+        }
         // >= 0: local-model adapters (e.g. Ollama) legitimately report zero cost
         // These fixtures give the adapter a real pricing table, so cost is
         // knowable and must actually be reported. Asserting it is defined
@@ -745,7 +783,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         // indistinguishable from a genuinely free call, which is the exact
         // substitution alpha.34 removed, so such an adapter reports nothing
         // and is checked on tokens instead.
-        if ((ctx.billing ?? "metered") === "flat_rate") {
+        if ((ctx.billing ?? "metered") !== "metered") {
           expect(result.usage.totalTokens).toBeGreaterThanOrEqual(0);
         } else {
           expect(result.cost).toBeDefined();
@@ -872,13 +910,21 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
                 schema: z.object({ ok: z.boolean() }),
               });
             } else if (method === "streamText") {
-              for await (const _ of ctx.port.streamText({ taskType: "t", messages: [{ role: "user", content: "x" }] })) break;
+              // Prime the generator without binding a value: a streaming
+              // adapter throws on the first `next()`, not at call time.
+              await ctx.port
+                .streamText({ taskType: "t", messages: [{ role: "user", content: "x" }] })
+                [Symbol.asyncIterator]()
+                .next();
             } else {
-              for await (const _ of ctx.port.streamStructured({
-                taskType: "t",
-                messages: [{ role: "user", content: "x" }],
-                schema: z.object({ ok: z.boolean() }),
-              })) break;
+              await ctx.port
+                .streamStructured({
+                  taskType: "t",
+                  messages: [{ role: "user", content: "x" }],
+                  schema: z.object({ ok: z.boolean() }),
+                })
+                [Symbol.asyncIterator]()
+                .next();
             }
           } catch {
             threw = true;

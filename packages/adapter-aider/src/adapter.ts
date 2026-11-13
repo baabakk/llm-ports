@@ -58,6 +58,27 @@ export interface AiderAdapterOptions {
   cliPath?: string;
 
   /**
+   * Arguments placed before the generated aider arguments.
+   *
+   * `cliPath` alone assumes the CLI is a single executable on PATH, which
+   * excludes `node ./aider.mjs`, `npx`, a wrapper script, a shim inside a
+   * container, and on Windows every `.cmd`, because Node refuses to spawn one
+   * without a shell. It also makes the adapter untestable, which is how it
+   * stayed outside the shared contract suite.
+   */
+  cliArgsPrefix?: readonly string[];
+
+  /**
+   * Default working directory, used when a call supplies no
+   * `providerExtras.aider.workingDirectory`.
+   *
+   * Without this the adapter cannot serve a plain contract-shaped call, because
+   * the working directory is the one genuinely required field and the only way
+   * to supply it was a provider-specific bag the caller had to know about.
+   */
+  defaultWorkingDirectory?: string;
+
+  /**
    * Default model to pass to aider via `--model`. Optional; aider has
    * its own default when omitted.
    */
@@ -130,6 +151,8 @@ export const ADAPTER_VERSION = "0.1.0-alpha.35";
 
 export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdapter {
   const cliPath = options.cliPath ?? "aider";
+  const cliArgsPrefix = options.cliArgsPrefix ?? [];
+  const defaultWorkingDirectory = options.defaultWorkingDirectory;
   const defaultModel = options.defaultModel;
   const defaultEditFormat = options.defaultEditFormat;
   const envOverrides = options.env ?? {};
@@ -172,6 +195,8 @@ export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdap
         async runAgent(callOptions: RunAgentOptions): Promise<AgentResult> {
           return runAiderAgent(callOptions, {
             cliPath,
+            cliArgsPrefix,
+            defaultWorkingDirectory,
             defaultModel,
             defaultEditFormat,
             envOverrides,
@@ -188,6 +213,8 @@ export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdap
 
 interface AdapterConfig {
   cliPath: string;
+  cliArgsPrefix: readonly string[];
+  defaultWorkingDirectory?: string;
   defaultModel?: string;
   defaultEditFormat?: string;
   envOverrides: Record<string, string>;
@@ -200,7 +227,7 @@ async function runAiderAgent(
   config: AdapterConfig,
 ): Promise<AgentResult> {
   const alias = "aider";
-  const aiderOpts = extractAiderOptions(options);
+  const aiderOpts = extractAiderOptions(options, config.defaultWorkingDirectory);
   assertToolsUnsupported(options);
   const prompt = extractPromptFromMessages(options);
   const model = aiderOpts.model ?? config.defaultModel;
@@ -250,7 +277,7 @@ async function runAiderAgent(
             try {
               outcome = await spawnAider({
                 cliPath: config.cliPath,
-                args,
+                args: [...config.cliArgsPrefix, ...args],
                 cwd: aiderOpts.workingDirectory,
                 env: { ...process.env, ...config.envOverrides } as NodeJS.ProcessEnv,
                 timeoutMs: config.timeoutMs,
@@ -402,16 +429,24 @@ async function spawnAider(req: SpawnRequest): Promise<SpawnOutcome> {
 // ─── Option extraction + arg building ───────────────────────────────
 
 /** @internal exported for tests, not part of the public API surface. */
-export function extractAiderOptions(options: RunAgentOptions): AiderRunAgentOptions {
+export function extractAiderOptions(
+  options: RunAgentOptions,
+  defaultWorkingDirectory?: string,
+): AiderRunAgentOptions {
   const bag = (options as unknown as { providerExtras?: { aider?: AiderRunAgentOptions } })
     .providerExtras?.aider;
-  if (!bag || typeof bag.workingDirectory !== "string" || bag.workingDirectory.length === 0) {
+  const workingDirectory =
+    bag && typeof bag.workingDirectory === "string" && bag.workingDirectory.length > 0
+      ? bag.workingDirectory
+      : defaultWorkingDirectory;
+  if (!workingDirectory) {
     throw new AdapterInternalError(
       "aider",
-      "runAgent requires providerExtras.aider.workingDirectory (the git repo the CLI operates in).",
+      "runAgent requires providerExtras.aider.workingDirectory (the git repo the CLI operates in), " +
+        "or a defaultWorkingDirectory on the adapter.",
     );
   }
-  return bag;
+  return { ...(bag ?? {}), workingDirectory };
 }
 
 /** @internal exported for tests, not part of the public API surface. */

@@ -23,6 +23,15 @@ export {
 } from "./suite.js";
 
 export {
+  makeFakeCli,
+  transmissionFromArgv,
+  type FakeCli,
+  type FakeCliMode,
+  type FakeCliResponse,
+  type CapturedInvocation,
+} from "./fake-cli.js";
+
+export {
   // Reusable response factories so adapter tests can build canned responses
   // without recomputing token usage or cost from scratch.
   fakeChatUsage,

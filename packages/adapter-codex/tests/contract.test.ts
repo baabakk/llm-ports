@@ -14,46 +14,23 @@
  * `TD-LLMPORTS-CLI-ADAPTERS-DISCARD-REQUIRED-INPUTS-AND-SIT-OUTSIDE-THE-CONTRACT-SUITE`.
  */
 
-import { runContractTests, type RunAgentTransmission } from "@llm-ports/adapter-contract-tests";
+import {
+  runContractTests,
+  makeFakeCli,
+  transmissionFromArgv,
+  type FakeCli,
+  type RunAgentTransmission,
+} from "@llm-ports/adapter-contract-tests";
 import { tmpdir } from "node:os";
 import { createCodexAdapter } from "../src/index.js";
-import { makeFakeCli, type FakeCli } from "./helpers/fake-cli.js";
 
 const MODEL_ID = "fake-codex-model";
 // The adapter hardcodes its alias; createLLMPort takes no alias argument.
 const ALIAS = "codex";
 
-/**
- * Read the three contract inputs back out of what the fake binary received.
- *
- * The adapter's wire format is a single prompt argument, so this reads that
- * argument. It reports what is observably present rather than what the adapter
- * intended: if the adapter never put the instructions into the prompt, there is
- * nothing here to find, which is exactly the failure the suite should catch.
- */
-function transmissionFrom(fake: FakeCli): RunAgentTransmission {
-  const { argv, stdin } = fake.lastInvocation();
-  // The prompt is the final positional argument; flags all precede it.
-  const prompt = `${argv[argv.length - 1] ?? ""}\n${stdin}`;
-
-  // Role markers only exist if the adapter labels turns. An adapter that
-  // concatenates user text and discards the rest produces none, and the
-  // suite's assertion then fails, correctly.
-  const roles: string[] = [];
-  for (const match of prompt.matchAll(/^\s*(user|assistant|system)\s*:/gim)) {
-    roles.push(match[1]!.toLowerCase());
-  }
-
-  // Tools have no channel in this adapter's argv today. Reporting the names
-  // found in the prompt rather than an empty list keeps this honest: if a
-  // later change passes tools through by naming them, this sees it.
-  const toolNames: string[] = [];
-  for (const match of prompt.matchAll(/\blookup_invoice\b/g)) {
-    void match;
-    toolNames.push("lookup_invoice");
-  }
-
-  return { instructions: prompt, toolNames, messageRoles: roles };
+/** Report what the adapter sent, via the shared helper. */
+function transmissionFrom(f: FakeCli): RunAgentTransmission {
+  return transmissionFromArgv(f.lastInvocation(), ["lookup_invoice"]);
 }
 
 let fake: FakeCli;
