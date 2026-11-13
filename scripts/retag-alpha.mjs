@@ -17,8 +17,12 @@
  *   node scripts/retag-alpha.mjs
  *
  * Skips packages with `private: true` (those don't go to npm at all).
- * Skips packages whose version is NOT in -alpha.* form (those would be
- * stable releases that shouldn't have an `alpha` tag pointing at them).
+ * Skips packages whose version carries no prerelease identifier, since a
+ * stable release should not have a prerelease tag pointing at it.
+ *
+ * The tag is read from the version rather than hard-coded, so an `alpha`
+ * release tags `alpha` and a `1.0.0-rc.36` tags `rc`. It was hard-coded to
+ * "alpha" until the 1.0.0-rc cut, where it would have skipped every package.
  *
  * Idempotent: re-tagging to the same version is a no-op on npm.
  */
@@ -54,19 +58,25 @@ for (const dir of packageDirs) {
     skippedPrivate++;
     continue;
   }
-  if (!pkg.version.includes("-alpha.")) {
-    console.log(`  skip (not alpha): ${pkg.name}@${pkg.version}`);
+  // Derive the dist-tag from the version's own prerelease identifier, rather
+  // than assuming "alpha". A prerelease is `1.2.3-<id>.<n>`, so the id is the
+  // tag a consumer asks for with `@<id>`. Generalised at the 1.0.0-rc cut,
+  // where the previous hard-coded "alpha" would have skipped every package and
+  // left `@rc` resolving to nothing.
+  const prerelease = /-([a-z]+)\.\d+/.exec(pkg.version)?.[1];
+  if (!prerelease) {
+    console.log(`  skip (not a prerelease): ${pkg.name}@${pkg.version}`);
     skippedNonAlpha++;
     continue;
   }
 
   const fullSpec = `${pkg.name}@${pkg.version}`;
-  console.log(`  retagging alpha -> ${fullSpec}`);
+  console.log(`  retagging ${prerelease} -> ${fullSpec}`);
   // `shell: true` is required on Windows so `npm` resolves to `npm.cmd`.
   // Safe here: the args (pkg.name, pkg.version) come from our own
   // package.json files in `packages/*`, NOT from user input or env. No
   // command-injection path. Node emits DEP0190 but it's cosmetic for this case.
-  const result = spawnSync("npm", ["dist-tag", "add", fullSpec, "alpha"], {
+  const result = spawnSync("npm", ["dist-tag", "add", fullSpec, prerelease], {
     stdio: ["ignore", "pipe", "pipe"],
     shell: true,
   });
@@ -88,6 +98,6 @@ for (const dir of packageDirs) {
 
 console.log(
   `\nretagged: ${retagged}, skipped (private): ${skippedPrivate}, ` +
-    `skipped (non-alpha): ${skippedNonAlpha}, failed: ${failures}`,
+    `skipped (not a prerelease): ${skippedNonAlpha}, failed: ${failures}`,
 );
 process.exit(failures > 0 ? 1 : 0);

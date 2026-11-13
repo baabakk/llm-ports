@@ -1,7 +1,7 @@
 {
   "name": "@llm-ports/adapter-google",
-  "version": "0.1.0-alpha.35",
-  "description": "Google Gemini adapter for llm-ports — native @google/genai SDK integration with bundled pricing, content-block translation, validation repair, and image-size + URL validation.",
+  "version": "1.0.0-rc.36",
+  "description": "Google Gemini adapter for llm-ports \u2014 native @google/genai SDK integration with bundled pricing, content-block translation, validation repair, and image-size + URL validation.",
   "license": "MIT",
   "author": "Babak Abbaschian",
   "type": "module",

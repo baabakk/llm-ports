@@ -156,7 +156,7 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
  * and fails on the next version bump. The guard is the part that matters; the
  * constant is just where the value lives.
  */
-export const ADAPTER_VERSION = "0.1.0-alpha.35";
+export const ADAPTER_VERSION = "1.0.0-rc.36";
 
 export function createCodexAdapter(options: CodexAdapterOptions = {}): CodexAdapter {
   const cliPath = options.cliPath ?? "codex";

@@ -147,7 +147,7 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
  * was five releases stale, and so is the one in the contract package under a
  * comment claiming a sync script that was never written.
  */
-export const ADAPTER_VERSION = "0.1.0-alpha.35";
+export const ADAPTER_VERSION = "1.0.0-rc.36";
 
 export function createAiderAdapter(options: AiderAdapterOptions = {}): AiderAdapter {
   const cliPath = options.cliPath ?? "aider";
