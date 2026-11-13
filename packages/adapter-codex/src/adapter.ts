@@ -142,11 +142,32 @@ export interface CodexRunAgentOptions {
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * Reported on every observability event as the emitting library's version.
+ *
+ * A constant rather than a runtime read of `package.json`, because this
+ * package builds to both ESM and CJS and `import.meta.url` is not available in
+ * the latter. **A constant alone is what went wrong before**: this said
+ * `0.1.0-alpha.30` for five releases, and the aider adapter still does, and the
+ * contract package's `SPEC_VERSION` is seven releases behind under a comment
+ * claiming a sync script that was never written.
+ *
+ * So the constant comes with a test that compares it against `package.json`
+ * and fails on the next version bump. The guard is the part that matters; the
+ * constant is just where the value lives.
+ */
+export const ADAPTER_VERSION = "0.1.0-alpha.35";
+
 export function createCodexAdapter(options: CodexAdapterOptions = {}): CodexAdapter {
   const cliPath = options.cliPath ?? "codex";
   const cliArgsPrefix = options.cliArgsPrefix ?? [];
   const defaultWorkingDirectory = options.defaultWorkingDirectory;
-  const defaultSandbox = options.defaultSandbox ?? "workspace-write";
+  // Read-only unless a caller opts out. `workspace-write` was the previous
+  // default, so a call whose output is a proposal could write files in the
+  // working directory without anyone asking for that. For a consumer whose
+  // architecture routes consequential action through an approval gate, the
+  // permissive mode has to be chosen rather than assumed.
+  const defaultSandbox = options.defaultSandbox ?? "read-only";
   const defaultModel = options.defaultModel;
   const envOverrides = options.env ?? {};
   const observability = options.observability;
@@ -221,6 +242,7 @@ async function runCodexAgent(
 ): Promise<AgentResult> {
   const alias = "codex";
   const codexOpts = extractCodexOptions(options, config.defaultWorkingDirectory);
+  assertToolsUnsupported(options);
   const prompt = extractPromptFromMessages(options);
   const model = codexOpts.model ?? config.defaultModel;
   const sandbox = codexOpts.sandbox ?? config.defaultSandbox;
@@ -236,7 +258,7 @@ async function runCodexAgent(
 
   const instrumentation = buildAdapterInstrumentation(config.observability, {
     library: "@llm-ports/adapter-codex",
-    library_version: "0.1.0-alpha.30",
+    library_version: ADAPTER_VERSION,
   });
 
   try {
@@ -308,7 +330,11 @@ async function runCodexAgent(
               modelId,
               providerAlias: alias,
               latencyMs,
-              stepsTaken: parsedEvents.length,
+              // One subprocess invocation is one step from this port's point of
+              // view. The previous value was the number of parsed output lines,
+              // which looks like a measurement and is not one: it moves with
+              // how chatty the CLI happens to be.
+              stepsTaken: 1,
               terminationReason: "completed",
             };
 
@@ -434,17 +460,61 @@ export function extractCodexOptions(
 }
 
 /** @internal exported for tests, not part of the public API surface. */
+function renderContent(content: unknown): string {
+  return typeof content === "string" ? content : JSON.stringify(content);
+}
+
+/**
+ * Compose the single prompt argument the CLI takes from the whole call.
+ *
+ * **Every part of the call reaches the prompt or the call is refused.** The
+ * earlier version kept only the user messages, which silently dropped the
+ * role prompt and every assistant turn: a ten-role agent system became ten
+ * identical generic models, and the result reported success. The CLI documents
+ * its prompt argument as the agent's initial instructions, so there is a
+ * channel for all of it, and concatenating is the honest use of it.
+ *
+ * Roles are labelled rather than run together, because a model asked to
+ * continue a conversation needs to know which turns were its own.
+ */
 export function extractPromptFromMessages(options: RunAgentOptions): string {
-  // Concatenate every user message (in order) into a single prompt.
-  // Codex takes one prompt argument; multi-turn context flows via
-  // codex's own session state, not through our messages array.
-  const userMessages = options.messages.filter((m) => m.role === "user");
-  if (userMessages.length === 0) {
-    throw new AdapterInternalError("codex", "runAgent requires at least one user message.");
+  if (options.messages.length === 0) {
+    throw new AdapterInternalError("codex", "runAgent requires at least one message.");
   }
-  return userMessages
-    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+
+  const sections: string[] = [];
+
+  // The role prompt first, which is how the CLI reads its prompt argument.
+  const instructions = options.instructions?.trim();
+  if (instructions) sections.push(instructions);
+
+  const transcript = options.messages
+    .map((m) => `${m.role}: ${renderContent(m.content)}`)
     .join("\n\n");
+  sections.push(transcript);
+
+  return sections.join("\n\n---\n\n");
+}
+
+/**
+ * Refuse a call carrying tools, because this adapter has no channel for them.
+ *
+ * The CLI exposes caller-supplied tools over MCP, which needs the tool
+ * definitions to travel as JSON Schema. They are Zod-only until
+ * `TD-LLMPORTS-TOOLS-ARE-ZOD-ONLY` lands in the release candidate, so the
+ * honest answer today is a refusal naming the field. Accepting them and
+ * dropping them is what this change exists to stop: an agent that reaches
+ * none of its tools looks like a weak model rather than a broken wiring.
+ */
+export function assertToolsUnsupported(options: RunAgentOptions): void {
+  const names = Object.keys(options.tools ?? {});
+  if (names.length === 0) return;
+  throw new AdapterInternalError(
+    "codex",
+    `runAgent cannot forward tools: adapter-codex has no tool channel yet, so the ${names.length} ` +
+      `supplied tool(s) (${names.join(", ")}) would be silently dropped. Route tool-using agent ` +
+      `traffic to an in-process adapter, or call without tools.`,
+  );
 }
 
 /** @internal exported for tests. */

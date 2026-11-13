@@ -21,6 +21,7 @@ import {
   deriveModelId,
   deriveUsage,
   extractPromptFromMessages,
+  assertToolsUnsupported,
   parseCodexJsonLines,
   type CodexJsonEvent,
 } from "../src/adapter.js";
@@ -225,52 +226,108 @@ describe("deriveModelId — extract effective model", () => {
   });
 });
 
-describe("extractPromptFromMessages — user-message concatenation", () => {
-  it("joins multiple user messages with a blank line", () => {
+describe("extractPromptFromMessages — every part of the call reaches the prompt", () => {
+  // These assertions were inverted before 2026-11-13. The suite they replace
+  // pinned the defect as the requirement: one case was named "ignores non-user
+  // roles entirely", which is the role prompt and every assistant turn being
+  // dropped, written down and locked in. The behaviour was not an oversight.
+  const base = { taskType: "x", instructions: "", tools: {} };
+
+  it("carries every role, in order, labelled", () => {
     const prompt = extractPromptFromMessages({
-      taskType: "x",
+      ...base,
       messages: [
         { role: "user", content: "first" },
         { role: "assistant", content: "reply" },
         { role: "user", content: "second" },
       ],
-      tools: {},
     });
-    expect(prompt).toBe("first\n\nsecond");
+    expect(prompt).toContain("user: first");
+    expect(prompt).toContain("assistant: reply");
+    expect(prompt).toContain("user: second");
+    // Order matters: a transcript read out of sequence is worse than none.
+    expect(prompt.indexOf("first")).toBeLessThan(prompt.indexOf("reply"));
+    expect(prompt.indexOf("reply")).toBeLessThan(prompt.indexOf("second"));
   });
 
-  it("ignores non-user roles entirely", () => {
+  it("carries system and assistant roles rather than discarding them", () => {
     const prompt = extractPromptFromMessages({
-      taskType: "x",
+      ...base,
       messages: [
         { role: "system", content: "SYS" },
         { role: "user", content: "U" },
         { role: "assistant", content: "A" },
       ],
-      tools: {},
     });
-    expect(prompt).toBe("U");
+    expect(prompt).toContain("SYS");
+    expect(prompt).toContain("A");
+  });
+
+  it("puts the instructions ahead of the transcript", () => {
+    const prompt = extractPromptFromMessages({
+      ...base,
+      instructions: "YOU-ARE-THE-CHIEF-OF-STAFF",
+      messages: [{ role: "user", content: "brief me" }],
+    });
+    expect(prompt).toContain("YOU-ARE-THE-CHIEF-OF-STAFF");
+    expect(prompt.indexOf("YOU-ARE-THE-CHIEF-OF-STAFF")).toBeLessThan(prompt.indexOf("brief me"));
   });
 
   it("stringifies non-string content", () => {
     const prompt = extractPromptFromMessages({
-      taskType: "x",
-      messages: [
-        { role: "user", content: [{ type: "text", text: "hi" }] as unknown as string },
-      ],
-      tools: {},
+      ...base,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] as unknown as string }],
     });
     expect(prompt).toContain("hi");
   });
 
-  it("throws AdapterInternalError when no user message", () => {
+  it("accepts a history with no user message, because an assistant turn is still context", () => {
+    const prompt = extractPromptFromMessages({
+      ...base,
+      messages: [{ role: "assistant", content: "only-assistant" }],
+    });
+    expect(prompt).toContain("only-assistant");
+  });
+
+  it("throws when there are no messages at all", () => {
+    expect(() => extractPromptFromMessages({ ...base, messages: [] })).toThrow(
+      AdapterInternalError,
+    );
+  });
+});
+
+describe("assertToolsUnsupported — a refusal that names what it refused", () => {
+  it("passes a call with no tools", () => {
     expect(() =>
-      extractPromptFromMessages({
+      assertToolsUnsupported({
         taskType: "x",
-        messages: [{ role: "assistant", content: "only-assistant" }],
+        instructions: "",
+        messages: [{ role: "user", content: "hi" }],
         tools: {},
       }),
-    ).toThrow(AdapterInternalError);
+    ).not.toThrow();
+  });
+
+  it("refuses tools and names them, rather than dropping them silently", () => {
+    let message = "";
+    try {
+      assertToolsUnsupported({
+        taskType: "x",
+        instructions: "",
+        messages: [{ role: "user", content: "hi" }],
+        tools: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          lookup_invoice: { name: "lookup_invoice" } as any,
+        },
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    // The caller has to be able to act on the refusal, which means knowing
+    // which field and which tools. A bare throw would pass a weaker test and
+    // tell an operator nothing.
+    expect(message).toContain("tools");
+    expect(message).toContain("lookup_invoice");
   });
 });
 
