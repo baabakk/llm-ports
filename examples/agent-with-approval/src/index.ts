@@ -88,6 +88,51 @@ const lookupCustomer: ToolDefinition = {
   },
 };
 
+/**
+ * A tool whose parameters came from somewhere else.
+ *
+ * Every other tool here is defined with a Zod schema, which is the right
+ * default: it is validated locally before `execute` runs, and `execute` gets a
+ * typed argument. Use `inputJsonSchema` instead when the shape genuinely
+ * arrived from outside your process, which is the case this exists for. A
+ * service that forwards tools its own clients registered holds JSON Schema and
+ * cannot convert it to Zod and back without losing what it was handed.
+ *
+ * **What you give up.** This library carries no JSON Schema validator. The
+ * schema reaches the provider, whose tool-calling enforces it where supported,
+ * and the model's arguments arrive at `execute` unvalidated. So `execute` takes
+ * `unknown` and checks what it needs, which the body below does.
+ *
+ * Exactly one of `inputSchema` and `inputJsonSchema` is required. Both is
+ * refused rather than resolved by precedence, and neither is refused too: a
+ * tool that really takes no arguments says so with an empty object schema,
+ * because omitting both is indistinguishable from forgetting.
+ *
+ * Available since `1.0.0-rc.36`.
+ */
+const trackShipment: ToolDefinition = {
+  name: "trackShipment",
+  description: "Look up a shipment's current location by tracking number.",
+  // Pretend this came off a registration request rather than being written here.
+  inputJsonSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["trackingNumber"],
+    properties: {
+      trackingNumber: { type: "string", pattern: "^[A-Z]{2}[0-9]{6}$" },
+    },
+  },
+  execute: async (input) => {
+    // Unvalidated, so narrow before trusting it. With a Zod schema this would
+    // already be typed and checked.
+    const tracking = (input as { trackingNumber?: unknown }).trackingNumber;
+    if (typeof tracking !== "string") {
+      return { error: "trackingNumber must be a string" };
+    }
+    return { trackingNumber: tracking, location: "Distribution centre, Leipzig" };
+  },
+};
+
 const cancelOrder: ToolDefinition = {
   name: "cancelOrder",
   description: "Cancel an order. Only works if status is 'processing' or 'pending'.",
@@ -172,7 +217,7 @@ function wrapWithApprovalGate(
 
 // Auto-approve for the demo. Real systems block here for human input.
 const wrappedTools = wrapWithApprovalGate(
-  { lookupOrder, lookupCustomer, cancelOrder, issueRefund },
+  { lookupOrder, lookupCustomer, trackShipment, cancelOrder, issueRefund },
   async () => true,
 );
 
