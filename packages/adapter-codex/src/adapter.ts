@@ -56,6 +56,19 @@ export interface CodexAdapterOptions {
   cliPath?: string;
 
   /**
+   * Arguments placed before the generated codex arguments.
+   *
+   * `cliPath` alone assumes the CLI is a single executable on PATH, which
+   * excludes every indirect invocation: `node ./codex.mjs`, `npx codex`, a
+   * wrapper script, or a shim inside a container. On Windows it also excludes
+   * any `.cmd` or `.bat`, because Node refuses to spawn those without a shell.
+   *
+   * With this, `{ cliPath: "node", cliArgsPrefix: ["./codex.mjs"] }` runs
+   * `node ./codex.mjs exec --json ...`.
+   */
+  cliArgsPrefix?: readonly string[];
+
+  /**
    * Default sandbox mode when `providerExtras.codex.sandbox` is not
    * set on a call. Defaults to `"workspace-write"`, which is codex's
    * own default for exec mode.
@@ -67,6 +80,18 @@ export interface CodexAdapterOptions {
    * own default when omitted.
    */
   defaultModel?: string;
+
+  /**
+   * Default working directory, used when a call supplies no
+   * `providerExtras.codex.workingDirectory`.
+   *
+   * Without this the adapter cannot serve a plain contract-shaped call at all,
+   * because the working directory is the one genuinely required field and the
+   * only way to supply it was a provider-specific bag the caller had to know
+   * about. A port whose methods cannot be called through the port's own
+   * options is not really implementing the port.
+   */
+  defaultWorkingDirectory?: string;
 
   /**
    * Env vars to pass to the subprocess. Merged over process.env by
@@ -119,6 +144,8 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
 export function createCodexAdapter(options: CodexAdapterOptions = {}): CodexAdapter {
   const cliPath = options.cliPath ?? "codex";
+  const cliArgsPrefix = options.cliArgsPrefix ?? [];
+  const defaultWorkingDirectory = options.defaultWorkingDirectory;
   const defaultSandbox = options.defaultSandbox ?? "workspace-write";
   const defaultModel = options.defaultModel;
   const envOverrides = options.env ?? {};
@@ -161,8 +188,10 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): CodexAdap
         async runAgent(callOptions: RunAgentOptions): Promise<AgentResult> {
           return runCodexAgent(callOptions, {
             cliPath,
+            cliArgsPrefix,
             defaultSandbox,
             defaultModel,
+            defaultWorkingDirectory,
             envOverrides,
             observability,
             timeoutMs,
@@ -177,8 +206,10 @@ export function createCodexAdapter(options: CodexAdapterOptions = {}): CodexAdap
 
 interface AdapterConfig {
   cliPath: string;
+  cliArgsPrefix: readonly string[];
   defaultSandbox: "read-only" | "workspace-write" | "danger-full-access";
   defaultModel?: string;
+  defaultWorkingDirectory?: string;
   envOverrides: Record<string, string>;
   observability?: CodexAdapterOptions["observability"];
   timeoutMs: number;
@@ -189,7 +220,7 @@ async function runCodexAgent(
   config: AdapterConfig,
 ): Promise<AgentResult> {
   const alias = "codex";
-  const codexOpts = extractCodexOptions(options);
+  const codexOpts = extractCodexOptions(options, config.defaultWorkingDirectory);
   const prompt = extractPromptFromMessages(options);
   const model = codexOpts.model ?? config.defaultModel;
   const sandbox = codexOpts.sandbox ?? config.defaultSandbox;
@@ -226,7 +257,7 @@ async function runCodexAgent(
             try {
               outcome = await spawnCodex({
                 cliPath: config.cliPath,
-                args,
+                args: [...config.cliArgsPrefix, ...args],
                 env: { ...process.env, ...config.envOverrides } as NodeJS.ProcessEnv,
                 timeoutMs: config.timeoutMs,
                 signal: options.signal,
@@ -382,16 +413,24 @@ async function spawnCodex(req: SpawnRequest): Promise<SpawnOutcome> {
 // ─── Option extraction + arg building ───────────────────────────────
 
 /** @internal exported for tests, not part of the public API surface. */
-export function extractCodexOptions(options: RunAgentOptions): CodexRunAgentOptions {
+export function extractCodexOptions(
+  options: RunAgentOptions,
+  defaultWorkingDirectory?: string,
+): CodexRunAgentOptions {
   const bag = (options as unknown as { providerExtras?: { codex?: CodexRunAgentOptions } })
     .providerExtras?.codex;
-  if (!bag || typeof bag.workingDirectory !== "string" || bag.workingDirectory.length === 0) {
+  const workingDirectory =
+    bag && typeof bag.workingDirectory === "string" && bag.workingDirectory.length > 0
+      ? bag.workingDirectory
+      : defaultWorkingDirectory;
+  if (!workingDirectory) {
     throw new AdapterInternalError(
       "codex",
-      "runAgent requires providerExtras.codex.workingDirectory (the git repo the CLI operates in).",
+      "runAgent requires providerExtras.codex.workingDirectory (the git repo the CLI operates in), " +
+        "or a defaultWorkingDirectory on the adapter.",
     );
   }
-  return bag;
+  return { ...(bag ?? {}), workingDirectory };
 }
 
 /** @internal exported for tests, not part of the public API surface. */

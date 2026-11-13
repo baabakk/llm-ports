@@ -120,6 +120,44 @@ export interface ContractTestContext {
    * `TD-LLMPORTS-CLI-ADAPTERS-DISCARD-REQUIRED-INPUTS-AND-SIT-OUTSIDE-THE-CONTRACT-SUITE`.
    */
   inspectLastRunAgentRequest?: () => RunAgentTransmission;
+
+  /**
+   * Optional. Port methods this adapter deliberately does not implement.
+   *
+   * The suite otherwise assumes every adapter serves every method, which is
+   * true of the in-process adapters and false of the subprocess ones: a
+   * coding-agent CLI serves `runAgent` and nothing else. Without this, such an
+   * adapter fails most of the suite for entirely legitimate reasons.
+   *
+   * Declaring a method here does two things. The suite skips that method's
+   * conformance tests, and it asserts the method **throws** when called, so a
+   * declared refusal is a real one rather than a silent degradation. That is
+   * the same rule as the honoured-or-refused tests, applied one level up: an
+   * adapter may refuse a capability and may not pretend to have it.
+   *
+   * Added for `1.0.0-rc.36`.
+   */
+  unsupportedMethods?: readonly ("generateText" | "generateStructured" | "streamText" | "streamStructured")[];
+
+  /**
+   * Optional. How the provider behind this adapter is billed.
+   *
+   * The suite otherwise asserts a per-call dollar cost is reported, which is
+   * right for a metered API and impossible for a subscription CLI: there is no
+   * per-call price to report, and inventing a zero is the lie `alpha.34`
+   * removed everywhere else.
+   *
+   * `"flat_rate"` relaxes the cost assertion and keeps the token assertion,
+   * because tokens are the only way to compare a flat-rate provider against a
+   * metered one. Defaults to `"metered"`, so every existing adapter is
+   * unaffected.
+   *
+   * Added for `1.0.0-rc.36`, from a consumer requirement: a cost gate
+   * configured against a flat-rate provider enforces nothing, silently and
+   * forever. See
+   * `TD-LLMPORTS-CONSUMER-REQUIREMENTS-FOR-THE-SUBPROCESS-ADAPTER-FAMILY`.
+   */
+  billing?: "metered" | "flat_rate";
 }
 
 /**
@@ -151,6 +189,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
     describe("generateText", () => {
       it("returns the populated GenerateTextResult shape", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateText")) return;
         ctx.setupGenerateText({
           text: "hello world",
           usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
@@ -177,6 +216,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
       it("propagates adapter errors with informative messages", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateText")) return;
         ctx.setupNetworkError(new Error("simulated network failure"));
 
         await expect(
@@ -193,6 +233,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
       it("validates output against the Zod schema and returns typed data", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateStructured")) return;
         ctx.setupGenerateStructured({
           data: { intent: "request", urgency: "high" },
           usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
@@ -233,6 +274,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
       // behaviour a caller sees.
       it("accepts a JSON Schema in place of a Zod schema, reporting one attempt", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateStructured")) return;
         ctx.setupGenerateStructured({
           data: { intent: "request", urgency: "high" },
           usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
@@ -263,6 +305,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
       it("refuses a call carrying both schema forms", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateStructured")) return;
         ctx.setupGenerateStructured({
           data: { intent: "request", urgency: "high" },
           usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
@@ -283,6 +326,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
       it("refuses a call carrying neither schema form", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateStructured")) return;
         ctx.setupGenerateStructured({
           data: { intent: "request", urgency: "high" },
           usage: { inputTokens: 50, outputTokens: 20, totalTokens: 70 },
@@ -298,6 +342,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
       it("retries with feedback when first attempt fails validation", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateStructured")) return;
         ctx.setupGenerateStructured({
           invalidFirstAttempt: { intent: "WRONG_VALUE", urgency: "high" },
           data: { intent: "request", urgency: "high" },
@@ -333,6 +378,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
        */
       it("surfaces a ValidationError carrying the Zod issues when no attempt validates", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("generateStructured")) return;
         // Both queued responses are invalid, so the retry cannot rescue it.
         ctx.setupGenerateStructured({
           invalidFirstAttempt: { intent: "NOT_AN_INTENT", urgency: "high" },
@@ -369,6 +415,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
     describe("streamText", () => {
       it("yields chunks in order and consumes cleanly", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("streamText")) return;
         ctx.setupStreamText({
           chunks: ["hel", "lo ", "wor", "ld"],
           usage: { inputTokens: 5, outputTokens: 4, totalTokens: 9 },
@@ -391,6 +438,7 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
 
       it("yields successively more complete partial objects", async () => {
         const ctx = await setup();
+        if (ctx.unsupportedMethods?.includes("streamStructured")) return;
         ctx.setupStreamStructured({
           partials: [{ ready: false }, { ready: true, message: "done" }],
           finalUsage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 },
@@ -693,8 +741,16 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
         // knowable and must actually be reported. Asserting it is defined
         // is stronger than coalescing, which would pass for an adapter that
         // silently stopped computing cost at all.
-        expect(result.cost).toBeDefined();
-        expect(result.cost?.totalUSD).toBeGreaterThanOrEqual(0);
+        // A flat-rate provider has no per-call price. Reporting zero would be
+        // indistinguishable from a genuinely free call, which is the exact
+        // substitution alpha.34 removed, so such an adapter reports nothing
+        // and is checked on tokens instead.
+        if ((ctx.billing ?? "metered") === "flat_rate") {
+          expect(result.usage.totalTokens).toBeGreaterThanOrEqual(0);
+        } else {
+          expect(result.cost).toBeDefined();
+          expect(result.cost?.totalUSD).toBeGreaterThanOrEqual(0);
+        }
       });
     });
 
@@ -797,6 +853,41 @@ export function runContractTests(name: string, setup: ContractTestSetup): void {
           return;
         }
         expect(sent?.messageRoles ?? []).toContain("assistant");
+      });
+
+      it("throws for every method it declares unsupported", async () => {
+        const ctx = await setup();
+        const declared = ctx.unsupportedMethods ?? [];
+        if (declared.length === 0) return;
+
+        for (const method of declared) {
+          let threw = false;
+          try {
+            if (method === "generateText") {
+              await ctx.port.generateText({ taskType: "t", messages: [{ role: "user", content: "x" }] });
+            } else if (method === "generateStructured") {
+              await ctx.port.generateStructured({
+                taskType: "t",
+                messages: [{ role: "user", content: "x" }],
+                schema: z.object({ ok: z.boolean() }),
+              });
+            } else if (method === "streamText") {
+              for await (const _ of ctx.port.streamText({ taskType: "t", messages: [{ role: "user", content: "x" }] })) break;
+            } else {
+              for await (const _ of ctx.port.streamStructured({
+                taskType: "t",
+                messages: [{ role: "user", content: "x" }],
+                schema: z.object({ ok: z.boolean() }),
+              })) break;
+            }
+          } catch {
+            threw = true;
+          }
+          // A declared refusal that silently succeeds is worse than an
+          // undeclared one, because the declaration invites a consumer to
+          // trust the boundary.
+          expect(threw, `${method} is declared unsupported and must throw`).toBe(true);
+        }
       });
     });
   });
